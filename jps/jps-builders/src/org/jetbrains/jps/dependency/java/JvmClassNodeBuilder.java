@@ -409,6 +409,7 @@ public final class JvmClassNodeBuilder extends ClassVisitor implements NodeBuild
   private final Ref<String> myOuterClassName = Ref.create();
   private final Ref<Boolean> myLocalClassFlag = Ref.create(false);
   private final Ref<Boolean> myAnonymousClassFlag = Ref.create(false);
+  private final Ref<Boolean> mySealedClassFlag = Ref.create(false);
 
   private final Set<JvmMethod> myMethods = new HashSet<>();
   private final Set<JvmField> myFields = new HashSet<>();
@@ -455,7 +456,6 @@ public final class JvmClassNodeBuilder extends ClassVisitor implements NodeBuild
     }
   }
 
-  // todo: ignore private nodes on the client side
   @Override
   public JVMClassNode<? extends JVMClassNode<?, ?>, ? extends Proto.Diff<? extends JVMClassNode<?, ?>>> getResult() {
     JVMFlags flags = new JVMFlags(myAccess);
@@ -464,6 +464,9 @@ public final class JvmClassNodeBuilder extends ClassVisitor implements NodeBuild
     }
     if (myAnonymousClassFlag.get()) {
       flags = flags.deriveIsAnonymous();
+    }
+    if (mySealedClassFlag.get()) {
+      flags = flags.deriveIsSealed();
     }
     if (myIsGenerated) {
       flags = flags.deriveIsGenerated();
@@ -569,7 +572,7 @@ public final class JvmClassNodeBuilder extends ClassVisitor implements NodeBuild
           super.visitEnd();
         }
         finally {
-          if ((access & Opcodes.ACC_SYNTHETIC) == 0) {
+          if ((access & Opcodes.ACC_SYNTHETIC) == 0 || (access & Opcodes.ACC_PRIVATE) == 0) {
             myFields.add(new JvmField(new JVMFlags(access), signature, name, desc, annotations, value));
           }
         }
@@ -618,7 +621,7 @@ public final class JvmClassNodeBuilder extends ClassVisitor implements NodeBuild
 
       @Override
       public void visitEnd() {
-        if ((access & Opcodes.ACC_SYNTHETIC) == 0 || (access & Opcodes.ACC_BRIDGE) > 0) {
+        if ((access & Opcodes.ACC_SYNTHETIC) == 0 || (access & Opcodes.ACC_BRIDGE) > 0 || (access & Opcodes.ACC_PRIVATE) == 0) {
           if (isInlined) {
             // use 'defaultValue' attribute to store the hash of the function body to track changes in inline method implementation
             ContentHashBuilder hashBuilder = ContentHashBuilder.create();
@@ -902,6 +905,13 @@ public final class JvmClassNodeBuilder extends ClassVisitor implements NodeBuild
     if (name != null) {
       myLocalClassFlag.set(true);
     }
+  }
+
+  @Override
+  public void visitPermittedSubclass(String permittedSubclass) {
+    mySealedClassFlag.set(true);
+    addUsage(new ClassUsage(permittedSubclass));
+    addUsage(new ClassPermitsUsage(permittedSubclass));
   }
 
   private class BaseSignatureVisitor extends SignatureVisitor {

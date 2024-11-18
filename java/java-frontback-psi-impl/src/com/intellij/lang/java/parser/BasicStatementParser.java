@@ -18,6 +18,8 @@ import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayList;
+
 import static com.intellij.lang.PsiBuilderUtil.*;
 import static com.intellij.lang.java.parser.BasicJavaParserUtil.*;
 import static com.intellij.psi.impl.source.BasicElementTypes.BASIC_JAVA_COMMENT_OR_WHITESPACE_BIT_SET;
@@ -211,6 +213,7 @@ public class BasicStatementParser {
 
     PsiBuilder.Marker pos = builder.mark();
     PsiBuilder.Marker expr = myParser.getExpressionParser().parse(builder);
+    IElementType incompleteDeclarationRestrictedTokenType = null;
 
     if (expr != null) {
       int count = 1;
@@ -240,7 +243,17 @@ public class BasicStatementParser {
         done(statement, myJavaElementTypeContainer.EXPRESSION_STATEMENT, myWhiteSpaceAndCommentSetHolder);
         return statement;
       }
+      boolean singleToken = expr.getEndIndex() - expr.getStartIndex() == 1;
       pos.rollbackTo();
+      if (singleToken && builder.getTokenType() == JavaTokenType.IDENTIFIER) {
+        String text = builder.getTokenText();
+        if (PsiKeyword.RECORD.equals(text) && JavaFeature.RECORDS.isSufficient(getLanguageLevel(builder))) {
+          incompleteDeclarationRestrictedTokenType = JavaTokenType.RECORD_KEYWORD;
+        }
+        if (PsiKeyword.VAR.equals(text) && JavaFeature.LVTI.isSufficient(getLanguageLevel(builder))) {
+          incompleteDeclarationRestrictedTokenType = JavaTokenType.VAR_KEYWORD;
+        }
+      }
     }
     else {
       pos.drop();
@@ -263,9 +276,18 @@ public class BasicStatementParser {
 
     if (expr != null) {
       PsiBuilder.Marker statement = builder.mark();
-      myParser.getExpressionParser().parse(builder);
-      semicolon(builder);
-      done(statement, myJavaElementTypeContainer.EXPRESSION_STATEMENT, myWhiteSpaceAndCommentSetHolder);
+      IElementType statementType;
+      if (incompleteDeclarationRestrictedTokenType != null) {
+        builder.remapCurrentToken(incompleteDeclarationRestrictedTokenType);
+        builder.advanceLexer();
+        error(builder, JavaPsiBundle.message("expected.identifier"));
+        statementType = myJavaElementTypeContainer.DECLARATION_STATEMENT;
+      } else {
+        myParser.getExpressionParser().parse(builder);
+        statementType = myJavaElementTypeContainer.EXPRESSION_STATEMENT;
+        semicolon(builder);
+      }
+      done(statement, statementType, myWhiteSpaceAndCommentSetHolder);
       return statement;
     }
 
@@ -305,23 +327,37 @@ public class BasicStatementParser {
 
   @NotNull
   private PsiBuilder.Marker parseIfStatement(PsiBuilder builder) {
-    PsiBuilder.Marker statement = builder.mark();
-    builder.advanceLexer();
+    ArrayList<PsiBuilder.Marker> stack = null;
+    PsiBuilder.Marker statement;
+    while (true) {
+      // replaced recursion with iteration plus stack to avoid huge call stack for extremely large else-if chains
+      statement = builder.mark();
+      builder.advanceLexer();
 
-    if (parseExprInParenth(builder)) {
-      PsiBuilder.Marker thenStatement = parseStatement(builder);
-      if (thenStatement == null) {
-        error(builder, JavaPsiBundle.message("expected.statement"));
-      }
-      else if (expect(builder, JavaTokenType.ELSE_KEYWORD)) {
-        PsiBuilder.Marker elseStatement = parseStatement(builder);
-        if (elseStatement == null) {
+      if (parseExprInParenth(builder)) {
+        if (parseStatement(builder) == null) {
           error(builder, JavaPsiBundle.message("expected.statement"));
         }
+        else if (expect(builder, JavaTokenType.ELSE_KEYWORD)) {
+          if (builder.getTokenType() == JavaTokenType.IF_KEYWORD) {
+            if (stack == null) stack = new ArrayList<>();
+            stack.add(statement);
+            continue;
+          }
+          else if (parseStatement(builder) == null) {
+            error(builder, JavaPsiBundle.message("expected.statement"));
+          }
+        }
+      }
+      break;
+    }
+    done(statement, myJavaElementTypeContainer.IF_STATEMENT, myWhiteSpaceAndCommentSetHolder);
+    if (stack != null) {
+      for (int i = stack.size() - 1; i >= 0; i--) {
+        statement = stack.get(i);
+        done(statement, myJavaElementTypeContainer.IF_STATEMENT, myWhiteSpaceAndCommentSetHolder);
       }
     }
-
-    done(statement, myJavaElementTypeContainer.IF_STATEMENT, myWhiteSpaceAndCommentSetHolder);
     return statement;
   }
 

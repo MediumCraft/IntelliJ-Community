@@ -3,9 +3,11 @@ package org.jetbrains.plugins.gradle.service.project;
 
 import com.intellij.build.events.MessageEvent;
 import com.intellij.execution.configurations.ParametersList;
+import com.intellij.gradle.toolingExtension.impl.model.sourceSetDependencyModel.DefaultGradleSourceSetDependencyModel;
+import com.intellij.gradle.toolingExtension.impl.model.sourceSetModel.DefaultGradleSourceSetModel;
+import com.intellij.gradle.toolingExtension.impl.model.taskModel.DefaultGradleTaskModel;
 import com.intellij.gradle.toolingExtension.impl.modelAction.GradleModelFetchAction;
-import com.intellij.gradle.toolingExtension.impl.modelAction.GradleModelFetchActionWithCustomSerializer;
-import com.intellij.gradle.toolingExtension.impl.telemetry.GradleTracingContext;
+import com.intellij.gradle.toolingExtension.impl.util.GradleTreeTraverserUtil;
 import com.intellij.gradle.toolingExtension.util.GradleVersionUtil;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.externalSystem.importing.ProjectResolverPolicy;
@@ -20,27 +22,24 @@ import com.intellij.openapi.externalSystem.service.project.ExternalSystemOperati
 import com.intellij.openapi.externalSystem.service.project.ExternalSystemProjectResolver;
 import com.intellij.openapi.externalSystem.statistics.ExternalSystemSyncActionsCollector;
 import com.intellij.openapi.externalSystem.statistics.Phase;
-import com.intellij.openapi.externalSystem.util.ExternalSystemDebugEnvironment;
 import com.intellij.openapi.externalSystem.util.ExternalSystemTelemetryUtil;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.io.CanonicalPathPrefixTreeFactory;
 import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.io.NioPathUtil;
 import com.intellij.openapi.util.registry.Registry;
-import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.ExceptionUtil;
 import com.intellij.util.Function;
 import com.intellij.util.ObjectUtils;
 import com.intellij.util.SmartList;
-import com.intellij.util.concurrency.annotations.RequiresBlockingContext;
 import com.intellij.util.containers.CollectionFactory;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.MultiMap;
-import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.StatusCode;
-import io.opentelemetry.context.Context;
 import io.opentelemetry.context.Scope;
 import org.gradle.api.ProjectConfigurationException;
 import org.gradle.tooling.BuildActionFailureException;
@@ -55,6 +54,7 @@ import org.gradle.util.GradleVersion;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.VisibleForTesting;
 import org.jetbrains.plugins.gradle.issue.DeprecatedGradleVersionIssue;
 import org.jetbrains.plugins.gradle.jvmcompat.GradleJvmSupportMatrix;
 import org.jetbrains.plugins.gradle.model.*;
@@ -70,12 +70,10 @@ import org.jetbrains.plugins.gradle.service.modelAction.GradleIdeaModelHolder;
 import org.jetbrains.plugins.gradle.service.modelAction.GradleModelFetchActionRunner;
 import org.jetbrains.plugins.gradle.service.syncAction.GradleModelFetchActionResultHandler;
 import org.jetbrains.plugins.gradle.service.syncAction.GradleProjectResolverResultHandler;
-import org.jetbrains.plugins.gradle.settings.DistributionType;
 import org.jetbrains.plugins.gradle.settings.GradleBuildParticipant;
 import org.jetbrains.plugins.gradle.settings.GradleExecutionSettings;
 import org.jetbrains.plugins.gradle.util.GradleConstants;
 import org.jetbrains.plugins.gradle.util.GradleModuleDataKt;
-import org.jetbrains.plugins.gradle.util.telemetry.GradleDaemonOpenTelemetryUtil;
 
 import java.io.File;
 import java.nio.file.Path;
@@ -108,6 +106,8 @@ public class GradleProjectResolver implements ExternalSystemProjectResolver<Grad
     Key.create("gradleOutputs");
 
   private static final Key<File> GRADLE_HOME_DIR = Key.create("gradleHomeDir");
+
+  public static final boolean DEBUG_ORPHAN_MODULES_PROCESSING = Boolean.getBoolean("external.system.debug.orphan.modules.processing");
 
   // This constructor is called by external system API, see AbstractExternalSystemFacadeImpl class constructor.
   @SuppressWarnings("UnusedDeclaration")
@@ -144,7 +144,7 @@ public class GradleProjectResolver implements ExternalSystemProjectResolver<Grad
       GradleConnector.newCancellationTokenSource()
     );
     DefaultProjectResolverContext resolverContext = new DefaultProjectResolverContext(
-      syncTaskId, projectPath, settings, listener, gradleResolverPolicy, projectResolverIndicator
+      syncTaskId, projectPath, settings, listener, gradleResolverPolicy, projectResolverIndicator, false
     );
     GradleProjectResolverResultHandler resolverResultHandler = new GradleProjectResolverResultHandler(resolverContext);
 
@@ -186,7 +186,7 @@ public class GradleProjectResolver implements ExternalSystemProjectResolver<Grad
       }
 
       final GradleProjectResolverExtension projectResolverChain = createProjectResolverChain(resolverContext);
-      var projectDataFunction = getProjectDataFunction(resolverContext, projectResolverChain, false);
+      var projectDataFunction = getProjectDataFunction(resolverContext, projectResolverChain);
       final DataNode<ProjectData> projectDataNode = myHelper.execute(
         resolverContext.getProjectPath(),
         resolverContext.getSettings(),
@@ -211,11 +211,12 @@ public class GradleProjectResolver implements ExternalSystemProjectResolver<Grad
     }
   }
 
-  @NotNull
-  Function<ProjectConnection, DataNode<ProjectData>> getProjectDataFunction(DefaultProjectResolverContext resolverContext,
-                                                                            GradleProjectResolverExtension projectResolverChain,
-                                                                            boolean isBuildSrcProject) {
-    return new ProjectConnectionDataNodeFunction(resolverContext, projectResolverChain, isBuildSrcProject);
+
+  protected @NotNull Function<ProjectConnection, DataNode<ProjectData>> getProjectDataFunction(
+    @NotNull DefaultProjectResolverContext resolverContext,
+    @NotNull GradleProjectResolverExtension projectResolverChain
+  ) {
+    return new ProjectConnectionDataNodeFunction(resolverContext, projectResolverChain);
   }
 
   @NotNull
@@ -231,7 +232,6 @@ public class GradleProjectResolver implements ExternalSystemProjectResolver<Grad
     return true;
   }
 
-  @RequiresBlockingContext
   private <R> R computeCancellable(@NotNull DefaultProjectResolverContext resolverContext, @NotNull Supplier<R> action) {
     ExternalSystemTaskId taskId = resolverContext.getExternalSystemTaskId();
     CancellationTokenSource cancellationTokenSource = resolverContext.getCancellationTokenSource();
@@ -247,8 +247,7 @@ public class GradleProjectResolver implements ExternalSystemProjectResolver<Grad
   @NotNull
   private DataNode<ProjectData> doResolveProjectInfo(
     @NotNull final DefaultProjectResolverContext resolverContext,
-    @NotNull final GradleProjectResolverExtension projectResolverChain,
-    boolean isBuildSrcProject
+    @NotNull final GradleProjectResolverExtension projectResolverChain
   )
     throws IllegalArgumentException, IllegalStateException {
 
@@ -263,17 +262,14 @@ public class GradleProjectResolver implements ExternalSystemProjectResolver<Grad
       resolverContext.setBuildEnvironment(buildEnvironment);
     }
 
-    boolean useCustomSerialization = Registry.is("gradle.tooling.custom.serializer", true);
-    var buildAction = useCustomSerialization
-                      ? new GradleModelFetchActionWithCustomSerializer()
-                      : new GradleModelFetchAction();
+    var buildAction = new GradleModelFetchAction();
 
     GradleExecutionSettings executionSettings = resolverContext.getSettings();
     if (executionSettings == null) {
-      executionSettings = new GradleExecutionSettings(null, null, DistributionType.BUNDLED, false);
+      executionSettings = new GradleExecutionSettings();
     }
 
-    configureExecutionArgumentsAndVmOptions(executionSettings, resolverContext, isBuildSrcProject);
+    configureExecutionArgumentsAndVmOptions(executionSettings, resolverContext);
     final Set<Class<?>> toolingExtensionClasses = new HashSet<>();
     for (GradleProjectResolverExtension resolverExtension = projectResolverChain;
          resolverExtension != null;
@@ -303,7 +299,7 @@ public class GradleProjectResolver implements ExternalSystemProjectResolver<Grad
     }
 
     GradleInitScriptUtil.attachTargetPathMapperInitScript(executionSettings);
-    var initScript = GradleInitScriptUtil.createMainInitScript(isBuildSrcProject, toolingExtensionClasses);
+    var initScript = GradleInitScriptUtil.createMainInitScript(resolverContext.isBuildSrcProject(), toolingExtensionClasses);
     executionSettings.withArguments(GradleConstants.INIT_SCRIPT_CMD_OPTION, initScript.toString());
 
     if (!executionSettings.isDownloadSources()) {
@@ -313,7 +309,7 @@ public class GradleProjectResolver implements ExternalSystemProjectResolver<Grad
 
     var environmentConfigurationProvider = ExternalSystemExecutionAware.getEnvironmentConfigurationProvider(executionSettings);
     var pathMapper = ObjectUtils.doIfNotNull(environmentConfigurationProvider, it -> it.getPathMapper());
-    var models = new GradleIdeaModelHolder(useCustomSerialization, pathMapper, buildEnvironment);
+    var models = new GradleIdeaModelHolder(pathMapper, buildEnvironment);
     resolverContext.setModels(models);
 
 
@@ -330,13 +326,9 @@ public class GradleProjectResolver implements ExternalSystemProjectResolver<Grad
     Span gradleCallSpan = ExternalSystemTelemetryUtil.getTracer(GradleConstants.SYSTEM_ID)
       .spanBuilder("GradleCall")
       .startSpan();
-    if (GradleDaemonOpenTelemetryUtil.isDaemonTracingEnabled()) {
-      GradleTracingContext gradleDaemonObservabilityContext = getActionTelemetryContext(gradleCallSpan);
-      buildAction.setTracingContext(gradleDaemonObservabilityContext);
-    }
     try (Scope ignore = gradleCallSpan.makeCurrent()) {
       var modelFetchActionResultHandler = new GradleModelFetchActionResultHandler(resolverContext);
-      GradleModelFetchActionRunner.runBuildAction(resolverContext, executionSettings, buildAction, modelFetchActionResultHandler);
+      GradleModelFetchActionRunner.runAndTraceBuildAction(resolverContext, executionSettings, buildAction, modelFetchActionResultHandler);
 
       var gradleVersion = ObjectUtils.doIfNotNull(resolverContext.getProjectGradleVersion(), it -> GradleVersion.version(it));
       if (gradleVersion != null && GradleJvmSupportMatrix.isGradleDeprecatedByIdea(gradleVersion)) {
@@ -371,7 +363,8 @@ public class GradleProjectResolver implements ExternalSystemProjectResolver<Grad
       .spanBuilder("GradleProjectResolverDataProcessing")
       .startSpan();
     try (Scope ignore = projectResolversSpan.makeCurrent()) {
-      return convertData(executionSettings, resolverContext, projectResolverChain, isBuildSrcProject, useCustomSerialization);
+      extractExternalProjectModels(models);
+      return convertData(executionSettings, resolverContext, projectResolverChain);
     }
     catch (Throwable t) {
       projectResolversErrorsCount += 1;
@@ -391,16 +384,12 @@ public class GradleProjectResolver implements ExternalSystemProjectResolver<Grad
   private @NotNull DataNode<ProjectData> convertData(
     @NotNull GradleExecutionSettings executionSettings,
     @NotNull DefaultProjectResolverContext resolverContext,
-    @NotNull GradleProjectResolverExtension tracedResolverChain,
-    boolean isBuildSrcProject,
-    boolean useCustomSerialization
+    @NotNull GradleProjectResolverExtension tracedResolverChain
   ) {
     final long activityId = resolverContext.getExternalSystemTaskId().getId();
 
     String projectPath = resolverContext.getProjectPath();
     String projectName = resolverContext.getRootBuild().getName();
-
-    extractExternalProjectModels(resolverContext.getModels(), useCustomSerialization);
 
     ProjectData projectData = new ProjectData(GradleConstants.SYSTEM_ID, projectName, projectPath, projectPath);
     DataNode<ProjectData> projectDataNode = new DataNode<>(ProjectKeys.PROJECT, projectData, null);
@@ -457,7 +446,7 @@ public class GradleProjectResolver implements ExternalSystemProjectResolver<Grad
 
       tracedResolverChain.populateModuleContentRoots(ideaModule, moduleDataNode);
       tracedResolverChain.populateModuleCompileOutputSettings(ideaModule, moduleDataNode);
-      if (!isBuildSrcProject) {
+      if (!resolverContext.isBuildSrcProject()) {
         tracedResolverChain.populateModuleTasks(ideaModule, moduleDataNode, projectDataNode);
       }
 
@@ -487,9 +476,9 @@ public class GradleProjectResolver implements ExternalSystemProjectResolver<Grad
         }
       }
 
-      ExternalProject externalProject = resolverContext.getExtraProject(ideaModule, ExternalProject.class);
-      if (externalProject != null) {
-        externalProject.getSourceSetModel().getAdditionalArtifacts().forEach((artifactFile) -> {
+      GradleSourceSetModel sourceSetModel = resolverContext.getProjectModel(ideaModule, GradleSourceSetModel.class);
+      if (sourceSetModel != null) {
+        sourceSetModel.getAdditionalArtifacts().forEach((artifactFile) -> {
           String path = toCanonicalPath(artifactFile.getPath());
           ModuleMappingInfo mapping = artifactsMap.getModuleMapping(path);
           if (mapping != null && OWNER_BASE_GRADLE.equals(mapping.getOwnerId())) {
@@ -513,7 +502,7 @@ public class GradleProjectResolver implements ExternalSystemProjectResolver<Grad
       }
     });
 
-    mergeSourceSetContentRoots(moduleMap, resolverContext);
+    mergeSourceSetContentRoots(resolverContext, moduleMap);
     if (resolverContext.isResolveModulePerSourceSet()) {
       mergeLibraryAndModuleDependencyData(resolverContext, projectDataNode, resolverContext.getGradleUserHome(), gradleHomeDir);
     }
@@ -540,7 +529,7 @@ public class GradleProjectResolver implements ExternalSystemProjectResolver<Grad
     if (gradleModule == null) {
       return null;
     }
-    if (ExternalSystemDebugEnvironment.DEBUG_ORPHAN_MODULES_PROCESSING) {
+    if (DEBUG_ORPHAN_MODULES_PROCESSING) {
       LOG.info(String.format("Importing module data: %s", gradleModule));
     }
     final String moduleName = gradleModule.getName();
@@ -613,8 +602,7 @@ public class GradleProjectResolver implements ExternalSystemProjectResolver<Grad
 
   private static void configureExecutionArgumentsAndVmOptions(
     @NotNull GradleExecutionSettings executionSettings,
-    @NotNull DefaultProjectResolverContext resolverContext,
-    boolean isBuildSrcProject
+    @NotNull DefaultProjectResolverContext resolverContext
   ) {
     executionSettings.withArgument("-Didea.gradle.download.sources=" + executionSettings.isDownloadSources());
     executionSettings.withArgument("-Didea.sync.active=true");
@@ -624,10 +612,13 @@ public class GradleProjectResolver implements ExternalSystemProjectResolver<Grad
     if (executionSettings.isParallelModelFetch()) {
       executionSettings.withArgument("-Didea.parallelModelFetch.enabled=true");
     }
-    if (!isBuildSrcProject) {
+    if (!resolverContext.isBuildSrcProject()) {
       for (GradleBuildParticipant buildParticipant : executionSettings.getExecutionWorkspace().getBuildParticipants()) {
         executionSettings.withArguments(GradleConstants.INCLUDE_BUILD_CMD_OPTION, buildParticipant.getProjectPath());
       }
+    }
+    if (Registry.is("gradle.daemon.experimental.dependency.resolver", false)) {
+      executionSettings.withArgument("-Didea.experimental.gradle.dependency.resolver=true");
     }
 
     GradleImportCustomizer importCustomizer = GradleImportCustomizer.get();
@@ -713,197 +704,231 @@ public class GradleProjectResolver implements ExternalSystemProjectResolver<Grad
     }
   }
 
-  private static void extractExternalProjectModels(
-    @NotNull GradleIdeaModelHolder models,
-    boolean useCustomSerialization
-  ) {
-    final ExternalProject externalRootProject = models.getRootModel(ExternalProject.class);
-    if (externalRootProject == null) return;
+  private static void extractExternalProjectModels(@NotNull GradleIdeaModelHolder models) {
+    replicateBuildModelHierarchyInExternalProjectHierarchy(models);
+    replicateProjectModelHierarchyInExternalProjectHierarchy(models);
+    associateSourceSetModelsWithExternalProjects(models);
+    associateSourceSetDependencyModelsWithSourceSetModels(models);
+    registerInheritedTaskModelsInParentTaskModel(models);
+    associateTaskModelsWithExternalProjects(models);
+  }
 
-    final DefaultExternalProject wrappedExternalRootProject =
-      useCustomSerialization ? (DefaultExternalProject)externalRootProject : new DefaultExternalProject(externalRootProject);
-    models.addModel(ExternalProject.class, wrappedExternalRootProject);
-    final Map<String, DefaultExternalProject> externalProjectsMap = createExternalProjectsMap(wrappedExternalRootProject);
+  private static void replicateBuildModelHierarchyInExternalProjectHierarchy(@NotNull GradleIdeaModelHolder models) {
+    var rootBuildModel = models.getRootBuild();
+    var rootProjectModel = rootBuildModel.getRootProject();
+    var rootExternalProject = (DefaultExternalProject)models.getProjectModel(rootProjectModel, ExternalProject.class);
+    if (rootExternalProject == null) return;
+    for (var nestedBuildModel : models.getNestedBuilds()) {
+      var projectModel = nestedBuildModel.getRootProject();
+      var externalProject = (DefaultExternalProject)models.getProjectModel(projectModel, ExternalProject.class);
+      if (externalProject == null) continue;
+      rootExternalProject.addChildProject(externalProject);
+    }
+  }
 
-    for (GradleLightProject project : models.getRootBuild().getProjects()) {
-      ExternalProject externalProject = externalProjectsMap.get(project.getProjectIdentifier().getProjectPath());
-      if (externalProject != null) {
-        models.addProjectModel(project, ExternalProject.class, externalProject);
+  private static void replicateProjectModelHierarchyInExternalProjectHierarchy(@NotNull GradleIdeaModelHolder models) {
+    for (var buildModel : models.getAllBuilds()) {
+      DefaultGradleLightBuild.replicateModelHierarchy(
+        buildModel.getRootProject(),
+        it -> (DefaultExternalProject)models.getProjectModel(it, ExternalProject.class),
+        GradleLightProject::getChildProjects,
+        DefaultExternalProject::addChildProject
+      );
+    }
+  }
+
+  private static void associateSourceSetModelsWithExternalProjects(@NotNull GradleIdeaModelHolder models) {
+    for (var buildModel : models.getAllBuilds()) {
+      for (var projectModel : buildModel.getProjects()) {
+        var externalProject = (DefaultExternalProject)models.getProjectModel(projectModel, ExternalProject.class);
+        var sourceSetModel = (DefaultGradleSourceSetModel)models.getProjectModel(projectModel, GradleSourceSetModel.class);
+        if (externalProject == null || sourceSetModel == null) continue;
+
+        externalProject.setSourceSetModel(sourceSetModel);
       }
     }
+  }
 
-    for (GradleLightBuild nestedBuild : models.getNestedBuilds()) {
-      final ExternalProject externalIncludedRootProject = models.getBuildModel(nestedBuild, ExternalProject.class);
-      if (externalIncludedRootProject == null) continue;
-      final DefaultExternalProject wrappedExternalIncludedRootProject = useCustomSerialization
-                                                                        ? (DefaultExternalProject)externalIncludedRootProject
-                                                                        : new DefaultExternalProject(externalIncludedRootProject);
-      wrappedExternalRootProject.getChildProjects().put(wrappedExternalIncludedRootProject.getName(), wrappedExternalIncludedRootProject);
-      final Map<String, DefaultExternalProject> externalIncludedProjectsMap = createExternalProjectsMap(wrappedExternalIncludedRootProject);
-      for (ProjectModel project : nestedBuild.getProjects()) {
-        ExternalProject externalProject = externalIncludedProjectsMap.get(project.getProjectIdentifier().getProjectPath());
-        if (externalProject != null) {
-          models.addProjectModel(project, ExternalProject.class, externalProject);
+  private static void associateSourceSetDependencyModelsWithSourceSetModels(@NotNull GradleIdeaModelHolder models) {
+    for (var buildModel : models.getAllBuilds()) {
+      for (var projectModel : buildModel.getProjects()) {
+        var sourceSetModel = (DefaultGradleSourceSetModel)models.getProjectModel(projectModel, GradleSourceSetModel.class);
+        var sourceSetDependencyModel = (DefaultGradleSourceSetDependencyModel)models.getProjectModel(projectModel, GradleSourceSetDependencyModel.class);
+        if (sourceSetModel == null || sourceSetDependencyModel == null) continue;
+
+        var sourceSets = sourceSetModel.getSourceSets();
+        var dependencies = sourceSetDependencyModel.getDependencies();
+        var sourceSetNames = new LinkedHashSet<>(sourceSets.keySet());
+        sourceSetNames.retainAll(dependencies.keySet());
+        for (String sourceSetName : sourceSetNames) {
+          var sourceSet = sourceSets.get(sourceSetName);
+          var sourceSetDependencies = dependencies.get(sourceSetName);
+          sourceSet.setDependencies(sourceSetDependencies);
         }
       }
     }
   }
 
-  @NotNull
-  private static Map<String, DefaultExternalProject> createExternalProjectsMap(@Nullable DefaultExternalProject rootExternalProject) {
-    final Map<String, DefaultExternalProject> externalProjectMap = new HashMap<>();
-    if (rootExternalProject == null) return externalProjectMap;
-    ArrayDeque<DefaultExternalProject> queue = new ArrayDeque<>();
-    queue.add(rootExternalProject);
-    DefaultExternalProject externalProject;
-    while ((externalProject = queue.pollFirst()) != null) {
-      queue.addAll(externalProject.getChildProjects().values());
-      externalProjectMap.put(externalProject.getQName(), externalProject);
+  private static void registerInheritedTaskModelsInParentTaskModel(@NotNull GradleIdeaModelHolder models) {
+    for (var buildModel : models.getAllBuilds()) {
+      GradleTreeTraverserUtil.backwardTraverseTree(buildModel.getRootProject(), it -> it.getChildProjects(), projectModel -> {
+        var taskModel = (DefaultGradleTaskModel)models.getProjectModel(projectModel, GradleTaskModel.class);
+        if (taskModel == null) return;
+
+        var tasks = new HashMap<>(taskModel.getTasks());
+
+        for (var childProjectModel : projectModel.getChildProjects()) {
+          var childTaskModel = (DefaultGradleTaskModel)models.getProjectModel(childProjectModel, GradleTaskModel.class);
+          if (childTaskModel == null) continue;
+
+          for (var childTask : childTaskModel.getTasks().values()) {
+            if (tasks.containsKey(childTask.getName())) continue;
+
+            var inheritedTask = new DefaultExternalTask(childTask);
+            inheritedTask.setInherited(true);
+            tasks.put(inheritedTask.getName(), inheritedTask);
+          }
+        }
+
+        taskModel.setTasks(tasks);
+      });
     }
-    return externalProjectMap;
   }
 
-  private static class Counter {
-    int count;
+  private static void associateTaskModelsWithExternalProjects(@NotNull GradleIdeaModelHolder models) {
+    for (var buildModel : models.getAllBuilds()) {
+      for (var projectModel : buildModel.getProjects()) {
+        var externalProject = (DefaultExternalProject)models.getProjectModel(projectModel, ExternalProject.class);
+        var taskModel = (DefaultGradleTaskModel)models.getProjectModel(projectModel, GradleTaskModel.class);
+        if (externalProject == null || taskModel == null) continue;
 
-    void increment() {
-      count++;
-    }
-
-    @Override
-    public String toString() {
-      return String.valueOf(count);
+        externalProject.setTaskModel(taskModel);
+      }
     }
   }
 
   private static void mergeSourceSetContentRoots(
-    @NotNull Map<String, Pair<DataNode<ModuleData>, IdeaModule>> moduleMap,
-    @NotNull ProjectResolverContext resolverContext
+    @NotNull ProjectResolverContext resolverContext,
+    @NotNull Map<String, Pair<DataNode<ModuleData>, IdeaModule>> moduleMap
   ) {
+    var modules = ContainerUtil.map2Map(moduleMap.values(), it -> new Pair<>(it.getSecond(), it.getFirst()));
+    if (resolverContext.isResolveModulePerSourceSet()) {
+      mergeSourceSetContentRootsInModulePerSourceSetMode(resolverContext, modules);
+    }
+    else {
+      mergeSourceSetContentRootsInModulePerProjectMode(resolverContext, modules);
+    }
+  }
 
-    final Map<String, Counter> weightMap = new HashMap<>();
-    for (final Pair<DataNode<ModuleData>, IdeaModule> pair : moduleMap.values()) {
-      final DataNode<ModuleData> moduleNode = pair.first;
-      for (DataNode<ContentRootData> contentRootNode : findAll(moduleNode, ProjectKeys.CONTENT_ROOT)) {
-        File file = new File(contentRootNode.getData().getRootPath());
-        while (file != null) {
-          weightMap.computeIfAbsent(file.getPath(), __ -> new Counter()).increment();
-          file = file.getParentFile();
-        }
-      }
+  /**
+   * Gradle source set haven't the content root term.
+   * Therefore, IDEA needs to deduct the best content roots for the specified source set directories.
+   * <p>
+   * For example, it creates content roots src/main for the source set directories src/main/java and src/main/resources.
+   * Same for src/test/java and src/test/resources, it creates src/test content root.
+   */
+  @VisibleForTesting
+  @ApiStatus.Internal
+  static void mergeSourceSetContentRootsInModulePerSourceSetMode(
+    @NotNull ProjectResolverContext resolverContext,
+    @NotNull Map<? extends ProjectModel, DataNode<ModuleData>> moduleMap
+  ) {
+    var contentRootIndex = new GradleContentRootIndex();
 
-      for (DataNode<GradleSourceSetData> sourceSetNode : findAll(moduleNode, GradleSourceSetData.KEY)) {
-        final Set<String> set = new HashSet<>();
-        for (DataNode<ContentRootData> contentRootNode : findAll(sourceSetNode, ProjectKeys.CONTENT_ROOT)) {
-          File file = new File(contentRootNode.getData().getRootPath());
-          while (file != null) {
-            set.add(file.getPath());
-            file = file.getParentFile();
-          }
-        }
-        for (String path : set) {
-          weightMap.computeIfAbsent(path, __ -> new Counter()).increment();
-        }
+    for (var moduleEntry : moduleMap.entrySet()) {
+      var moduleNode = moduleEntry.getValue();
+
+      for (var sourceSetNode : findAll(moduleNode, GradleSourceSetData.KEY)) {
+        contentRootIndex.addSourceRoots(sourceSetNode);
       }
     }
-    for (final Pair<DataNode<ModuleData>, IdeaModule> pair : moduleMap.values()) {
-      final DataNode<ModuleData> moduleNode = pair.first;
-      final ExternalProject externalProject = resolverContext.getExtraProject(pair.second, ExternalProject.class);
+
+    for (var moduleEntry : moduleMap.entrySet()) {
+      var projectModel = moduleEntry.getKey();
+      var moduleNode = moduleEntry.getValue();
+
+      var externalProject = resolverContext.getProjectModel(projectModel, ExternalProject.class);
       if (externalProject == null) continue;
 
-      mergeModuleContentRoots(weightMap, externalProject, moduleNode);
-      for (DataNode<GradleSourceSetData> sourceSetNode : findAll(moduleNode, GradleSourceSetData.KEY)) {
-        mergeModuleContentRoots(weightMap, externalProject, sourceSetNode);
+      for (var sourceSetNode : findAll(moduleNode, GradleSourceSetData.KEY)) {
+        var contentRootPaths = contentRootIndex.resolveContentRoots(externalProject, sourceSetNode);
+
+        var contentRootNodes = CanonicalPathPrefixTreeFactory.INSTANCE.<ContentRootData>createMap();
+        for (var contentRootPath : contentRootPaths) {
+          var contentRootData = new ContentRootData(GradleConstants.SYSTEM_ID, contentRootPath);
+          contentRootNodes.set(contentRootPath, contentRootData);
+        }
+
+        for (var contentRootNode : findAll(sourceSetNode, ProjectKeys.CONTENT_ROOT)) {
+          for (var sourceRootType : ExternalSystemSourceType.values()) {
+            for (var sourceRoot : contentRootNode.getData().getPaths(sourceRootType)) {
+              var sourceRootPath = sourceRoot.getPath();
+              var packagePrefix = sourceRoot.getPackagePrefix();
+              var contentRootData = ContainerUtil.getLastItem(contentRootNodes.getAncestorValues(sourceRootPath));
+              contentRootData.storePath(sourceRootType, sourceRootPath, packagePrefix);
+            }
+          }
+          contentRootNode.clear(true);
+        }
+
+        for (var contentRootData : contentRootNodes.values()) {
+          sourceSetNode.createChild(ProjectKeys.CONTENT_ROOT, contentRootData);
+        }
       }
     }
   }
 
-  private static void mergeModuleContentRoots(@NotNull Map<String, Counter> weightMap,
-                                              @NotNull ExternalProject externalProject,
-                                              @NotNull DataNode<? extends ModuleData> moduleNode) {
-    final File buildDir = externalProject.getBuildDir();
-    final MultiMap<String, ContentRootData> sourceSetRoots = MultiMap.create();
-    Collection<DataNode<ContentRootData>> contentRootNodes = findAll(moduleNode, ProjectKeys.CONTENT_ROOT);
-    if (contentRootNodes.size() <= 1) return;
+  private static void mergeSourceSetContentRootsInModulePerProjectMode(
+    @NotNull ProjectResolverContext resolverContext,
+    @NotNull Map<? extends ProjectModel, DataNode<ModuleData>> moduleMap
+  ) {
+    for (var moduleEntry : moduleMap.entrySet()) {
+      var projectModel = moduleEntry.getKey();
+      var moduleNode = moduleEntry.getValue();
 
-    for (DataNode<ContentRootData> contentRootNode : contentRootNodes) {
-      File root = new File(contentRootNode.getData().getRootPath());
-      if (FileUtil.isAncestor(buildDir, root, true)) continue;
+      var externalProject = resolverContext.getProjectModel(projectModel, ExternalProject.class);
+      if (externalProject == null) continue;
 
-      while (weightMap.containsKey(root.getParent()) && weightMap.get(root.getParent()).count <= 1) {
-        root = root.getParentFile();
-      }
+      var projectRootPath = NioPathUtil.toCanonicalPath(externalProject.getProjectDir().toPath());
 
-      ContentRootData mergedContentRoot = null;
-      String rootPath = toCanonicalPath(root.getPath());
-      Set<String> paths = new HashSet<>(sourceSetRoots.keySet());
-      for (String path : paths) {
-        if (FileUtil.isAncestor(rootPath, path, true)) {
-          Collection<ContentRootData> values = sourceSetRoots.remove(path);
-          if (values != null) {
-            sourceSetRoots.putValues(rootPath, values);
-          }
-        }
-        else if (FileUtil.isAncestor(path, rootPath, false)) {
-          Collection<ContentRootData> contentRoots = sourceSetRoots.get(path);
-          for (ContentRootData rootData : contentRoots) {
-            if (StringUtil.equals(rootData.getRootPath(), path)) {
-              mergedContentRoot = rootData;
-              break;
+      var projectContentRootData = new ContentRootData(GradleConstants.SYSTEM_ID, projectRootPath);
+      var externalContentRootNodes = new ArrayList<ContentRootData>();
+
+      for (var contentRootNode : findAll(moduleNode, ProjectKeys.CONTENT_ROOT)) {
+        for (var sourceRootType : ExternalSystemSourceType.values()) {
+          for (var sourceRoot : contentRootNode.getData().getPaths(sourceRootType)) {
+            var sourceRootPath = sourceRoot.getPath();
+            var packagePrefix = sourceRoot.getPackagePrefix();
+            if (FileUtil.isAncestor(projectRootPath, sourceRootPath, false)) {
+              projectContentRootData.storePath(sourceRootType, sourceRootPath, packagePrefix);
+            }
+            else {
+              var externalContentRootData = new ContentRootData(GradleConstants.SYSTEM_ID, sourceRootPath);
+              externalContentRootData.storePath(sourceRootType, sourceRootPath, packagePrefix);
+              externalContentRootNodes.add(externalContentRootData);
             }
           }
-          if (mergedContentRoot == null) {
-            mergedContentRoot = contentRoots.iterator().next();
-          }
-          break;
         }
-        if (sourceSetRoots.size() == 1) break;
+        contentRootNode.clear(true);
       }
 
-      if (mergedContentRoot == null) {
-        mergedContentRoot = new ContentRootData(GradleConstants.SYSTEM_ID, root.getPath());
-        sourceSetRoots.putValue(mergedContentRoot.getRootPath(), mergedContentRoot);
+      moduleNode.createChild(ProjectKeys.CONTENT_ROOT, projectContentRootData);
+      for (var externalContentRootData : externalContentRootNodes) {
+        moduleNode.createChild(ProjectKeys.CONTENT_ROOT, externalContentRootData);
       }
-
-      for (ExternalSystemSourceType sourceType : ExternalSystemSourceType.values()) {
-        for (ContentRootData.SourceRoot sourceRoot : contentRootNode.getData().getPaths(sourceType)) {
-          mergedContentRoot.storePath(sourceType, sourceRoot.getPath(), sourceRoot.getPackagePrefix());
-        }
-      }
-
-      contentRootNode.clear(true);
-    }
-
-    for (Map.Entry<String, Collection<ContentRootData>> entry : sourceSetRoots.entrySet()) {
-      final String rootPath = entry.getKey();
-      final ContentRootData ideContentRoot = new ContentRootData(GradleConstants.SYSTEM_ID, rootPath);
-
-      for (ContentRootData rootData : entry.getValue()) {
-        for (ExternalSystemSourceType sourceType : ExternalSystemSourceType.values()) {
-          Collection<ContentRootData.SourceRoot> roots = rootData.getPaths(sourceType);
-          for (ContentRootData.SourceRoot sourceRoot : roots) {
-            ideContentRoot.storePath(sourceType, sourceRoot.getPath(), sourceRoot.getPackagePrefix());
-          }
-        }
-      }
-
-      moduleNode.createChild(ProjectKeys.CONTENT_ROOT, ideContentRoot);
     }
   }
 
   private final class ProjectConnectionDataNodeFunction implements Function<ProjectConnection, DataNode<ProjectData>> {
     private final @NotNull GradleProjectResolverExtension myProjectResolverChain;
     private final @NotNull DefaultProjectResolverContext myResolverContext;
-    private final boolean myIsBuildSrcProject;
 
     private ProjectConnectionDataNodeFunction(
       @NotNull DefaultProjectResolverContext resolverContext,
-      @NotNull GradleProjectResolverExtension projectResolverChain,
-      boolean isBuildSrcProject
+      @NotNull GradleProjectResolverExtension projectResolverChain
     ) {
       myResolverContext = resolverContext;
       myProjectResolverChain = projectResolverChain;
-      myIsBuildSrcProject = isBuildSrcProject;
     }
 
     @Override
@@ -914,7 +939,7 @@ public class GradleProjectResolver implements ExternalSystemProjectResolver<Grad
       return computeCancellable(myResolverContext, () -> {
         try {
           myResolverContext.setConnection(connection);
-          return doResolveProjectInfo(myResolverContext, myProjectResolverChain, myIsBuildSrcProject);
+          return doResolveProjectInfo(myResolverContext, myProjectResolverChain);
         }
         catch (ProcessCanceledException e) {
           throw e;
@@ -1005,14 +1030,5 @@ public class GradleProjectResolver implements ExternalSystemProjectResolver<Grad
     };
     chainWrapper.setNext(firstResolver);
     return chainWrapper;
-  }
-
-  private static @NotNull GradleTracingContext getActionTelemetryContext(@NotNull Span span) {
-    GradleTracingContext context = new GradleTracingContext();
-    GlobalOpenTelemetry.get()
-      .getPropagators()
-      .getTextMapPropagator()
-      .inject(Context.current().with(span), context, GradleTracingContext.SETTER);
-    return context;
   }
 }

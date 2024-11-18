@@ -4,17 +4,17 @@ package org.jetbrains.kotlin.idea.compilerPlugin.assignment
 import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiElement
 import org.jetbrains.kotlin.analysis.api.fir.diagnostics.KaFirDiagnostic
-import org.jetbrains.kotlin.analysis.project.structure.KtCompilerPluginsProvider
-import org.jetbrains.kotlin.analysis.project.structure.KtCompilerPluginsProvider.CompilerPluginType
-import org.jetbrains.kotlin.analysis.project.structure.KtSourceModule
-import org.jetbrains.kotlin.analysis.project.structure.ProjectStructureProvider
+import org.jetbrains.kotlin.analysis.api.platform.projectStructure.KotlinCompilerPluginsProvider
+import org.jetbrains.kotlin.analysis.api.platform.projectStructure.KotlinCompilerPluginsProvider.CompilerPluginType
+import org.jetbrains.kotlin.analysis.api.projectStructure.KaSourceModule
 import org.jetbrains.kotlin.idea.codeinsight.api.applicators.fixes.KotlinQuickFixFactory
 import org.jetbrains.kotlin.idea.codeinsight.api.applicators.fixes.KotlinQuickFixRegistrar
 import org.jetbrains.kotlin.idea.codeinsight.api.applicators.fixes.KotlinQuickFixesList
 import org.jetbrains.kotlin.idea.codeinsight.api.applicators.fixes.KtQuickFixesListBuilder
-import org.jetbrains.kotlin.idea.k2.codeinsight.fixes.imprt.ImportQuickFix
+import org.jetbrains.kotlin.idea.k2.codeinsight.fixes.imprt.ImportQuickFixProvider
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.psi.KtBinaryExpression
+import org.jetbrains.kotlin.idea.base.projectStructure.getKaModuleOfTypeSafe
 
 internal class FirAssignmentPluginQuickFixRegistrar : KotlinQuickFixRegistrar() {
 
@@ -30,13 +30,14 @@ private val FACTORY = KotlinQuickFixFactory.IntentionBased { diagnostic: KaFirDi
     val project = element.project
 
     if (element is KtBinaryExpression && element.operationToken == KtTokens.EQ && isAssignmentPluginEnabled(project, element)) {
-        ImportQuickFix.getFixes(element.operationReference)
+        ImportQuickFixProvider.getFixes(element.operationReference)
     } else {
         emptyList()
     }
 }
 
 private fun isAssignmentPluginEnabled(project: Project, element: PsiElement): Boolean {
-    val module = ProjectStructureProvider.getModule(project, element, contextualModule = null) as? KtSourceModule ?: return false
-    return project.getService(KtCompilerPluginsProvider::class.java).isPluginOfTypeRegistered(module, CompilerPluginType.ASSIGNMENT)
+    val module = element.getKaModuleOfTypeSafe<KaSourceModule>(project, useSiteModule = null) ?: return false
+    val compilerPluginsProvider = KotlinCompilerPluginsProvider.getInstance(project) ?: return false
+    return compilerPluginsProvider.isPluginOfTypeRegistered(module, CompilerPluginType.ASSIGNMENT)
 }

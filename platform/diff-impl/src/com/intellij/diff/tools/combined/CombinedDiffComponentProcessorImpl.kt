@@ -16,6 +16,7 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.logger
+import com.intellij.openapi.diff.impl.DiffUsageTriggerCollector
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.fileEditor.FileEditorState
 import com.intellij.openapi.fileEditor.FileEditorStateLevel
@@ -39,14 +40,15 @@ interface CombinedDiffManager {
   fun createProcessor(diffPlace: String? = null): CombinedDiffComponentProcessor
 
   companion object {
-    @JvmStatic
     fun getInstance(project: Project): CombinedDiffManager = project.service()
   }
 }
 
 @ApiStatus.Internal
-class CombinedDiffComponentProcessorImpl(val model: CombinedDiffModel,
-                                         goToChangeAction: AnAction?) : CombinedDiffComponentProcessor {
+class CombinedDiffComponentProcessorImpl(
+  val model: CombinedDiffModel,
+  goToChangeAction: AnAction?,
+) : CombinedDiffComponentProcessor {
 
   override val disposable = Disposer.newCheckedDisposable()
 
@@ -189,10 +191,12 @@ class CombinedDiffComponentProcessorImpl(val model: CombinedDiffModel,
   }
 
   companion object {
-    private fun buildBlockContent(mainUi: CombinedDiffMainUI,
-                                  context: DiffContext,
-                                  request: DiffRequest,
-                                  blockId: CombinedBlockId): CombinedDiffBlockContent? {
+    private fun buildBlockContent(
+      mainUi: CombinedDiffMainUI,
+      context: DiffContext,
+      request: DiffRequest,
+      blockId: CombinedBlockId,
+    ): CombinedDiffBlockContent? {
       val diffSettings = DiffSettingsHolder.DiffSettings.getSettings(context.getUserData(DiffUserDataKeys.PLACE))
       val diffTools = DiffManagerEx.getInstance().diffTools
       request.putUserData(DiffUserDataKeys.ALIGNED_TWO_SIDED_DIFF, true)
@@ -224,9 +228,11 @@ class CombinedDiffComponentProcessorImpl(val model: CombinedDiffModel,
       return DiffUtil.findToolSubstitutor(tool, context, request) as? FrameDiffTool ?: tool
     }
 
-    private fun getOrderedDiffTools(diffSettings: DiffSettingsHolder.DiffSettings,
-                                    diffTools: List<DiffTool>,
-                                    isUnifiedView: Boolean): List<FrameDiffTool> {
+    private fun getOrderedDiffTools(
+      diffSettings: DiffSettingsHolder.DiffSettings,
+      diffTools: List<DiffTool>,
+      isUnifiedView: Boolean,
+    ): List<FrameDiffTool> {
       return DiffRequestProcessor.getToolOrderFromSettings(diffSettings, diffTools).asSequence()
         .filterIsInstance<FrameDiffTool>()
         .sortedBy {
@@ -249,10 +255,11 @@ class CombinedDiffComponentProcessorImpl(val model: CombinedDiffModel,
   }
 }
 
-data class CombinedDiffEditorState(
+@ApiStatus.Experimental
+internal data class CombinedDiffEditorState(
   val currentBlockIds: Set<CombinedBlockId>,
   val activeBlockId: CombinedBlockId?,
-  val activeEditorStates: List<TextEditorState>
+  val activeEditorStates: List<TextEditorState>,
 ) : FileEditorStateWithPreferredOpenMode {
   override val openMode: FileEditorManagerImpl.OpenMode?
     get() = if (!isDiffInEditor) FileEditorManagerImpl.OpenMode.NEW_WINDOW else null

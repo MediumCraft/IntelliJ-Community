@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.kotlin.fe10.testGenerator
 
 import com.intellij.testFramework.TestIndexingModeSupporter.IndexingMode
@@ -51,13 +51,12 @@ import org.jetbrains.kotlin.idea.configuration.gradle.AbstractGradleConfigurePro
 import org.jetbrains.kotlin.idea.conversion.copy.AbstractLiteralKotlinToKotlinCopyPasteTest
 import org.jetbrains.kotlin.idea.conversion.copy.AbstractLiteralTextToKotlinCopyPasteTest
 import org.jetbrains.kotlin.idea.coverage.AbstractKotlinCoverageOutputFilesTest
-import org.jetbrains.kotlin.idea.debugger.evaluate.AbstractCodeFragmentAutoImportTest
-import org.jetbrains.kotlin.idea.debugger.evaluate.AbstractCodeFragmentCompletionHandlerTest
-import org.jetbrains.kotlin.idea.debugger.evaluate.AbstractCodeFragmentCompletionTest
-import org.jetbrains.kotlin.idea.debugger.evaluate.AbstractCodeFragmentHighlightingTest
+import org.jetbrains.kotlin.idea.debugger.evaluate.AbstractK1CodeFragmentAutoImportTest
+import org.jetbrains.kotlin.idea.debugger.evaluate.AbstractK1CodeFragmentCompletionHandlerTest
+import org.jetbrains.kotlin.idea.debugger.evaluate.AbstractK1CodeFragmentCompletionTest
+import org.jetbrains.kotlin.idea.debugger.evaluate.AbstractK1CodeFragmentHighlightingTest
 import org.jetbrains.kotlin.idea.debugger.test.*
 import org.jetbrains.kotlin.idea.debugger.test.sequence.exec.AbstractIrSequenceTraceTestCase
-import org.jetbrains.kotlin.idea.debugger.test.sequence.exec.AbstractIrSequenceTraceWithIREvaluatorTestCase
 import org.jetbrains.kotlin.idea.decompiler.navigation.*
 import org.jetbrains.kotlin.idea.decompiler.stubBuilder.AbstractLoadJavaClsStubTest
 import org.jetbrains.kotlin.idea.decompiler.textBuilder.AbstractCommonDecompiledTextTest
@@ -82,7 +81,7 @@ import org.jetbrains.kotlin.idea.inspections.AbstractViewOfflineInspectionTest
 import org.jetbrains.kotlin.idea.intentions.AbstractConcatenatedStringGeneratorTest
 import org.jetbrains.kotlin.idea.intentions.AbstractK1IntentionTest
 import org.jetbrains.kotlin.idea.intentions.AbstractK1IntentionTest2
-import org.jetbrains.kotlin.idea.intentions.AbstractMultiFileIntentionTest
+import org.jetbrains.kotlin.idea.intentions.AbstractK1MultiFileIntentionTest
 import org.jetbrains.kotlin.idea.intentions.declarations.AbstractJoinLinesTest
 import org.jetbrains.kotlin.idea.internal.AbstractBytecodeToolWindowMultiplatformTest
 import org.jetbrains.kotlin.idea.internal.AbstractBytecodeToolWindowTest
@@ -121,7 +120,6 @@ import org.jetbrains.kotlin.idea.refactoring.safeDelete.AbstractSafeDeleteTest
 import org.jetbrains.kotlin.idea.repl.AbstractIdeReplCompletionTest
 import org.jetbrains.kotlin.idea.resolve.*
 import org.jetbrains.kotlin.idea.scratch.AbstractScratchLineMarkersTest
-import org.jetbrains.kotlin.idea.scratch.AbstractScratchRunActionTest
 import org.jetbrains.kotlin.idea.script.*
 import org.jetbrains.kotlin.idea.search.refIndex.AbstractFindUsagesWithCompilerReferenceIndexTest
 import org.jetbrains.kotlin.idea.search.refIndex.AbstractKotlinCompilerReferenceByReferenceTest
@@ -159,7 +157,6 @@ import org.jetbrains.kotlin.testGenerator.model.Patterns.KT_WITHOUT_DOTS
 import org.jetbrains.kotlin.testGenerator.model.Patterns.KT_WITHOUT_DOT_AND_FIR_PREFIX
 import org.jetbrains.kotlin.testGenerator.model.Patterns.KT_WITHOUT_FIR_PREFIX
 import org.jetbrains.kotlin.testGenerator.model.Patterns.TEST
-import org.jetbrains.kotlin.testGenerator.model.Patterns.WS_KTS
 import org.jetbrains.uast.test.kotlin.comparison.*
 
 fun main(@Suppress("UNUSED_PARAMETER") args: Array<String>) {
@@ -210,17 +207,11 @@ private fun assembleWorkspace(): TWorkspace = workspace(KotlinPluginMode.K1) {
             }
         }
 
-        testClass<AbstractIrKotlinEvaluateExpressionTest> {
-            model("evaluation/singleBreakpoint", testMethodName = "doSingleBreakpointTest", targetBackend = TargetBackend.JVM_IR_WITH_OLD_EVALUATOR)
-            model("evaluation/multipleBreakpoints", testMethodName = "doMultipleBreakpointsTest", targetBackend = TargetBackend.JVM_IR_WITH_OLD_EVALUATOR)
-            model("evaluation/jvmMultiModule", testMethodName = "doJvmMultiModuleTest", targetBackend = TargetBackend.JVM_IR_WITH_OLD_EVALUATOR)
-        }
-
         listOf(
-          AbstractIndyLambdaIrKotlinEvaluateExpressionTest::class,
-          AbstractIrKotlinEvaluateExpressionWithIRFragmentCompilerTest::class,
-          AbstractK1IdeK2CodeKotlinEvaluateExpressionTest::class,
-          AbstractInlineScopesAndK1IdeK2CodeEvaluateExpressionTest::class,
+            AbstractIndyLambdaIrKotlinEvaluateExpressionTest::class,
+            AbstractIrKotlinEvaluateExpressionWithIRFragmentCompilerTest::class,
+            AbstractK1IdeK2CodeKotlinEvaluateExpressionTest::class,
+            AbstractInlineScopesAndK1IdeK2CodeEvaluateExpressionTest::class,
         ).forEach {
             testClass(it) {
                 model("evaluation/singleBreakpoint", testMethodName = "doSingleBreakpointTest", targetBackend = TargetBackend.JVM_IR_WITH_IR_EVALUATOR)
@@ -285,10 +276,14 @@ private fun assembleWorkspace(): TWorkspace = workspace(KotlinPluginMode.K1) {
             }
         }
 
-        listOf(AbstractAsyncStackTraceTest::class, AbstractK1IdeK2CodeAsyncStackTraceTest::class).forEach {
+        listOf(AbstractSuspendStackTraceTest::class, AbstractK1IdeK2CodeSuspendStackTraceTest::class).forEach {
             testClass(it) {
-                model("asyncStackTrace")
+                model("suspendStackTrace")
             }
+        }
+
+        testClass<AbstractFlowAsyncStackTraceTest> {
+            model("asyncStackTrace/flows")
         }
 
         listOf(AbstractCoroutineDumpTest::class, AbstractK1IdeK2CodeCoroutineDumpTest::class).forEach {
@@ -301,10 +296,6 @@ private fun assembleWorkspace(): TWorkspace = workspace(KotlinPluginMode.K1) {
             model("sequence/streams/sequence", excludedDirectories = listOf("terminal"))
         }
 
-        testClass<AbstractIrSequenceTraceWithIREvaluatorTestCase> { // TODO: implement mapping logic for terminal operations
-            model("sequence/streams/sequence", excludedDirectories = listOf("terminal"))
-        }
-
         listOf(AbstractContinuationStackTraceTest::class, AbstractK1IdeK2CodeContinuationStackTraceTest::class).forEach {
             testClass(it) {
                 model("continuation")
@@ -313,7 +304,7 @@ private fun assembleWorkspace(): TWorkspace = workspace(KotlinPluginMode.K1) {
 
         listOf(AbstractKotlinVariablePrintingTest::class, AbstractK1IdeK2CodeKotlinVariablePrintingTest::class).forEach {
             testClass(it) {
-                model("variables")
+                model("variables", isRecursive = false)
             }
         }
 
@@ -414,12 +405,12 @@ private fun assembleWorkspace(): TWorkspace = workspace(KotlinPluginMode.K1) {
             model("unifier")
         }
 
-        testClass<AbstractCodeFragmentHighlightingTest> {
+        testClass<AbstractK1CodeFragmentHighlightingTest> {
             model("checker/codeFragments", pattern = KT, isRecursive = false)
             model("checker/codeFragments/imports", testMethodName = "doTestWithImport", pattern = KT)
         }
 
-        testClass<AbstractCodeFragmentAutoImportTest> {
+        testClass<AbstractK1CodeFragmentAutoImportTest> {
             model("quickfix.special/codeFragmentAutoImport", pattern = KT, isRecursive = false)
         }
 
@@ -493,8 +484,13 @@ private fun assembleWorkspace(): TWorkspace = workspace(KotlinPluginMode.K1) {
             model("navigation/implementations", isRecursive = false)
         }
 
+        testClass< AbstractKotlinGotoImplementationMultifileTest> {
+            model("navigation/implementations/multifile/javaKotlin", testMethodName = "doJavaKotlinTest")
+            model("navigation/implementations/multifile/kotlinJava", testMethodName = "doKotlinJavaTest")
+        }
+
         testClass<AbstractGotoTestOrCodeActionTest> {
-            model("navigation/gotoTestOrCode", pattern = Patterns.forRegex("^(.+)\\.main\\..+\$"))
+            model("navigation/gotoTestOrCode", pattern = Patterns.forRegex("^(.+)\\.main\\..+$"))
         }
 
         testClass<AbstractKotlinGotoImplementationMultiModuleTest> {
@@ -569,7 +565,13 @@ private fun assembleWorkspace(): TWorkspace = workspace(KotlinPluginMode.K1) {
 
     testGroup("idea/tests", category = INTENTIONS) {
         testClass<AbstractK1IntentionTest> {
-            model("intentions", pattern = Patterns.forRegex("^([\\w\\-_]+)\\.(kt|kts)$"))
+            model(
+                "intentions", pattern = Patterns.forRegex("^([\\w\\-_]+)\\.(kt|kts)$"),
+                excludedDirectories = listOf(
+                    "convertToMultiDollarString", // K2-only
+                    "branched/ifWhen/ifToWhen/whenGuards", // K2-only
+                )
+            )
         }
 
         testClass<AbstractK1IntentionTest2> {
@@ -587,8 +589,12 @@ private fun assembleWorkspace(): TWorkspace = workspace(KotlinPluginMode.K1) {
         testClass<AbstractLocalInspectionTest> {
             model(
                 "inspectionsLocal", pattern = Patterns.forRegex("^([\\w\\-_]+)\\.(kt|kts)$"),
-                // In FE1.0, this is a quickfix rather than a local inspection
-                excludedDirectories = listOf("unusedVariable")
+                excludedDirectories = listOf(
+                    "unusedVariable", // In FE1.0, this is a quickfix rather than a local inspection
+                    "canSimplifyDollarLiteral", // K2-only
+                    "canConvertToMultiDollarString", // K2-only
+                    "branched/introduceWhenSubject/whenGuards", // K2-only
+                )
             )
         }
 
@@ -818,7 +824,7 @@ private fun assembleWorkspace(): TWorkspace = workspace(KotlinPluginMode.K1) {
     }
 
     testGroup("idea/tests", category = INTENTIONS) {
-        testClass<AbstractMultiFileIntentionTest> {
+        testClass<AbstractK1MultiFileIntentionTest> {
             model("multiFileIntentions", pattern = TEST, flatten = true)
         }
 
@@ -860,10 +866,6 @@ private fun assembleWorkspace(): TWorkspace = workspace(KotlinPluginMode.K1) {
     testGroup("idea/tests") {
         testClass<AbstractDiagnosticMessageTest> {
             model("diagnosticMessage", isRecursive = false)
-        }
-
-        testClass<AbstractDiagnosticMessageJsTest> {
-            model("diagnosticMessage/js", isRecursive = false, targetBackend = TargetBackend.JS)
         }
     }
 
@@ -907,14 +909,8 @@ private fun assembleWorkspace(): TWorkspace = workspace(KotlinPluginMode.K1) {
         }
 
         testClass<AbstractInsertImportOnPasteTest> {
-            model(
-                "copyPaste/imports",
-                pattern = KT_WITHOUT_DOTS,
-                testMethodName = "doTestCopy",
-                testClassName = "Copy",
-                isRecursive = false
-            )
-            model("copyPaste/imports", pattern = KT_WITHOUT_DOTS, testMethodName = "doTestCut", testClassName = "Cut", isRecursive = false)
+            model("copyPaste/imports", pattern = KT_WITHOUT_DOTS, testMethodName = "doTestCopy", testClassName = "Copy", isRecursive = true)
+            model("copyPaste/imports", pattern = KT_WITHOUT_DOTS, testMethodName = "doTestCut", testClassName = "Cut", isRecursive = true)
         }
 
         testClass<AbstractMoveOnCutPasteTest> {
@@ -1079,10 +1075,6 @@ private fun assembleWorkspace(): TWorkspace = workspace(KotlinPluginMode.K1) {
             model("codeInsight/hints/chainCall", pattern = inlayHintsFileRegexp)
         }
 
-        testClass<AbstractKotlinCodeVisionProviderTest> {
-            model("codeInsight/codeVision")
-        }
-
         testClass<AbstractKotlinNavBarTest> {
             model("navigationToolbar", pattern = KT_OR_KTS, isRecursive = false)
         }
@@ -1098,7 +1090,7 @@ private fun assembleWorkspace(): TWorkspace = workspace(KotlinPluginMode.K1) {
         }
 
         testClass<AbstractStubBuilderTest> {
-            model("stubs", pattern = KT)
+            model("stubs", pattern = KT_OR_KTS)
         }
 
         testClass<AbstractMultiplatformAnalysisTest> {
@@ -1169,15 +1161,16 @@ private fun assembleWorkspace(): TWorkspace = workspace(KotlinPluginMode.K1) {
     }
 
     testGroup("scripting-support", category = SCRIPTS) {
-        testClass<AbstractScratchRunActionTest> {
-            model("scratch", pattern = KTS, testMethodName = "doScratchCompilingTest", testClassName = "ScratchCompiling", isRecursive = false)
-            model("scratch", pattern = KTS, testMethodName = "doScratchReplTest", testClassName = "ScratchRepl", isRecursive = false)
-            model("scratch/multiFile", pattern = DIRECTORY, testMethodName = "doScratchMultiFileTest", testClassName = "ScratchMultiFile", isRecursive = false)
-            model("worksheet", pattern = WS_KTS, testMethodName = "doWorksheetCompilingTest", testClassName = "WorksheetCompiling", isRecursive = false)
-            model("worksheet", pattern = WS_KTS, testMethodName = "doWorksheetReplTest", testClassName = "WorksheetRepl", isRecursive = false)
-            model("worksheet/multiFile", pattern = DIRECTORY, testMethodName = "doWorksheetMultiFileTest", testClassName = "WorksheetMultiFile", isRecursive = false)
-            model("scratch/rightPanelOutput", pattern = KTS, testMethodName = "doRightPreviewPanelOutputTest", testClassName = "ScratchRightPanelOutput", isRecursive = false)
-        }
+        // See KTIJ-31408 for the reasoning why these tests are not generated
+        //testClass<AbstractScratchRunActionTest> {
+        //    model("scratch", pattern = KTS, testMethodName = "doScratchCompilingTest", testClassName = "ScratchCompiling", isRecursive = false)
+        //    model("scratch", pattern = KTS, testMethodName = "doScratchReplTest", testClassName = "ScratchRepl", isRecursive = false)
+        //    model("scratch/multiFile", pattern = DIRECTORY, testMethodName = "doScratchMultiFileTest", testClassName = "ScratchMultiFile", isRecursive = false)
+        //    model("worksheet", pattern = WS_KTS, testMethodName = "doWorksheetCompilingTest", testClassName = "WorksheetCompiling", isRecursive = false)
+        //    model("worksheet", pattern = WS_KTS, testMethodName = "doWorksheetReplTest", testClassName = "WorksheetRepl", isRecursive = false)
+        //    model("worksheet/multiFile", pattern = DIRECTORY, testMethodName = "doWorksheetMultiFileTest", testClassName = "WorksheetMultiFile", isRecursive = false)
+        //    model("scratch/rightPanelOutput", pattern = KTS, testMethodName = "doRightPreviewPanelOutputTest", testClassName = "ScratchRightPanelOutput", isRecursive = false)
+        //}
 
         testClass<AbstractScratchLineMarkersTest> {
             model("scratch/lineMarker", testMethodName = "doScratchTest", pattern = KT_OR_KTS)
@@ -1378,16 +1371,18 @@ private fun assembleWorkspace(): TWorkspace = workspace(KotlinPluginMode.K1) {
         }
 
         testClass<AbstractMultiPlatformCompletionTest> {
-            model("multiPlatform", isRecursive = false, pattern = DIRECTORY)
+            model("multiPlatform/actualDeclaration", isRecursive = false, pattern = DIRECTORY)
+            model("multiPlatform/classDeclaration", isRecursive = false, pattern = DIRECTORY)
+            model("multiPlatform/functionDeclaration", isRecursive = false, pattern = DIRECTORY)
         }
     }
 
     testGroup("idea/tests", testDataPath = "../../completion/testData", category = COMPLETION) {
-        testClass<AbstractCodeFragmentCompletionHandlerTest> {
+        testClass<AbstractK1CodeFragmentCompletionHandlerTest> {
             model("handlers/runtimeCast")
         }
 
-        testClass<AbstractCodeFragmentCompletionTest> {
+        testClass<AbstractK1CodeFragmentCompletionTest> {
             model("basic/codeFragments", pattern = KT)
         }
     }

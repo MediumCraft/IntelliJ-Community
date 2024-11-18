@@ -5,29 +5,29 @@ package org.jetbrains.kotlin.idea.codeinsight.api.applicators.fixes
 import com.intellij.codeInsight.intention.CommonIntentionAction
 import com.intellij.codeInsight.intention.IntentionAction
 import com.intellij.modcommand.ModCommandAction
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
-import org.jetbrains.kotlin.analysis.api.diagnostics.KtDiagnosticWithPsi
+import org.jetbrains.kotlin.analysis.api.KaSession
+import org.jetbrains.kotlin.analysis.api.diagnostics.KaDiagnosticWithPsi
 
-/*sealed*/ fun interface KotlinQuickFixFactory<DIAGNOSTIC : KtDiagnosticWithPsi<*>> {
+/*sealed*/ fun interface KotlinQuickFixFactory<DIAGNOSTIC : KaDiagnosticWithPsi<*>> {
 
-    context(KtAnalysisSession)
+    context(KaSession)
     fun createQuickFixes(diagnostic: DIAGNOSTIC): List<CommonIntentionAction>
 
     /**
      * Creates [IntentionAction]s from a diagnostic.
      */
-    fun interface IntentionBased<DIAGNOSTIC : KtDiagnosticWithPsi<*>> : KotlinQuickFixFactory<DIAGNOSTIC> {
+    fun interface IntentionBased<DIAGNOSTIC : KaDiagnosticWithPsi<*>> : KotlinQuickFixFactory<DIAGNOSTIC> {
 
-        context(KtAnalysisSession)
+        context(KaSession)
         override fun createQuickFixes(diagnostic: DIAGNOSTIC): List<IntentionAction>
     }
 
     /**
      * Creates [ModCommandAction]s from a diagnostic.
      */
-    fun interface ModCommandBased<DIAGNOSTIC : KtDiagnosticWithPsi<*>> : KotlinQuickFixFactory<DIAGNOSTIC> {
+    fun interface ModCommandBased<DIAGNOSTIC : KaDiagnosticWithPsi<*>> : KotlinQuickFixFactory<DIAGNOSTIC> {
 
-        context(KtAnalysisSession)
+        context(KaSession)
         override fun createQuickFixes(diagnostic: DIAGNOSTIC): List<ModCommandAction>
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.plugins.groovy.debugger;
 
@@ -77,9 +77,7 @@ public class GroovyPositionManager extends PositionManagerEx {
         LOG.debug("locationsOfLine: " + type + "; " + position);
       }
       int line = position.getLine() + 1;
-      List<Location> locations = getDebugProcess().getVirtualMachineProxy().versionHigher("1.4")
-                                 ? DebuggerUtilsAsync.locationsOfLineSync(type, DebugProcess.JAVA_STRATUM, null, line)
-                                 : DebuggerUtilsAsync.locationsOfLineSync(type, line);
+      List<Location> locations = DebuggerUtilsAsync.locationsOfLineSync(type, DebugProcess.JAVA_STRATUM, null, line);
       if (locations == null || locations.isEmpty()) throw NoDataException.INSTANCE;
       return locations;
     }
@@ -464,8 +462,7 @@ public class GroovyPositionManager extends PositionManagerEx {
         if (!DebuggerUtilsAsync.locationsOfLineSync(fromClass, lineNumber).isEmpty()) {
           return fromClass;
         }
-        //noinspection LoopStatementThatDoesntLoop
-        for (Location location : fromClass.allLineLocations()) {
+        for (Location location : DebuggerUtilsAsync.allLineLocationsSync(fromClass)) {
           final SourcePosition candidateFirstPosition = SourcePosition.createFromLine(
             toFind.getContainingFile(), location.lineNumber() - 1
           );

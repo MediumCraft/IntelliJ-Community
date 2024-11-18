@@ -13,13 +13,15 @@ import com.intellij.platform.workspace.jps.JpsFileEntitySource
 import com.intellij.platform.workspace.jps.JpsImportedEntitySource
 import com.intellij.platform.workspace.jps.entities.ExternalSystemModuleOptionsEntity
 import com.intellij.platform.workspace.jps.entities.exModuleOptions
-import com.intellij.platform.workspace.jps.entities.modifyEntity
+import com.intellij.platform.workspace.jps.entities.modifyModuleEntity
 import com.intellij.platform.workspace.storage.MutableEntityStorage
 import com.intellij.workspaceModel.ide.impl.legacyBridge.module.ModuleManagerBridgeImpl
 import com.intellij.workspaceModel.ide.impl.legacyBridge.module.findModuleEntity
 import com.intellij.workspaceModel.ide.legacyBridge.ModuleBridge
+import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.jps.model.serialization.SerializationConstants
 
+@ApiStatus.Internal
 class ExternalSystemModulePropertyManagerBridge(private val module: Module) : ExternalSystemModulePropertyManager() {
   private fun findEntity(): ExternalSystemModuleOptionsEntity? {
     val modelsProvider = module.getUserData(IdeModifiableModelsProviderImpl.MODIFIABLE_MODELS_PROVIDER_KEY)
@@ -39,7 +41,7 @@ class ExternalSystemModulePropertyManagerBridge(private val module: Module) : Ex
     if (moduleDiff != null) {
       val moduleEntity = module.findModuleEntity(moduleDiff) ?: return
       val options = moduleEntity.exModuleOptions ?: moduleDiff.run {
-        val updatedModule = moduleDiff.modifyEntity(moduleEntity) {
+        val updatedModule = moduleDiff.modifyModuleEntity(moduleEntity) {
           this.exModuleOptions = ExternalSystemModuleOptionsEntity(moduleEntity.entitySource)
         }
         updatedModule.exModuleOptions!!
@@ -51,7 +53,7 @@ class ExternalSystemModulePropertyManagerBridge(private val module: Module) : Ex
         WorkspaceModel.getInstance(module.project).updateProjectModel("Modify external system module options") { builder ->
           val moduleEntity = module.findModuleEntity(builder) ?: return@updateProjectModel
           val options = moduleEntity.exModuleOptions ?: builder.run {
-            val updatedEntity = builder.modifyEntity(moduleEntity) {
+            val updatedEntity = builder.modifyModuleEntity(moduleEntity) {
               this.exModuleOptions = ExternalSystemModuleOptionsEntity(moduleEntity.entitySource)
             }
             updatedEntity.exModuleOptions!!

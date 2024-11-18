@@ -4,20 +4,30 @@ import com.intellij.driver.client.Driver
 import com.intellij.driver.client.Remote
 import com.intellij.driver.model.OnDispatcher
 import com.intellij.driver.sdk.Project
+import com.intellij.driver.sdk.invokeAction
 import com.intellij.driver.sdk.ui.Finder
-import com.intellij.driver.sdk.ui.Locators
 import com.intellij.driver.sdk.ui.remote.Component
+import com.intellij.driver.sdk.ui.remote.Window
 import com.intellij.driver.sdk.ui.ui
-import com.intellij.openapi.util.SystemInfo
-import java.awt.event.KeyEvent
+import java.awt.Frame
 import javax.swing.JFrame
 
+fun Finder.ideFrame() = x(IdeaFrameUI::class.java) { byClass("IdeFrameImpl") }
+
 fun Finder.ideFrame(action: IdeaFrameUI.() -> Unit) {
-  x("//div[@class='IdeFrameImpl']", IdeaFrameUI::class.java).action()
+  ideFrame().action()
 }
 
 fun Driver.ideFrame(action: IdeaFrameUI.() -> Unit) {
   this.ui.ideFrame(action)
+}
+
+fun Finder.projectIdeFrame(projectName: String, action: IdeaFrameUI.() -> Unit) {
+  x("//div[@class='IdeFrameImpl' and contains(@accessiblename, '${projectName}')]", IdeaFrameUI::class.java).action()
+}
+
+fun Driver.projectIdeFrame(projectName: String, action: IdeaFrameUI.() -> Unit) {
+  this.ui.projectIdeFrame(projectName, action)
 }
 
 open class IdeaFrameUI(data: ComponentData) : UiComponent(data) {
@@ -35,9 +45,9 @@ open class IdeaFrameUI(data: ComponentData) : UiComponent(data) {
   val isMaximized: Boolean
     get() = ideaFrameComponent.getExtendedState().and(JFrame.MAXIMIZED_BOTH) != 0
 
-  val leftToolWindowToolbar: ToolWindowLeftToolbarUi = x(Locators.byClass("ToolWindowLeftToolbar"), ToolWindowLeftToolbarUi::class.java)
+  val leftToolWindowToolbar: ToolWindowLeftToolbarUi = x(ToolWindowLeftToolbarUi::class.java) { byClass("ToolWindowLeftToolbar") }
 
-  val rightToolWindowToolbar: ToolWindowRightToolbarUi = x(Locators.byClass("ToolWindowRightToolbar"), ToolWindowRightToolbarUi::class.java)
+  val rightToolWindowToolbar: ToolWindowRightToolbarUi = x(ToolWindowRightToolbarUi::class.java) { byClass("ToolWindowRightToolbar") }
 
   val settingsButton = x("//div[@myicon='settings.svg']")
 
@@ -51,10 +61,18 @@ open class IdeaFrameUI(data: ComponentData) : UiComponent(data) {
     ideaFrameComponent.setSize(width, height)
   }
 
-  fun openSettingsDialog() = if (SystemInfo.isMac)
-    keyboard { hotKey(KeyEvent.VK_META, KeyEvent.VK_COMMA) }
-  else
-    keyboard { hotKey(KeyEvent.VK_CONTROL, KeyEvent.VK_ALT, KeyEvent.VK_S) }
+  fun openSettingsDialog() = driver.invokeAction("ShowSettings", now = false)
+
+  fun toFront() {
+    ideaFrameComponent.toFront()
+    mainToolbar.click()
+  }
+
+  fun isMinimized() = ideaFrameComponent.getState() == Frame.ICONIFIED
+
+  fun unminimize() {
+    ideaFrameComponent.setState(Frame.NORMAL)
+  }
 }
 
 @Remote("com.intellij.openapi.wm.impl.ProjectFrameHelper")
@@ -64,9 +82,11 @@ interface ProjectFrameHelper {
 }
 
 @Remote("com.intellij.openapi.wm.impl.IdeFrameImpl")
-interface IdeFrameImpl {
+interface IdeFrameImpl : Window {
   fun isInFullScreen(): Boolean
   fun getExtendedState(): Int
   fun setExtendedState(state: Int)
   fun setSize(width: Int, height: Int)
+  fun getState(): Int
+  fun setState(state: Int)
 }

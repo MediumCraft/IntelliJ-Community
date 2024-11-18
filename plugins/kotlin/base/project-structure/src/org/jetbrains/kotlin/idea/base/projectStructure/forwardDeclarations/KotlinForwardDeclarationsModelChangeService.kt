@@ -1,6 +1,7 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.kotlin.idea.base.projectStructure.forwardDeclarations
 
+import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.OrderRootType
@@ -10,10 +11,10 @@ import com.intellij.openapi.util.registry.Registry
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.platform.backend.workspace.WorkspaceModel
 import com.intellij.platform.workspace.jps.entities.LibraryEntity
+import com.intellij.platform.workspace.jps.entities.modifyLibraryEntity
 import com.intellij.platform.workspace.storage.EntityChange
 import com.intellij.platform.workspace.storage.ImmutableEntityStorage
 import com.intellij.platform.workspace.storage.impl.url.toVirtualFileUrl
-import com.intellij.platform.workspace.jps.entities.modifyEntity
 import com.intellij.util.PathUtil
 import com.intellij.workspaceModel.ide.impl.legacyBridge.library.findLibraryBridge
 import kotlinx.coroutines.CoroutineScope
@@ -23,6 +24,7 @@ import org.jetbrains.kotlin.idea.base.platforms.isKlibLibraryRootForPlatform
 import org.jetbrains.kotlin.idea.base.platforms.platform
 import org.jetbrains.kotlin.idea.base.projectStructure.moduleInfo.NativeKlibLibraryInfo
 import org.jetbrains.kotlin.idea.base.util.caching.getChanges
+import org.jetbrains.kotlin.idea.util.application.isUnitTestMode
 import org.jetbrains.kotlin.platform.idePlatformKind
 import org.jetbrains.kotlin.platform.impl.NativeIdePlatformKind
 import java.io.File
@@ -34,35 +36,31 @@ import java.io.File
  *
  * @see [KotlinForwardDeclarationsFileGenerator]
  */
-@Suppress("LightServiceMigrationCode") // K2-only service
+@Service(Service.Level.PROJECT)
 internal class KotlinForwardDeclarationsModelChangeService(private val project: Project, cs: CoroutineScope) {
     init {
-        if (Registry.`is`("kotlin.k2.kmp.enabled")) {
-            cs.launch {
-                WorkspaceModel.getInstance(project).subscribe { _, changes ->
-                    changes.collect { event ->
-                        val fwdDeclarationChanges = event.getChanges<KotlinForwardDeclarationsWorkspaceEntity>()
-                        cleanUp(fwdDeclarationChanges)
+        cs.launch {
+            WorkspaceModel.getInstance(project).eventLog.collect { event ->
+                val fwdDeclarationChanges = event.getChanges<KotlinForwardDeclarationsWorkspaceEntity>()
+                cleanUp(fwdDeclarationChanges)
 
-                        val libraryChanges = event.getChanges<LibraryEntity>().ifEmpty { return@collect }
+                val libraryChanges = event.getChanges<LibraryEntity>().ifEmpty { return@collect }
 
-                        val nativeKlibLibraryInfos: Map<LibraryEntity, NativeKlibLibraryInfo> =
-                            libraryChanges.toNativeKLibraryInfos(event.storageAfter).ifEmpty { return@collect }
-                        val workspaceModel = WorkspaceModel.getInstance(project)
-                        val createEntityStorageChanges = createEntityStorageChanges(workspaceModel, nativeKlibLibraryInfos)
+                val nativeKlibLibraryInfos: Map<LibraryEntity, NativeKlibLibraryInfo> =
+                    libraryChanges.toNativeKLibraryInfos(event.storageAfter).ifEmpty { return@collect }
+                val workspaceModel = WorkspaceModel.getInstance(project)
+                val createEntityStorageChanges = createEntityStorageChanges(workspaceModel, nativeKlibLibraryInfos)
 
-                        cs.launch {
-                            workspaceModel.update("Kotlin Forward Declarations workspace model update") { storage ->
-                                createEntityStorageChanges.forEach { (libraryEntity, builder) ->
+                cs.launch {
+                    workspaceModel.update("Kotlin Forward Declarations workspace model update") { storage ->
+                        createEntityStorageChanges.forEach { (libraryEntity, builder) ->
 
-                                    // a hack to bypass workspace model issues; without the extra check entity updates lead to recursion
-                                    if (libraryEntity.kotlinForwardDeclarationsWorkspaceEntity == null) {
-                                        storage.modifyEntity(libraryEntity) {
-                                            this.kotlinForwardDeclarationsWorkspaceEntity = builder
-                                        }
-                                        storage.addEntity(builder)
-                                    }
+                            // a hack to bypass workspace model issues; without the extra check entity updates lead to recursion
+                            if (libraryEntity.kotlinForwardDeclarationsWorkspaceEntity == null) {
+                                storage.modifyLibraryEntity(libraryEntity) {
+                                    this.kotlinForwardDeclarationsWorkspaceEntity = builder
                                 }
+                                storage.addEntity(builder)
                             }
                         }
                     }
@@ -128,8 +126,6 @@ internal class KotlinForwardDeclarationsModelChangeService(private val project: 
  */
 internal class KotlinForwardDeclarationsStartupActivity : ProjectActivity {
     override suspend fun execute(project: Project) {
-        if (!Registry.`is`("kotlin.k2.kmp.enabled")) return
-
         project.service<KotlinForwardDeclarationsModelChangeService>()
     }
 }

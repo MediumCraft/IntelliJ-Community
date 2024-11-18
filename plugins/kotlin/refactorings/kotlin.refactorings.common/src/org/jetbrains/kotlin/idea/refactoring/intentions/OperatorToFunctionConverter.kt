@@ -3,13 +3,13 @@ package org.jetbrains.kotlin.idea.codeinsights.impl.base.inspections
 
 import org.jetbrains.annotations.NonNls
 import org.jetbrains.kotlin.analysis.api.analyze
-import org.jetbrains.kotlin.analysis.api.calls.singleFunctionCallOrNull
-import org.jetbrains.kotlin.analysis.api.calls.symbol
+import org.jetbrains.kotlin.analysis.api.resolution.singleFunctionCallOrNull
+import org.jetbrains.kotlin.analysis.api.resolution.symbol
 import org.jetbrains.kotlin.analysis.api.permissions.KaAllowAnalysisFromWriteAction
 import org.jetbrains.kotlin.analysis.api.permissions.KaAllowAnalysisOnEdt
 import org.jetbrains.kotlin.analysis.api.permissions.allowAnalysisFromWriteAction
 import org.jetbrains.kotlin.analysis.api.permissions.allowAnalysisOnEdt
-import org.jetbrains.kotlin.analysis.api.symbols.markers.KtNamedSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.markers.KaNamedSymbol
 import org.jetbrains.kotlin.config.LanguageFeature
 import org.jetbrains.kotlin.idea.base.projectStructure.languageVersionSettings
 import org.jetbrains.kotlin.idea.base.psi.copied
@@ -145,7 +145,7 @@ object OperatorToFunctionConverter {
         @OptIn(KaAllowAnalysisFromWriteAction::class)
         allowAnalysisFromWriteAction {
             analyze(expression) {
-                expression.getKtType()?.isMarkedNullable
+                expression.expressionType?.isMarkedNullable
             }
         }
     }
@@ -155,10 +155,10 @@ object OperatorToFunctionConverter {
         @OptIn(KaAllowAnalysisFromWriteAction::class)
         allowAnalysisFromWriteAction {
             analyze(element) {
-                val resolvedCall = element.resolveCall()?.singleFunctionCallOrNull()
+                val resolvedCall = element.resolveToCall()?.singleFunctionCallOrNull()
                 val targetSymbol = resolvedCall?.partiallyAppliedSymbol?.symbol
 
-                (targetSymbol as? KtNamedSymbol)?.name
+                (targetSymbol as? KaNamedSymbol)?.name
             }
         }
     }
@@ -199,7 +199,7 @@ object OperatorToFunctionConverter {
     private fun convertCall(element: KtCallExpression): KtExpression {
         val callee = element.calleeExpression!!
         val receiver = element.parent?.safeAs<KtQualifiedExpression>()?.receiverExpression
-        val isAnonymousFunctionWithReceiver = receiver != null && callee.safeDeparenthesize() is KtNamedFunction
+        val isAnonymousFunctionWithReceiver = receiver != null && (callee.safeDeparenthesize() as? KtNamedFunction)?.receiverTypeReference != null
         // to skip broken code like Main.({ println("hello")})() which is possible during inline anonymous function.
         // see KotlinInlineAnonymousFunctionProcessor.Companion.findFunction
         // and corresponding test InlineVariableOrProperty.testFunctionalPropertyWithReceiver
@@ -207,7 +207,7 @@ object OperatorToFunctionConverter {
         val argumentsList = element.valueArgumentList
         val argumentString = argumentsList?.text?.removeSurrounding("(", ")") ?: ""
         val argumentsWithReceiverIfNeeded = if (isAnonymousFunctionWithReceiver) {
-            val receiverText = receiver?.text ?: ""
+            val receiverText = receiver.text ?: ""
             val delimiter = if (receiverText.isNotEmpty() && argumentString.isNotEmpty()) ", " else ""
             receiverText + delimiter + argumentString
         } else {
@@ -245,7 +245,7 @@ object OperatorToFunctionConverter {
             return dotExpression.selectorExpression as KtExpression
         }
 
-        val elementToReplace = if (isAnonymousFunctionWithReceiver) element.parent else element
+        val elementToReplace = if (isAnonymousFunctionWithReceiver || isLambdaWithReceiver) element.parent else element
         return elementToReplace.replace(transformed) as KtExpression
     }
 

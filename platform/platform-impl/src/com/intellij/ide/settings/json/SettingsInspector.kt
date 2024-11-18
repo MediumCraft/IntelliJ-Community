@@ -1,15 +1,20 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.settings.json
 
+import com.intellij.codeWithMe.ClientId
 import com.intellij.ide.plugins.PluginManagerCore
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.client.ClientSessionsManager
 import com.intellij.openapi.components.*
 import com.intellij.openapi.extensions.PluginDescriptor
 import com.intellij.serialization.MutableAccessor
 import com.intellij.serviceContainer.ComponentManagerImpl
+import com.intellij.util.xmlb.annotations.OptionTag
 import com.intellij.util.xmlb.getBeanAccessors
+import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.VisibleForTesting
 
+@ApiStatus.Internal
 @VisibleForTesting
 fun buildComponentModel(): JsonSettingsModel.ComponentModel =
   JsonSettingsModel.ComponentModel(listAppComponents().map { descriptor ->
@@ -24,12 +29,12 @@ fun buildComponentModel(): JsonSettingsModel.ComponentModel =
   })
 
 
-internal fun listAppComponents(): List<ComponentDescriptor> {
+@ApiStatus.Internal
+fun listAppComponents(): List<ComponentDescriptor> {
   val descriptors = mutableListOf<ComponentDescriptor>()
-  val componentManager = ApplicationManager.getApplication() as ComponentManagerImpl
-  componentManager.processAllImplementationClasses { aClass, descriptor ->
+  fun processImplementationClass(aClass: Class<*>, descriptor: PluginDescriptor?) {
     if (PersistentStateComponent::class.java.isAssignableFrom(aClass)) {
-      val state = aClass.getAnnotation(State::class.java)
+      val state = getState(aClass)
       @Suppress("UNCHECKED_CAST")
       descriptors.add(
         ComponentDescriptor(
@@ -41,14 +46,27 @@ internal fun listAppComponents(): List<ComponentDescriptor> {
       )
     }
   }
+
+  val componentManager = ApplicationManager.getApplication() as ComponentManagerImpl
+  val localAppSession = ClientSessionsManager.getAppSession(ClientId.localId) as ComponentManagerImpl
+  componentManager.processAllImplementationClasses(::processImplementationClass)
+  localAppSession.processAllImplementationClasses(::processImplementationClass)
+
   descriptors.sortWith(
     compareBy<ComponentDescriptor> { it.name }.thenBy { it.aClass.name }
   )
   return descriptors
 }
 
+private fun getState(aClass: Class<*>): State? {
+  aClass.getAnnotation(State::class.java)?.let { return it }
+  aClass.superclass?.let { return getState(it) }
+  return null
+}
 
-internal data class ComponentDescriptor(
+
+@ApiStatus.Internal
+data class ComponentDescriptor(
   val name: String,
   val aClass: Class<PersistentStateComponent<*>>,
   val pluginDescriptor: PluginDescriptor?,
@@ -110,9 +128,10 @@ internal data class ComponentDescriptor(
       component.state?.let { componentState ->
         val accessors = getBeanAccessors(componentState::class.java)
         accessors.forEach {
-          val jsonName = JsonSettingsModel.toJsonName(it.name)
+          val internalName = it.getInternalName()
+          val jsonName = JsonSettingsModel.toJsonName(internalName)
           infoList += JsonSettingsModel.ComponentPropertyInfo(jsonName,
-                                                              if (it.name == jsonName) null else it.name,
+                                                              if (internalName == jsonName) null else internalName,
                                                               toModelType(it),
                                                               it.valueClass.typeName,
                                                               getVariants(it.valueClass))
@@ -120,6 +139,15 @@ internal data class ComponentDescriptor(
       }
     }
     return infoList
+  }
+
+  private fun MutableAccessor.getInternalName(): String {
+    this.getAnnotation(OptionTag::class.java)?.let {
+      if (it.value.isNotEmpty()) {
+        return it.value
+      }
+    }
+    return this.name
   }
 
 
@@ -135,7 +163,8 @@ internal data class ComponentDescriptor(
     when (accessor.genericType.typeName) {
       "java.util.List<java.lang.String>" -> return JsonSettingsModel.PropertyType.StringList
       "java.util.Set<java.lang.String>" -> return JsonSettingsModel.PropertyType.StringSet
-      "java.util.Collection<java.lang.String>" -> JsonSettingsModel.PropertyType.StringList
+      "java.util.Collection<java.lang.String>" -> return JsonSettingsModel.PropertyType.StringList
+      "java.util.Map<java.lang.String, java.lang.String>" -> return JsonSettingsModel.PropertyType.StringMap
     }
     return JsonSettingsModel.PropertyType.Unsupported
   }

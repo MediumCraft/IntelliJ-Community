@@ -3,15 +3,18 @@ package org.jetbrains.kotlin.idea.k2.codeinsight.fixes
 
 import com.intellij.modcommand.ActionContext
 import com.intellij.modcommand.ModPsiUpdater
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
-import org.jetbrains.kotlin.analysis.api.calls.KtCallableMemberCall
-import org.jetbrains.kotlin.analysis.api.calls.successfulCallOrNull
-import org.jetbrains.kotlin.analysis.api.calls.symbol
+import com.intellij.psi.PsiElement
+import org.jetbrains.annotations.ApiStatus
+import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
+import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.fir.diagnostics.KaFirDiagnostic
-import org.jetbrains.kotlin.analysis.api.symbols.KtNamedClassOrObjectSymbol
-import org.jetbrains.kotlin.analysis.api.symbols.markers.KtSymbolWithVisibility
-import org.jetbrains.kotlin.analysis.api.types.KtNonErrorClassType
-import org.jetbrains.kotlin.descriptors.Modality
+import org.jetbrains.kotlin.analysis.api.resolution.KaCallableMemberCall
+import org.jetbrains.kotlin.analysis.api.resolution.successfulCallOrNull
+import org.jetbrains.kotlin.analysis.api.resolution.symbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaDeclarationSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaNamedClassSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaSymbolModality
+import org.jetbrains.kotlin.analysis.api.types.KaClassType
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.codeinsight.api.applicable.intentions.KotlinPsiUpdateModCommandAction
 import org.jetbrains.kotlin.idea.codeinsight.api.applicators.fixes.KotlinQuickFixFactory
@@ -23,20 +26,20 @@ internal object AddDataModifierFixFactory {
         val element = diagnostic.psi as? KtExpression ?: return@ModCommandBased emptyList()
 
         val callableSymbol = if (element is KtParameter && element.firstChild is KtDestructuringDeclaration) {
-            (element as? KtParameter)?.getParameterSymbol()
+            element.symbol
         } else {
-            element.resolveCall()?.successfulCallOrNull<KtCallableMemberCall<*, *>>()?.symbol
+            element.resolveToCall()?.successfulCallOrNull<KaCallableMemberCall<*, *>>()?.symbol
         }
 
-        val type = (callableSymbol?.returnType as? KtNonErrorClassType)?.ownTypeArguments?.firstOrNull()?.type
+        val type = (callableSymbol?.returnType as? KaClassType)?.typeArguments?.firstOrNull()?.type
             ?: callableSymbol?.returnType
 
-        val classSymbol = (type as? KtNonErrorClassType)?.classSymbol as? KtNamedClassOrObjectSymbol
+        val classSymbol = (type as? KaClassType)?.symbol as? KaNamedClassSymbol
             ?: return@ModCommandBased emptyList()
 
         val modality = classSymbol.modality
-        if (modality != Modality.FINAL || classSymbol.isInner) return@ModCommandBased emptyList()
-        val constructors = classSymbol.getDeclaredMemberScope().getConstructors()
+        if (modality != KaSymbolModality.FINAL || classSymbol.isInner) return@ModCommandBased emptyList()
+        val constructors = classSymbol.declaredMemberScope.constructors
         val ctorParams = constructors.firstOrNull { it.isPrimary }?.valueParameters ?: return@ModCommandBased emptyList()
         if (ctorParams.isEmpty()) return@ModCommandBased emptyList()
 
@@ -76,8 +79,10 @@ internal object AddDataModifierFixFactory {
     }
 }
 
-context(KtAnalysisSession)
-private fun KtSymbolWithVisibility.isVisible(position: KtElement): Boolean {
-    val file = position.containingKtFile.getFileSymbol()
+context(KaSession)
+@ApiStatus.Internal
+@OptIn(KaExperimentalApi::class)
+fun KaDeclarationSymbol.isVisible(position: PsiElement): Boolean {
+    val file = (position.containingFile as? KtFile)?.symbol ?: return false
     return isVisible(this, file, position = position)
 }

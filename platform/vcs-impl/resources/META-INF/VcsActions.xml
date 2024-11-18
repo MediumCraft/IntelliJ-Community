@@ -101,10 +101,7 @@
           <separator/>
           <action id="ChangesView.CreatePatch" class="com.intellij.openapi.vcs.changes.actions.CreatePatchAction"
                   icon="AllIcons.Vcs.Patch"/>
-          <action id="ChangesView.ApplyPatch" class="com.intellij.openapi.vcs.changes.patch.ApplyPatchAction">
-            <add-to-group group-id="ProjectViewPopupMenu" relative-to-action="ProjectViewEditSource" anchor="after"/>
-            <add-to-group group-id="NavbarPopupMenu" relative-to-action="EditSource" anchor="after"/>
-          </action>
+          <action id="ChangesView.ApplyPatch" class="com.intellij.openapi.vcs.changes.patch.ApplyPatchAction"/>
           <action id="ChangesView.ApplyPatchFromClipboard" class="com.intellij.openapi.vcs.changes.patch.ApplyPatchFromClipboardAction"/>
           <action id="ChangesView.Shelve" class="com.intellij.openapi.vcs.changes.shelf.ShelveChangesAction" icon="com.intellij.platform.vcs.impl.icons.PlatformVcsImplIcons.Shelve"/>
         </group>
@@ -456,14 +453,17 @@
         <add-to-group group-id="Diff.EditorGutterPopupMenu.EditorSettings"/>
         <override-text place="popup@DiffToolbar"/>
       </action>
-      <action id="Vcs.Diff.ShowDiffInEditorTab" class="com.intellij.openapi.vcs.changes.actions.diff.MoveDiffPreviewToEditorAction">
+      <action id="Vcs.Diff.ResolveConflictsInImports" class="com.intellij.diff.merge.ResolveConflictsInImportsToggleAction">
+        <add-to-group group-id="Diff.EditorGutterPopupMenu.EditorSettings"/>
+      </action>
+      <action id="Vcs.Diff.ShowDiffInEditorTab" class="com.intellij.diff.editor.MoveDiffEditorAction$ToEditor">
         <add-to-group group-id="Diff.EditorGutterPopupMenu.EditorSettings" anchor="last"/>
         <add-to-group group-id="Diff.Binary.Settings" anchor="last"/>
       </action>
       <group id="Vcs.Diff.EditorTabs.Group" searchable="false">
         <action id="Vcs.Diff.ShowDiffInNewWindow"
                 icon="AllIcons.Actions.MoveToWindow"
-                class="com.intellij.openapi.vcs.changes.actions.diff.MoveDiffPreviewToNewWindowAction">
+                class="com.intellij.diff.editor.MoveDiffEditorAction$ToWindow">
           <add-to-group group-id="Diff.Binary.Settings"/>
         </action>
         <action id="Vcs.Diff.EnableDisableCombinedDiff"
@@ -623,7 +623,6 @@
     <action id="Vcs.ShowConsoleTab" class="com.intellij.vcs.console.ShowVcsConsoleTabAction"/>
 
     <group id="CommitView.GearActions">
-      <action id="CommitView.SwitchToCommitDialog" class="com.intellij.vcs.commit.SwitchToCommitDialogAction"/>
       <group id="CommitView.ShowOnDoubleClick" popup="true" searchable="false">
         <action id="CommitView.ShowOnDoubleClick.EditorPreview"
                 class="com.intellij.openapi.vcs.changes.actions.ShowOnDoubleClickToggleAction$EditorPreview">

@@ -15,6 +15,7 @@ import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.ex.DocumentEx;
 import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.project.DumbService;
+import com.intellij.openapi.project.IndexNotReadyException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Pair;
@@ -29,6 +30,7 @@ import com.intellij.util.ObjectUtils;
 import com.intellij.util.Processor;
 import com.intellij.util.SmartList;
 import com.intellij.util.containers.ContainerUtil;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
@@ -36,9 +38,12 @@ import org.jetbrains.annotations.TestOnly;
 import java.util.*;
 
 @SuppressWarnings("deprecation")
+@ApiStatus.Internal
 public final class InjectedLanguageManagerImpl extends InjectedLanguageManager implements Disposable {
   private static final Logger LOG = Logger.getInstance(InjectedLanguageManagerImpl.class);
   static final Object ourInjectionPsiLock = ObjectUtils.sentinel("injectionPsiLock");
+  public static final Object INJECTION_BACKGROUND_TOOL_ID = ObjectUtils.sentinel("INJECTION_BACKGROUND_ID");
+  public static final Object INJECTION_SYNTAX_TOOL_ID = ObjectUtils.sentinel("INJECTION_BACKGROUND_ID");
   private final Project myProject;
   private final DumbService myDumbService;
   private final PsiDocumentManager myDocManager;
@@ -490,10 +495,13 @@ public final class InjectedLanguageManagerImpl extends InjectedLanguageManager i
       if (!myDumbService.isUsableInCurrentContext(injector)) {
         continue;
       }
-
-      injector.getLanguagesToInject(hostRegistrar, element);
-      InjectionResult result = hostRegistrar.getInjectedResult();
-      if (result != null) return result;
+      try {
+        injector.getLanguagesToInject(hostRegistrar, element);
+        InjectionResult result = hostRegistrar.getInjectedResult();
+        if (result != null) return result;
+      }
+      catch (IndexNotReadyException ignore) {
+      }
     }
     return null;
   }
@@ -513,6 +521,10 @@ public final class InjectedLanguageManagerImpl extends InjectedLanguageManager i
       }
     });
     return result.isEmpty() ? null : result;
+  }
+
+  public static boolean isInjectionRelated(Object toolId) {
+    return toolId == INJECTION_BACKGROUND_TOOL_ID || toolId == INJECTION_SYNTAX_TOOL_ID;
   }
 
   private static class PsiManagerRegisteredInjectorsAdapter implements MultiHostInjector {

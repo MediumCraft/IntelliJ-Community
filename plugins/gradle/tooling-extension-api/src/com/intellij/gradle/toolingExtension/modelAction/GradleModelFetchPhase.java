@@ -15,17 +15,24 @@ public enum GradleModelFetchPhase {
   PROJECT_LOADED_PHASE("Project loaded phase"),
 
   /**
-   * Model provider, in this phase, fetches and caches a Gradle task model into
-   * {@link com.intellij.gradle.toolingExtension.impl.model.taskModel.GradleTaskCache}.
-   * This cache is available by {@link org.jetbrains.plugins.gradle.tooling.ModelBuilderContext}.
+   * Model providers, in this phase, warm up Gradle tasks configurations.
    * <p>
-   * This phase should be first, because this phase evaluates all lazy Task configurations.
-   * These configurations may modify a Gradle project model which is necessary for the following phases.
+   * This phase should be first, because this phase:
+   * 1. Warmed tasks don't throw configuration exceptions during {@link org.gradle.api.Project#getTasks};
+   * 2. It evaluates all lazy task configurations that may modify a Gradle project model which is necessary for the following phases.
    *
    * @see org.gradle.tooling.BuildActionExecuter.Builder#buildFinished
    * @see org.gradle.tooling.BuildActionExecuter#setStreamedValueListener
    */
   WARM_UP_PHASE("Configuration warm-up phase"),
+
+  /**
+   * Model providers, in this phase, fetch a Gradle project identification models.
+   *
+   * @see org.gradle.tooling.BuildActionExecuter.Builder#buildFinished
+   * @see org.gradle.tooling.BuildActionExecuter#setStreamedValueListener
+   */
+  PROJECT_MODEL_PHASE("Project model phase"),
 
   /**
    * Model providers, in this phase, fetch a Gradle project source set models and resolve dependencies.
@@ -46,16 +53,6 @@ public enum GradleModelFetchPhase {
    * @see org.gradle.tooling.BuildActionExecuter#setStreamedValueListener
    */
   PROJECT_SOURCE_SET_DEPENDENCY_PHASE("Project source set dependency phase"),
-
-  /**
-   * Model providers, in this phase, fetch an initial set of Gradle models for IDEA project structure.
-   * These models form a minimal set to start working with a project: basic code insight of source code.
-   * It is module names, source sets and content roots, project and module SDKs, language level, etc.
-   *
-   * @see org.gradle.tooling.BuildActionExecuter.Builder#buildFinished
-   * @see org.gradle.tooling.BuildActionExecuter#setStreamedValueListener
-   */
-  PROJECT_MODEL_PHASE("Project model phase"),
 
   /**
    * Model provides, in this phase, fetches rest of Gradle models, which needed for rich experience in IntelliJ IDEA.

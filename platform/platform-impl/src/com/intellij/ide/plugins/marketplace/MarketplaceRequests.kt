@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.plugins.marketplace
 
 import com.fasterxml.jackson.core.type.TypeReference
@@ -10,25 +10,38 @@ import com.intellij.ide.plugins.PluginNode
 import com.intellij.ide.plugins.auth.PluginRepositoryAuthService
 import com.intellij.ide.plugins.marketplace.utils.MarketplaceUrls
 import com.intellij.ide.plugins.newui.Tags
+import com.intellij.ide.util.PropertiesComponent
+import com.intellij.internal.statistic.eventLog.fus.MachineIdManager
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.PathManager
+import com.intellij.openapi.application.PermanentInstallationID
 import com.intellij.openapi.application.impl.ApplicationInfoImpl
 import com.intellij.openapi.components.serviceOrNull
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.extensions.PluginId
 import com.intellij.openapi.progress.ProgressIndicator
+import com.intellij.openapi.updateSettings.impl.UpdateChecker
 import com.intellij.openapi.updateSettings.impl.pluginsAdvertisement.PluginAdvertiserService
 import com.intellij.openapi.updateSettings.impl.pluginsAdvertisement.PluginAdvertiserService.Companion.marketplaceIdeCodes
 import com.intellij.openapi.util.BuildNumber
 import com.intellij.openapi.util.IntellijInternalApi
+import com.intellij.openapi.util.SystemInfo
 import com.intellij.openapi.util.TimeoutCachedValue
+import com.intellij.openapi.vfs.CharsetToolkit
 import com.intellij.util.PlatformUtils
 import com.intellij.util.concurrency.annotations.RequiresBackgroundThread
 import com.intellij.util.concurrency.annotations.RequiresReadLockAbsence
-import com.intellij.util.io.*
+import com.intellij.util.io.HttpRequests
+import com.intellij.util.io.RequestBuilder
+import com.intellij.util.io.computeDetached
+import com.intellij.util.io.write
 import com.intellij.util.ui.IoErrorText
-import kotlinx.coroutines.*
+import com.intellij.util.withQuery
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.jetbrains.annotations.ApiStatus
@@ -39,9 +52,9 @@ import org.xml.sax.SAXException
 import java.io.IOException
 import java.io.InputStream
 import java.net.HttpURLConnection
-import java.net.SocketTimeoutException
+import java.net.URI
 import java.net.URLConnection
-import java.net.UnknownHostException
+import java.net.URLEncoder
 import java.nio.file.Files
 import java.nio.file.NoSuchFileException
 import java.nio.file.Path
@@ -121,8 +134,25 @@ class MarketplaceRequests(private val coroutineScope: CoroutineScope) : PluginIn
           return emptyList()
         }
 
+        var url = URI(MarketplaceUrls.getSearchCompatibleUpdatesUrl())
+        val os = URLEncoder.encode(SystemInfo.OS_NAME + " " + SystemInfo.OS_VERSION, CharsetToolkit.UTF8)
+        val uid = PermanentInstallationID.get()
+        val machineId = MachineIdManager.getAnonymizedMachineId("JetBrainsUpdates")
+          .takeIf { PropertiesComponent.getInstance().getBoolean(UpdateChecker.MACHINE_ID_DISABLED_PROPERTY, false) }
+
+        val query = buildString {
+          append("build=${ApplicationInfoImpl.orFromPluginCompatibleBuild(buildNumber)}")
+          append("&os=$os")
+          append("&uuid=$uid")
+          if (machineId != null) {
+            append("&machineId=$machineId")
+          }
+        }
+
+        val urlString = url.withQuery(query).toString()
+
         val data = objectMapper.writeValueAsString(CompatibleUpdateRequest(ids, buildNumber))
-        return HttpRequests.post(MarketplaceUrls.getSearchCompatibleUpdatesUrl(), HttpRequests.JSON_CONTENT_TYPE).run {
+        return HttpRequests.post(urlString, HttpRequests.JSON_CONTENT_TYPE).run {
           productNameAsUserAgent()
           throwStatusCodeException(throwExceptions)
           connect {
@@ -130,7 +160,6 @@ class MarketplaceRequests(private val coroutineScope: CoroutineScope) : PluginIn
             objectMapper.readValue(it.inputStream, object : TypeReference<List<IdeCompatibleUpdate>>() {})
           }
         }
-
       }
       catch (e: Exception) {
         LOG.infoOrDebug("Can not get compatible updates from Marketplace", e)
@@ -268,7 +297,7 @@ class MarketplaceRequests(private val coroutineScope: CoroutineScope) : PluginIn
   }
 
   @Throws(IOException::class)
-  suspend fun getFeatures(param: Map<String, String>): List<FeatureImpl> {
+  internal suspend fun getFeatures(param: Map<String, String>): List<FeatureImpl> {
     if (param.isEmpty()) {
       return emptyList()
     }
@@ -309,7 +338,6 @@ class MarketplaceRequests(private val coroutineScope: CoroutineScope) : PluginIn
 
   @RequiresBackgroundThread
   @JvmOverloads
-  @Throws(IOException::class)
   fun getMarketplacePlugins(indicator: ProgressIndicator? = null): Set<PluginId> {
     try {
       return readOrUpdateFile(
@@ -320,25 +348,15 @@ class MarketplaceRequests(private val coroutineScope: CoroutineScope) : PluginIn
         ::parseXmlIds,
       )
     }
-    catch (e: UnknownHostException) {
+    catch (e: IOException) {
       LOG.infoOrDebug("Cannot get plugins from Marketplace", e)
-      return emptySet()
-    }
-    catch (es: SocketTimeoutException) {
-      LOG.infoOrDebug("Cannot get plugins from Marketplace", es)
       return emptySet()
     }
   }
 
   override fun loadPlugins(indicator: ProgressIndicator?): Future<Set<PluginId>> {
     return ApplicationManager.getApplication().executeOnPooledThread(Callable {
-      try {
-        getMarketplacePlugins(indicator)
-      }
-      catch (e: IOException) {
-        LOG.infoOrDebug("Cannot get plugins from Marketplace", e)
-        emptySet()
-      }
+      getMarketplacePlugins(indicator)
     })
   }
 
@@ -382,14 +400,15 @@ class MarketplaceRequests(private val coroutineScope: CoroutineScope) : PluginIn
         val pluginNode = it.toPluginNode()
 
         if (it.externalUpdateId != null) return@mapNotNull pluginNode
-        if (it.nearestUpdate == null) return@mapNotNull null
-        if (it.nearestUpdate.compatible) return@mapNotNull pluginNode
+        val nearestUpdate = it.nearestUpdate
+        if (nearestUpdate == null) return@mapNotNull null
+        if (nearestUpdate.compatible) return@mapNotNull pluginNode
 
         // filter out plugins which version is not compatible with the current IDE version,
         // but they have versions compatible with Community
         if (includeIncompatible
-            && !it.nearestUpdate.supports(activeProductCode)
-            && it.nearestUpdate.supports(suggestedIdeCode)) {
+            && !nearestUpdate.supports(activeProductCode)
+            && nearestUpdate.supports(suggestedIdeCode)) {
 
           pluginNode.suggestedCommercialIde = suggestedIdeCode
           pluginNode.tags = getTagsForUi(pluginNode).distinct()
@@ -542,14 +561,14 @@ class MarketplaceRequests(private val coroutineScope: CoroutineScope) : PluginIn
 
   @RequiresBackgroundThread
   @RequiresReadLockAbsence
-  fun loadPluginMetadata(pluginNode: PluginNode): IntellijPluginMetadata? {
+  internal fun loadPluginMetadata(pluginNode: PluginNode): IntellijPluginMetadata? {
     val externalPluginId = pluginNode.externalPluginId ?: return null
     return loadPluginMetadata(externalPluginId)
   }
 
   @RequiresBackgroundThread
   @RequiresReadLockAbsence
-  fun loadPluginMetadata(externalPluginId: String): IntellijPluginMetadata? {
+  internal fun loadPluginMetadata(externalPluginId: String): IntellijPluginMetadata? {
     try {
       return readOrUpdateFile(
         Paths.get(PathManager.getPluginTempPath(), "${externalPluginId}-meta.json"),

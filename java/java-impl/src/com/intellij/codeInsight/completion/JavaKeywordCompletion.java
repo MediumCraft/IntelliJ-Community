@@ -36,6 +36,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 import static com.intellij.codeInsight.completion.JavaCompletionContributor.IN_CASE_LABEL_ELEMENT_LIST;
 import static com.intellij.openapi.util.Conditions.notInstanceOf;
@@ -524,11 +525,12 @@ public class JavaKeywordCompletion {
   private void addCaseDefault() {
     PsiSwitchBlock switchBlock = getSwitchFromLabelPosition(myPosition);
     if (switchBlock == null) return;
-    if (SwitchUtils.findDefaultElement(switchBlock) != null) {
+    PsiElement defaultElement = SwitchUtils.findDefaultElement(switchBlock);
+    if (defaultElement != null && defaultElement.getTextRange().getStartOffset() < myPosition.getTextRange().getStartOffset()) return;
+    addKeyword(new OverridableSpace(createKeyword(PsiKeyword.CASE), TailTypes.insertSpaceType()));
+    if (defaultElement != null) {
       return;
     }
-    addKeyword(new OverridableSpace(createKeyword(PsiKeyword.CASE), TailTypes.insertSpaceType()));
-
     final OverridableSpace defaultCaseRule =
       new OverridableSpace(createKeyword(PsiKeyword.DEFAULT), JavaTailTypes.forSwitchLabel(switchBlock));
     addKeyword(prioritizeForRule(LookupElementDecorator.withInsertHandler(defaultCaseRule, ADJUST_LINE_OFFSET), switchBlock));
@@ -542,6 +544,9 @@ public class JavaKeywordCompletion {
 
     final PsiType selectorType = getSelectorType(switchBlock);
     if (selectorType == null || selectorType instanceof PsiPrimitiveType) return;
+
+    PsiElement defaultElement = SwitchUtils.findDefaultElement(switchBlock);
+    if (defaultElement != null && defaultElement.getTextRange().getStartOffset() < myPosition.getTextRange().getStartOffset()) return;
 
     final TailType caseRuleTail = JavaTailTypes.forSwitchLabel(switchBlock);
     Set<String> containedLabels = getSwitchCoveredLabels(switchBlock, myPosition);
@@ -838,6 +843,10 @@ public class JavaKeywordCompletion {
     if (PsiUtil.isAvailable(JavaFeature.STATIC_IMPORTS, file) && myPrevLeaf != null && myPrevLeaf.textMatches(PsiKeyword.IMPORT)) {
       addKeyword(new OverridableSpace(createKeyword(PsiKeyword.STATIC), TailTypes.humbleSpaceBeforeWordType()));
     }
+
+    if (PsiUtil.isAvailable(JavaFeature.MODULE_IMPORT_DECLARATIONS, file) && myPrevLeaf != null && myPrevLeaf.textMatches(PsiKeyword.IMPORT)) {
+      addKeyword(new OverridableSpace(createKeyword(PsiKeyword.MODULE), TailTypes.humbleSpaceBeforeWordType()));
+    }
   }
 
   private void addInstanceof() {
@@ -984,7 +993,8 @@ public class JavaKeywordCompletion {
     String name = file.getName();
     if (!StringUtil.endsWithIgnoreCase(name, JavaFileType.DOT_DEFAULT_EXTENSION)) return null;
     String candidate = name.substring(0, name.length() - JavaFileType.DOT_DEFAULT_EXTENSION.length());
-    if (StringUtil.isJavaIdentifier(candidate) && !ContainerUtil.exists(file.getClasses(), c -> candidate.equals(c.getName()))) {
+    if (StringUtil.isJavaIdentifier(candidate)
+        && !ContainerUtil.exists(file.getClasses(), c -> !(c instanceof PsiImplicitClass) && candidate.equals(c.getName()))) {
       return candidate;
     }
     return null;
@@ -1183,6 +1193,22 @@ public class JavaKeywordCompletion {
       PsiSwitchBlock switchBlock = PsiTreeUtil.getParentOfType(position, PsiSwitchBlock.class);
       if (switchBlock != null && switchBlock.getExpression() != null) {
         JavaPatternCompletionUtil.suggestPrimitiveTypesForPattern(position, switchBlock.getExpression().getType(), result);
+      }
+      if (switchBlock != null && switchBlock.getExpression() != null) {
+        PsiType type = switchBlock.getExpression().getType();
+        if (PsiTypes.booleanType().equals(PsiPrimitiveType.getOptionallyUnboxedType(type))) {
+          Set<String> branches = SwitchUtils.getSwitchBranches(switchBlock).stream()
+            .map(branch -> branch instanceof PsiExpression expression ? ExpressionUtils.computeConstantExpression(expression) : null)
+            .filter(constant -> constant instanceof Boolean)
+            .map(branch -> branch.toString())
+            .collect(Collectors.toSet());
+          TailType tailType = JavaTailTypes.forSwitchLabel(switchBlock);
+          for (String keyword : List.of(PsiKeyword.TRUE, PsiKeyword.FALSE)) {
+            if(branches.contains(keyword)) continue;
+            result.accept(new JavaKeywordCompletion.OverridableSpace(
+              BasicExpressionCompletionContributor.createKeywordLookupItem(position, keyword), tailType));
+          }
+        }
       }
       return;
     }

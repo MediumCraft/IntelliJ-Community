@@ -48,7 +48,7 @@
 
     <localInspection implementationClass="org.jetbrains.kotlin.idea.codeInsight.inspections.shared.RedundantEmptyInitializerBlockInspection"
                      groupPath="Kotlin"
-                     groupBundle="messages.KotlinBundle" groupKey="group.names.other.problems"
+                     groupBundle="messages.KotlinBundle" groupKey="group.names.redundant.constructs"
                      enabledByDefault="true"
                      level="WEAK WARNING"
                      language="kotlin" editorAttributes="NOT_USED_ELEMENT_ATTRIBUTES"
@@ -205,7 +205,6 @@
             groupPath="Kotlin"
             groupBundle="messages.KotlinBundle" groupKey="group.names.other.problems"
             enabledByDefault="true"
-            cleanupTool="false"
             level="WARNING"
             language="JAVA"
             key="inspection.enum.values.method.soft.deprecate.in.java.display.name" bundle="messages.KotlinBundle"/>
@@ -217,6 +216,7 @@
             enabledByDefault="false"
             level="WEAK WARNING"
             language="kotlin"
+            cleanupTool="true"
             key="inspection.redundant.value.argument.display.name" bundle="messages.KotlinBundle"/>
 
     <localInspection
@@ -318,7 +318,7 @@
 
     <localInspection implementationClass="org.jetbrains.kotlin.idea.codeInsight.inspections.shared.ControlFlowWithEmptyBodyInspection"
                      groupPath="Kotlin"
-                     groupBundle="messages.KotlinBundle" groupKey="group.names.probable.bugs"
+                     groupBundle="messages.KotlinBundle" groupKey="group.names.redundant.constructs"
                      enabledByDefault="true"
                      level="WARNING"
                      language="kotlin"
@@ -334,6 +334,10 @@
 
     <codeInsight.unresolvedReferenceQuickFixProvider
             implementation="org.jetbrains.kotlin.idea.codeInsight.inspections.shared.libraries.AddKotlinCoroutinesQuickFixProvider"/>
+
+    <codeInsight.unresolvedReferenceQuickFixProvider
+            implementation="org.jetbrains.kotlin.idea.codeInsight.inspections.shared.libraries.AddKotlinTestLibraryQuickFixProvider"/>
+
     <localInspection implementationClass="org.jetbrains.kotlin.idea.codeInsight.inspections.shared.InfixCallToOrdinaryInspection"
                      groupPath="Kotlin"
                      groupBundle="messages.KotlinBundle" groupKey="group.names.code.migration"
@@ -355,5 +359,22 @@
                      level="WEAK WARNING" enabledByDefault="true"
                      key="inspection.complex.redundant.let.display.name" bundle="messages.KotlinBundle"/>
 
+    <localInspection implementationClass="org.jetbrains.kotlin.idea.codeInsight.inspections.shared.SuspiciousCollectionReassignmentInspection"
+                     groupPath="Kotlin"
+                     groupBundle="messages.KotlinBundle" groupKey="group.names.probable.bugs"
+                     enabledByDefault="true"
+                     level="WEAK WARNING"
+                     language="kotlin"
+                     key="inspection.suspicious.collection.reassignment.display.name" bundle="messages.KotlinBundle"/>
+
+    <globalInspection groupPath="Kotlin" language="kotlin"
+                      groupBundle="messages.KotlinBundle"
+                      groupKey="group.names.coroutine"
+                      bundle="messages.KotlinBundle"
+                      key="inspection.runblocking.presentation.display.name"
+                      enabledByDefault="true"
+                      level="WARNING"
+                      implementationClass="org.jetbrains.kotlin.idea.codeInsight.inspections.shared.runBlocking.RunBlockingInspection"
+                      presentation="org.jetbrains.kotlin.idea.codeInsight.inspections.shared.runBlocking.RunBlockingInspectionPresentation"/>
   </extensions>
 </idea-plugin>

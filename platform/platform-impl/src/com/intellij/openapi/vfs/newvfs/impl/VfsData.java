@@ -43,7 +43,7 @@ import java.util.concurrent.atomic.AtomicReferenceArray;
  * <li> The file has not been instantiated yet, so {@link #getFileById} returns null. </li>
  *
  * <li> A file is explicitly requested by calling getChildren or findChild on its parent. The parent initializes all the necessary data (in a thread-safe context)
- * and creates the file instance. See {@link Segment#initFileData(int, Object)} </li>
+ * and creates the file instance. See {@link Segment#initFileData(int, Object, VirtualDirectoryImpl)} </li>
  *
  * <li> After that the file is live, an object representing it can be retrieved any time from its parent. File system roots are
  * kept on hard references in {@link PersistentFS} </li>
@@ -55,6 +55,7 @@ import java.util.concurrent.atomic.AtomicReferenceArray;
  * Dead ids won't be reused in the same session of the IDE. </li>
  * </ol>
  */
+@ApiStatus.Internal
 public final class VfsData {
   private static final Logger LOG = Logger.getInstance(VfsData.class);
 
@@ -225,8 +226,13 @@ public final class VfsData {
     private final AtomicReferenceArray<Object> objectFieldsArray;
 
     /**
-     * fields cortege [nameId, flags] per fileId
-     * flag's lowest 3 bytes are used as modificationCounter
+     * [flags | modCount] per fileId
+     * Currently it is single int32 per fileId: flag bits (highest byte) and modificationCounter (lowest 3 bytes)
+     * Flags are from {@link VirtualFileSystemEntry.VfsDataFlags}: they are a subset of underlying {@link PersistentFS.Flags},
+     * see {@link VirtualDirectoryImpl#createChildImpl(int, int, int, boolean)} for an assignment.
+     * Modification counter is separated from underlying {@link FSRecordsImpl#getModCount(int)}: it is transient (not persistent),
+     * and incremented only on file _content_ modification, while {@link FSRecordsImpl#getModCount(int)} is incremented on _any_
+     * file attribute/content/etc change.
      */
     private final AtomicIntegerArray intFieldsArray;
 
@@ -328,12 +334,13 @@ public final class VfsData {
     }
 
     //@GuardedBy("parent.DirectoryData")
-    void initFileData(int fileId, @NotNull Object fileData) throws FileAlreadyCreatedException {
+    void initFileData(int fileId, @NotNull Object fileData, @NotNull VirtualDirectoryImpl parent) throws FileAlreadyCreatedException {
       int offset = objectOffsetInSegment(fileId);
 
       Object existingData = objectFieldsArray.get(offset);
       if (existingData != null) {
-        //RC: it seems like concurrency issue, really -- check the locks acquired up the stack in all invocation traces
+        //RC: it seems like concurrency issue, but I can't find a specific location
+        //MAYBE RC: don't throw the exception -- if an entry was already created, so be it, log warn and go on?
 
         FSRecordsImpl vfsPeer = owningVfsData.owningPersistentFS.peer();
         int parentId = vfsPeer.getParent(fileId);
@@ -344,10 +351,11 @@ public final class VfsData {
           describeAlreadyCreatedFile(fileId)
           + " data: " + fileData
           + ", alreadyExistingData: " + existingData
-          + ", parentData: " + parentData
+          + ", parentData: " + parentData + ", parent.data: " + parent.myData + " equals: " + (parentData == parent.myData)
           + ", synchronized(parentData): " + (parentData != null ? Thread.holdsLock(parentData) : "...")
         );
       }
+
       objectFieldsArray.set(offset, fileData);
     }
 

@@ -5,7 +5,6 @@ import com.intellij.internal.statistic.DeviceIdManager
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.diagnostic.runAndLogException
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.project.UnindexedFilesScannerExecutor
 import com.intellij.openapi.util.registry.Registry
 import com.intellij.util.SmartList
 import com.intellij.util.indexing.UnindexedFilesUpdater
@@ -35,9 +34,9 @@ internal sealed interface ProjectIndexableFilesFilterHolder {
 
   fun findProjectsForFile(fileId: Int): List<Project>
 
-  fun onProjectClosing(project: Project)
+  fun onProjectClosing(project: Project, vfsCreationTimestamp: Long)
 
-  fun onProjectOpened(project: Project)
+  fun onProjectOpened(project: Project, vfsCreationTimestamp: Long)
 
   /**
    * This is a temp method
@@ -50,14 +49,14 @@ private val log = logger<IncrementalProjectIndexableFilesFilterHolder>()
 internal class IncrementalProjectIndexableFilesFilterHolder : ProjectIndexableFilesFilterHolder {
   private val myProjectFilters: ConcurrentMap<Project, ProjectIndexableFilesFilter> = ConcurrentHashMap()
 
-  override fun onProjectClosing(project: Project) {
+  override fun onProjectClosing(project: Project, vfsCreationTimestamp: Long) {
     val pair = myProjectFilters.remove(project)
-    pair?.onProjectClosing(project)
+    pair?.onProjectClosing(project, vfsCreationTimestamp)
   }
 
-  override fun onProjectOpened(project: Project) {
+  override fun onProjectOpened(project: Project, vfsCreationTimestamp: Long) {
     val factory = chooseFactory(project.name)
-    myProjectFilters[project] = factory.create(project)
+    myProjectFilters[project] = factory.create(project, vfsCreationTimestamp)
   }
 
   private fun chooseFactory(projectName: String): ProjectIndexableFilesFilterFactory {
@@ -86,14 +85,14 @@ internal class IncrementalProjectIndexableFilesFilterHolder : ProjectIndexableFi
   }
 
   override fun getProjectIndexableFiles(project: Project): ProjectIndexableFilesFilter? {
-    if (!isFirstProjectScanningPerformed(project) || UnindexedFilesScannerExecutor.getInstance(project).isRunning.value) {
+    if (!isFirstProjectScanningPerformed(project) || UnindexedFilesUpdater.isScanningInProgress(project)) {
       return null
     }
     return getFilter(project)
   }
 
   override fun resetFileIds(project: Project) {
-    assert(UnindexedFilesUpdater.isIndexUpdateInProgress(project))
+    assert(UnindexedFilesUpdater.isScanningInProgress(project))
 
     getFilter(project)?.resetFileIds()
   }

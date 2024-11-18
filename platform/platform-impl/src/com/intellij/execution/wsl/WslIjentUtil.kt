@@ -1,6 +1,8 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 @file:JvmName("WslIjentUtil")
 @file:Suppress("RAW_RUN_BLOCKING")  // These functions are called by different legacy code, a ProgressIndicator is not always available.
+@file:ApiStatus.Internal
+
 package com.intellij.execution.wsl
 
 import com.intellij.execution.CommandLineUtil.posixQuote
@@ -12,14 +14,15 @@ import com.intellij.openapi.diagnostic.debug
 import com.intellij.openapi.progress.runBlockingCancellable
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.io.FileUtil
+import com.intellij.platform.eel.EelExecApi
+import com.intellij.platform.eel.EelResult
 import com.intellij.platform.ijent.IjentChildProcess
-import com.intellij.platform.ijent.IjentExecApi
-import com.intellij.platform.ijent.IjentId
 import com.intellij.util.concurrency.annotations.RequiresBackgroundThread
 import com.intellij.util.concurrency.annotations.RequiresBlockingContext
 import com.intellij.util.suspendingLazy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.DelicateCoroutinesApi
+import org.jetbrains.annotations.ApiStatus
 import java.io.IOException
 
 /**
@@ -118,7 +121,7 @@ fun runProcessBlocking(
   val exePath = FileUtil.toSystemIndependentName(args.removeFirst())
 
   val pty = ptyOptions?.run {
-    IjentExecApi.Pty(initialColumns, initialRows, !consoleMode)
+    EelExecApi.Pty(initialColumns, initialRows, !consoleMode)
   }
 
   val workingDirectory = processBuilder.directory()?.toPath()?.let { windowsWorkingDirectory ->
@@ -130,22 +133,31 @@ fun runProcessBlocking(
   }
 
   val scope = @OptIn(DelicateCoroutinesApi::class) (wslIjentManager.processAdapterScope)
-  when (val processResult = ijentApi.exec.executeProcessBuilder(exePath)
-    .args(args)
-    .env(explicitEnvironmentVariables)
-    .pty(pty)
-    .workingDirectory(workingDirectory)
-    .execute()
-  ) {
-    is IjentExecApi.ExecuteProcessResult.Success -> processResult.process.toProcess(scope, ijentApi.id, pty != null)
-    is IjentExecApi.ExecuteProcessResult.Failure -> throw IOException(processResult.message)
+  when (val processResult = ijentApi.exec.execute(EelExecApi.ExecuteProcessOptions.Builder(exePath)
+                                                    .args(args)
+                                                    .env(explicitEnvironmentVariables)
+                                                    .pty(pty)
+                                                    .workingDirectory(workingDirectory)
+                                                    .build()
+  )) {
+    is EelResult.Ok ->
+      (processResult.value as IjentChildProcess).toProcess(
+        coroutineScope = scope,
+        isPty = pty != null,
+        redirectStderr = processBuilder.redirectErrorStream(),
+      )
+    is EelResult.Error -> throw IOException(processResult.error.message)
   }
 }
 
-private fun IjentChildProcess.toProcess(coroutineScope: CoroutineScope, ijentId: IjentId, isPty: Boolean): Process =
+private fun IjentChildProcess.toProcess(
+  coroutineScope: CoroutineScope,
+  isPty: Boolean,
+  redirectStderr: Boolean,
+): Process =
   if (isPty)
-    IjentChildPtyProcessAdapter(coroutineScope, ijentId, this)
+    IjentChildPtyProcessAdapter(coroutineScope, this)
   else
-    IjentChildProcessAdapter(coroutineScope,ijentId, this)
+    IjentChildProcessAdapter(coroutineScope, this, redirectStderr)
 
 private val LOG by lazy { Logger.getInstance("com.intellij.execution.wsl.WslIjentUtil") }

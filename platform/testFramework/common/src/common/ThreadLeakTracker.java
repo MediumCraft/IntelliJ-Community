@@ -13,6 +13,7 @@ import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.io.FilePageCacheLockFree;
 import com.intellij.util.ui.EDT;
 import com.intellij.util.ui.UIUtil;
+import java.util.concurrent.locks.LockSupport;
 import org.jetbrains.annotations.ApiStatus.Internal;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.TestOnly;
@@ -67,6 +68,7 @@ public final class ThreadLeakTracker {
       "BatchSpanProcessor_WorkerThread", // io.opentelemetry.sdk.trace.export.BatchSpanProcessor.WORKER_THREAD_NAME
       "Batik CleanerThread",
       "BC Entropy Daemon",
+      "CefHandlers-",
       "Cidr Symbol Building Thread", // ForkJoinPool com.jetbrains.cidr.lang.symbols.symtable.building.OCBuildingActivityExecutionService
       "Cleaner-0", // Thread[Cleaner-0,8,InnocuousThreadGroup], java.lang.ref.Cleaner in android layoutlib, Java9+
       "CompilerThread0",
@@ -93,10 +95,12 @@ public final class ThreadLeakTracker {
       "Monitor Ctrl-Break",
       "Netty ",
       "ObjectCleanerThread",
-      "OkHttp ConnectionPool", // Dockers okhttp3.internal.connection.RealConnectionPool
+      // see okhttp3.ConnectionPool: "this pool holds up to 5 idle connections which will be evicted after 5 minutes of inactivity"
+      "OkHttp ",
       "Okio Watchdog", // Dockers "okio.AsyncTimeout.Watchdog"
       "Periodic tasks thread", // com.intellij.util.concurrency.AppDelayQueue.TransferThread
       "process reaper", // Thread[#46,process reaper(pid7496),10,InnocuousThreadGroup] (since JDK-8279488 part of InnocuousThreadGroup)
+      "qtp", // used in tests for mocking via WireMock in integration testing
       "rd throttler", // daemon thread created by com.jetbrains.rd.util.AdditionalApiKt.getTimer
       "Reference Handler",
       "RMI GC Daemon",
@@ -105,6 +109,7 @@ public final class ThreadLeakTracker {
       "Shared Index Hash Index Flushing Queue",
       "Signal Dispatcher",
       "tc-okhttp-stream", // Dockers "com.github.dockerjava.okhttp.UnixDomainSocket.recv"
+      "testcontainers",
       "timer-int", //serverIm,
       "timer-sys", //clientIm,
       "TimerQueue",
@@ -177,6 +182,8 @@ public final class ThreadLeakTracker {
       // after some time, the submitted task can finish and the thread can become idle
       stackTrace = thread.getStackTrace();
       if (shouldIgnore(thread, stackTrace)) break;
+      // avoid busy-waiting, otherwise other threads might yield priority to this one (see sleepIfNeededToGivePriorityToAnotherThread)
+      LockSupport.parkNanos(10_000_000);
     }
 
     // check once more because the thread name may be set via race

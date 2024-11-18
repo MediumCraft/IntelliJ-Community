@@ -26,6 +26,7 @@ import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.psi.util.RedundantCastUtil;
 import com.intellij.refactoring.inline.InlineTransformer;
+import com.intellij.util.ArrayUtil;
 import com.intellij.util.CommonJavaRefactoringUtil;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.containers.ContainerUtil;
@@ -214,7 +215,14 @@ public final class InlineUtil implements CommonJavaInlineUtil {
     }
     if (callParent instanceof PsiExpression && BoolUtils.isNegation((PsiExpression)callParent)) {
       PsiElement negationParent = PsiUtil.skipParenthesizedExprUp(callParent.getParent());
-      if (negationParent instanceof PsiReturnStatement || negationParent instanceof PsiLambdaExpression) {
+      if (negationParent instanceof PsiPolyadicExpression polyOp &&
+          (polyOp.getOperationTokenType().equals(JavaTokenType.ANDAND) || polyOp.getOperationTokenType().equals(JavaTokenType.OROR)) &&
+          PsiTreeUtil.isAncestor(ArrayUtil.getLastElement(polyOp.getOperands()), callParent, false)) {
+        negationParent = PsiUtil.skipParenthesizedExprUp(negationParent.getParent());
+      }
+      if (negationParent instanceof PsiReturnStatement ||
+          negationParent instanceof PsiYieldStatement || 
+          negationParent instanceof PsiLambdaExpression) {
         return TailCallType.Invert;
       }
     }
@@ -543,10 +551,21 @@ public final class InlineUtil implements CommonJavaInlineUtil {
         if (!(list.getParent() instanceof PsiCallExpression call)) return false;
         PsiExpression qualifier = call instanceof PsiMethodCallExpression methodCall ? methodCall.getMethodExpression().getQualifierExpression() :
                                   call instanceof PsiNewExpression newExpression ? newExpression.getQualifier() : null;
-        if (qualifier != null && !ExpressionUtils.isSafelyRecomputableExpression(qualifier)) return false;
+        if (qualifier != null &&
+            !(ExpressionUtils.isSafelyRecomputableExpression(qualifier) ||
+              qualifier instanceof PsiReferenceExpression qualifierRef && qualifierRef.resolve() instanceof PsiClass)) {
+          return false;
+        }
         cur = call;
-      }
-      else if (parent instanceof PsiReferenceExpression ref) {
+      } else if (parent instanceof PsiAssignmentExpression assign && assign.getRExpression() == cur) {
+        PsiExpression lExpression = assign.getLExpression();
+        if (lExpression instanceof PsiReferenceExpression lRef &&
+            (lRef.getQualifierExpression() == null || lRef.getQualifierExpression() instanceof PsiQualifiedExpression)) {
+          cur = assign;
+        } else {
+          return false;
+        }
+      } else if (parent instanceof PsiReferenceExpression ref) {
         if (parent.getParent() instanceof PsiMethodCallExpression call) {
           cur = call;
         } else {
@@ -744,9 +763,13 @@ public final class InlineUtil implements CommonJavaInlineUtil {
 
 
     boolean isAccessedForWriting = false;
+    boolean usedAsResource = false;
     for (PsiReferenceExpression refElement : refs) {
       if (PsiUtil.isAccessedForWriting(refElement)) {
         isAccessedForWriting = true;
+      }
+      if (refElement.getParent() instanceof PsiResourceExpression) {
+        usedAsResource = true;
       }
     }
 
@@ -754,6 +777,7 @@ public final class InlineUtil implements CommonJavaInlineUtil {
     Project project = variable.getProject();
     boolean canInline = refs.size() == 1 && !isAccessedForWriting && isFirstUse(variable, refs.get(0)) ||
                         canInlineParameterOrThisVariable(project, initializer, shouldBeFinal, strictlyFinal, refs.size(), isAccessedForWriting);
+    canInline &= !usedAsResource;
     if (canInline) {
       if (shouldBeFinal) {
         declareUsedLocalsFinal(initializer, true);

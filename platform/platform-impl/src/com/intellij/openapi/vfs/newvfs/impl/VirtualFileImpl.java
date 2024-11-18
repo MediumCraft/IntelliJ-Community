@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.vfs.newvfs.impl;
 
 import com.intellij.openapi.application.ApplicationManager;
@@ -10,10 +10,10 @@ import com.intellij.openapi.fileTypes.ex.FileTypeManagerEx;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.io.FileTooBigException;
-import com.intellij.openapi.util.io.FileUtilRt;
 import com.intellij.openapi.vfs.LargeFileWriteRequestor;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.vfs.VirtualFileUtil;
 import com.intellij.openapi.vfs.newvfs.NewVirtualFile;
 import com.intellij.openapi.vfs.newvfs.NewVirtualFileSystem;
 import com.intellij.util.LineSeparator;
@@ -112,23 +112,30 @@ public final class VirtualFileImpl extends VirtualFileSystemEntry {
   @Override
   public byte @NotNull [] contentsToByteArray(boolean cacheContent) throws IOException {
     checkNotTooLarge(null);
-    final byte[] preloadedContent = getUserData(ourPreloadedContentKey);
-    if (preloadedContent != null) return preloadedContent;
-    byte[] bytes = owningPersistentFS().contentsToByteArray(this, cacheContent);
-    if (!isCharsetSet()) {
-      // optimisation: take the opportunity to not load bytes again in getCharset()
-      // use getFileTypeByFile(..., bytes) to not fall into recursive trap from vfile.getFileType() which would try to load contents again to detect charset
-      FileType fileType = FileTypeManagerEx.getInstanceEx().getFileTypeByFile(this, bytes);
+    byte[] preloadedContent = getUserData(ourPreloadedContentKey);
+    if (preloadedContent != null) {
+      return preloadedContent;
+    }
 
-      if (fileType != UnknownFileType.INSTANCE && !fileType.isBinary() && bytes.length != 0) {
-        try {
-          // execute in impatient mode to not deadlock when the indexing process waits under write action for the queue to load contents in other threads
-          // and that other thread asks JspManager for encoding which requires read action for PSI
-          ((ApplicationEx)ApplicationManager.getApplication())
-            .executeByImpatientReader(() -> LoadTextUtil.detectCharsetAndSetBOM(this, bytes, fileType));
-        }
-        catch (ProcessCanceledException ignored) {
-        }
+    byte[] bytes = owningPersistentFS().contentsToByteArray(this, cacheContent);
+    if (isCharsetSet()) {
+      return bytes;
+    }
+
+    // optimization: take the opportunity to not load bytes again in getCharset()
+    // use getFileTypeByFile(..., bytes) to not fall into a recursive trap from vfile.getFileType()
+    // which would try to load contents again to detect charset
+    FileType fileType = FileTypeManagerEx.getInstanceEx().getFileTypeByFile(this, bytes);
+
+    if (fileType != UnknownFileType.INSTANCE && !fileType.isBinary() && bytes.length != 0) {
+      try {
+        // execute in impatient mode
+        // to not deadlock when the indexing process waits under a write action for the queue to load contents in other threads
+        // and that another thread asks JspManager for encoding which requires read action for PSI
+        ((ApplicationEx)ApplicationManager.getApplication())
+          .executeByImpatientReader(() -> LoadTextUtil.detectCharsetAndSetBOM(this, bytes, fileType));
+      }
+      catch (ProcessCanceledException ignored) {
       }
     }
     return bytes;
@@ -190,7 +197,7 @@ public final class VirtualFileImpl extends VirtualFileSystemEntry {
   }
 
   private void checkNotTooLarge(@Nullable Object requestor) throws FileTooBigException {
-    if (!(requestor instanceof LargeFileWriteRequestor) && FileUtilRt.isTooLarge(getLength())) throw new FileTooBigException(getPath());
+    if (!(requestor instanceof LargeFileWriteRequestor) && VirtualFileUtil.isTooLarge(this)) throw new FileTooBigException(getPath());
   }
 
   @Override

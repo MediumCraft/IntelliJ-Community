@@ -8,7 +8,7 @@ import com.google.gson.reflect.TypeToken
 import com.intellij.diagnostic.MacOSDiagnosticReportDirectories
 import com.intellij.diagnostic.PerformanceWatcher
 import com.intellij.ide.IdeBundle
-import com.intellij.ide.actions.CollectZippedLogsAction
+import com.intellij.ide.actions.COLLECT_LOGS_NOTIFICATION_GROUP
 import com.intellij.ide.troubleshooting.CompositeGeneralTroubleInfoCollector
 import com.intellij.ide.troubleshooting.collectDimensionServiceDiagnosticsData
 import com.intellij.idea.LoggerFactory
@@ -17,12 +17,13 @@ import com.intellij.notification.NotificationType
 import com.intellij.openapi.application.ApplicationNamesInfo
 import com.intellij.openapi.application.PathManager
 import com.intellij.openapi.diagnostic.Logger
-import com.intellij.openapi.progress.*
+import com.intellij.openapi.progress.ProgressManager
+import com.intellij.openapi.progress.checkCanceled
+import com.intellij.openapi.progress.coroutineToIndicator
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.SystemInfoRt
 import com.intellij.openapi.util.io.BufferExposingByteArrayOutputStream
-import com.intellij.platform.util.progress.indeterminateStep
-import com.intellij.platform.util.progress.withRawProgressReporter
+import com.intellij.platform.util.progress.reportProgress
 import com.intellij.troubleshooting.TroubleInfoCollector
 import com.intellij.util.SystemProperties
 import com.intellij.util.concurrency.annotations.RequiresBackgroundThread
@@ -38,7 +39,6 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
-import java.nio.file.NoSuchFileException
 import java.nio.file.Path
 import java.text.SimpleDateFormat
 import java.util.*
@@ -80,22 +80,7 @@ object LogPacker {
             for (dir in entry.files) {
               if (dir.exists()) {
                 val dirPrefix = if (entry.entryName.isNotEmpty()) "${entry.entryName}/${dir.name}" else ""
-                if (dir == PathManager.getLogDir()) {
-                  // OT files are added/removed every minute, so they need special treatment
-                  zip.filter { _, file -> file?.name?.startsWith("open-telemetry-") == false }
-                  zip.addDirectory(dirPrefix, dir)
-                  zip.filter(null)
-                  dir.listDirectoryEntries("open-telemetry-*").forEach { file ->
-                    val entryName = if (dirPrefix.isNotEmpty()) "${dirPrefix}/${file.name}" else file.name
-                    try {
-                      zip.addFile(entryName, file)
-                    }
-                    catch (_: NoSuchFileException) { }
-                  }
-                }
-                else {
-                  zip.addDirectory(dirPrefix, dir)
-                }
+                zip.addDirectory(dirPrefix, dir)
               }
             }
           }
@@ -151,26 +136,29 @@ object LogPacker {
 
   @RequiresBackgroundThread
   @Throws(IOException::class)
-  suspend fun uploadLogs(project: Project?): String {
-    return indeterminateStep(IdeBundle.message("uploading.logs.message")) {
-      withRawProgressReporter {
-        withContext(Dispatchers.IO) {
-          val file = packLogs(project)
-          checkCanceled()
-          val responseJson = requestSign(file.name)
-          val uploadUrl = responseJson["url"] as String
-          val folderName = responseJson["folderName"] as String
-          val headers = responseJson["headers"] as Map<*, *>
-          checkCanceled()
-          coroutineToIndicator {
-            upload(file, uploadUrl, headers)
-          }
-          val message = IdeBundle.message("collect.logs.notification.sent.success", UPLOADS_SERVICE_URL, folderName)
-          Notification(CollectZippedLogsAction.NOTIFICATION_GROUP, message, NotificationType.INFORMATION).notify(project)
-          folderName
-        }
-      }
+  suspend fun uploadLogs(project: Project?): String = reportProgress { reporter ->
+    reporter.indeterminateStep("") {
+      val file = packLogs(project)
+      checkCanceled()
+
+      val folderName = uploadFile(file)
+
+      val message = IdeBundle.message("collect.logs.notification.sent.success", UPLOADS_SERVICE_URL, folderName)
+      Notification(COLLECT_LOGS_NOTIFICATION_GROUP, message, NotificationType.INFORMATION).notify(project)
+      folderName
     }
+  }
+
+  suspend fun uploadFile(file: Path): String {
+    val responseJson = requestSign(file.name)
+    val uploadUrl = responseJson["url"] as String
+    val folderName = responseJson["folderName"] as String
+    val headers = responseJson["headers"] as Map<*, *>
+    checkCanceled()
+    coroutineToIndicator {
+      upload(file, uploadUrl, headers)
+    }
+    return folderName
   }
 
   private fun requestSign(fileName: String): Map<String, Any> {

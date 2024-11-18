@@ -1,4 +1,4 @@
-// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.psi.stubs;
 
 import com.intellij.diagnostic.PluginException;
@@ -33,6 +33,7 @@ import java.nio.file.NoSuchFileException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicReference;
 
 final class PerFileElementTypeStubModificationTracker implements StubIndexImpl.FileUpdateProcessor {
   static final Logger LOG = Logger.getInstance(PerFileElementTypeStubModificationTracker.class);
@@ -67,12 +68,16 @@ final class PerFileElementTypeStubModificationTracker implements StubIndexImpl.F
 
   private final SimpleMessageBusConnection myProjectCloseListener;
 
+  private final AtomicReference<Throwable> disposeTrace = new AtomicReference<>();
+
   PerFileElementTypeStubModificationTracker() {
     myProjectCloseListener = ApplicationManager.getApplication().getMessageBus().simpleConnect();
     myProjectCloseListener.subscribe(ProjectCloseListener.TOPIC, new ProjectCloseListener() {
       @Override
       public void projectClosing(@NotNull Project project) {
-        endUpdatesBatch();
+        // currently called from EDT
+        // given that the project is closing, it is acceptable not to process updates precisely
+        endUpdatesBatchOnProjectClose();
       }
     });
   }
@@ -117,6 +122,9 @@ final class PerFileElementTypeStubModificationTracker implements StubIndexImpl.F
   public synchronized void endUpdatesBatch() {
     myModificationsInCurrentBatch.clear();
     ReadAction.run(() -> {
+      if (disposeTrace.get() != null) {
+        throw new IllegalStateException("Cannot end updates batch because the tracker is disposed! Disposal trace is in the cause", disposeTrace.get());
+      }
       fastCheck();
       if (myProbablyExpensiveUpdates.size() > PRECISE_CHECK_THRESHOLD) {
         coarseCheck();
@@ -127,16 +135,20 @@ final class PerFileElementTypeStubModificationTracker implements StubIndexImpl.F
     });
   }
 
+  private synchronized void endUpdatesBatchOnProjectClose() {
+    myModificationsInCurrentBatch.clear();
+    zeroCheck();
+  }
+
+  // consumes myPendingUpdates, all unprocessed updates are placed in myProbablyExpensiveUpdates
   private void fastCheck() {
     var index = myStubUpdatingIndexStorage.getValue();
     if (index == null) { // if indexes are not ready, then just increment global mod count and exit
-      myPendingUpdates.clear();
-      registerModificationForAllElementTypes();
+      zeroCheck();
       return;
     }
     while (!myPendingUpdates.isEmpty()) {
-      VirtualFile file = myPendingUpdates.poll();
-
+      VirtualFile file = myPendingUpdates.remove();
       //noinspection deprecation
       if (file.getUserData(BackFileViewProvider.FRONT_FILE_KEY) != null) {
         //noinspection deprecation
@@ -175,14 +187,22 @@ final class PerFileElementTypeStubModificationTracker implements StubIndexImpl.F
     }
   }
 
+  // consumes myPendingUpdates
+  private void zeroCheck() {
+    myPendingUpdates.clear();
+    registerModificationForAllElementTypes();
+  }
+
+  // consumes myProbablyExpensiveUpdates
   private void coarseCheck() {
     while (!myProbablyExpensiveUpdates.isEmpty()) {
-      FileInfo info = myProbablyExpensiveUpdates.poll();
+      FileInfo info = myProbablyExpensiveUpdates.remove();
       if (wereModificationsInCurrentBatch(info.type)) continue;
       registerModificationFor(info.type);
     }
   }
 
+  // consumes myProbablyExpensiveUpdates
   private void preciseCheck() {
     var index = myStubUpdatingIndexStorage.getValue();
     if (index == null) {
@@ -192,7 +212,7 @@ final class PerFileElementTypeStubModificationTracker implements StubIndexImpl.F
     }
     DataIndexer<Integer, SerializedStubTree, FileContent> stubIndexer = index.getIndexer();
     while (!myProbablyExpensiveUpdates.isEmpty()) {
-      FileInfo info = myProbablyExpensiveUpdates.poll();
+      FileInfo info = myProbablyExpensiveUpdates.remove();
       if (wereModificationsInCurrentBatch(info.type) || info.project.isDisposed()) continue;
       FileBasedIndexImpl.markFileIndexed(info.file, null);
       try {
@@ -209,7 +229,7 @@ final class PerFileElementTypeStubModificationTracker implements StubIndexImpl.F
         }
         final Stub stub = StubTreeBuilder.buildStubTree(fileContent);
         Map<Integer, SerializedStubTree> serializedStub = stub == null ? Collections.emptyMap() : stubIndexer.map(fileContent);
-        if (diffBuilder.differentiate(serializedStub, (__, ___, ____) -> { }, (__, ___, ____) -> { }, (__, ___) -> { }, true)) {
+        if (diffBuilder.differentiate(serializedStub, (__, ___, ____, _____) -> { }, true)) {
           registerModificationFor(info.type);
         }
       }
@@ -236,13 +256,17 @@ final class PerFileElementTypeStubModificationTracker implements StubIndexImpl.F
     }
     PsiFile psi = PsiDocumentManager.getInstance(project).getPsiFile(doc);
     DocumentContent content = FileBasedIndexImpl.findLatestContent(doc, psi);
-    return FileContentImpl.createByContent(file, () -> {
-      var text = content.getText();
-      return text.toString().getBytes(file.getCharset());
-    }, project);
+    return FileContentImpl.createByText(file, content.getText(), project);
+  }
+
+  void undispose() {
+    // we have a real problem when plugins are installed. At the moment suppress it, because there seems to be
+    // one more problem (possible race between dispose() and endUpdatesBatch()) which is otherwise masked by this one.
+    disposeTrace.set(null);
   }
 
   public void dispose() {
+    disposeTrace.set(new Throwable());
     myProjectCloseListener.disconnect();
     myFileElementTypesCache.clear();
     myModCounts.clear();
@@ -297,8 +321,7 @@ final class PerFileElementTypeStubModificationTracker implements StubIndexImpl.F
     }
   }
 
-  @NotNull
-  private static List<Pair<String, @Nullable PluginId>> describeStubFileElementTypes(List<StubFileElementType<?>> types) {
+  private static @NotNull List<Pair<String, @Nullable PluginId>> describeStubFileElementTypes(List<StubFileElementType<?>> types) {
     return ContainerUtil.map(types, (elemType) -> {
       var plugin = PluginManager.getPluginByClass(elemType.getClass());
       var pluginId = plugin == null ? null : plugin.getPluginId();

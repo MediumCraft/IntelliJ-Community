@@ -4,8 +4,10 @@ package org.jetbrains.kotlin.idea.gradleCodeInsightCommon
 import com.intellij.model.psi.ImplicitReferenceProvider
 import com.intellij.psi.PsiElement
 import org.jetbrains.kotlin.analysis.api.analyze
-import org.jetbrains.kotlin.analysis.api.calls.singleFunctionCallOrNull
-import org.jetbrains.kotlin.analysis.api.calls.symbol
+import org.jetbrains.kotlin.analysis.api.permissions.KaAllowAnalysisOnEdt
+import org.jetbrains.kotlin.analysis.api.permissions.allowAnalysisOnEdt
+import org.jetbrains.kotlin.analysis.api.resolution.singleFunctionCallOrNull
+import org.jetbrains.kotlin.analysis.api.resolution.symbol
 import org.jetbrains.kotlin.name.CallableId
 import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.psi.KtCallExpression
@@ -17,6 +19,8 @@ abstract class AbstractKotlinGradleReferenceProvider: ImplicitReferenceProvider 
     companion object {
         @JvmStatic
         protected val GRADLE_DSL_PACKAGE: FqName = FqName("org.gradle.kotlin.dsl")
+        @JvmStatic
+        protected val KGP_PACKAGE: FqName = FqName("org.jetbrains.kotlin.gradle.plugin")
     }
 
     protected fun getTextFromLiteralEntry(element: PsiElement?) : String? {
@@ -25,11 +29,14 @@ abstract class AbstractKotlinGradleReferenceProvider: ImplicitReferenceProvider 
             ?.text
     }
     
+    @OptIn(KaAllowAnalysisOnEdt::class)
     protected fun analyzeSurroundingCallExpression(element: PsiElement?) : CallableId? {
         val callExpression = element?.getParentOfType<KtCallExpression>(true, KtDeclarationWithBody::class.java) ?: return null
-        return analyze(callExpression) {
-            val singleFunctionCallOrNull = callExpression.resolveCall()?.singleFunctionCallOrNull()
-            singleFunctionCallOrNull?.symbol?.callableId
+        return allowAnalysisOnEdt {
+            analyze(callExpression) {
+                val singleFunctionCallOrNull = callExpression.resolveToCall()?.singleFunctionCallOrNull()
+                singleFunctionCallOrNull?.symbol?.callableId
+            }
         }
     }
 }

@@ -26,6 +26,7 @@ import com.intellij.util.animation.Easing;
 import com.intellij.util.animation.JBAnimator;
 import com.intellij.util.concurrency.annotations.RequiresEdt;
 import com.intellij.util.containers.ContainerUtil;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -36,6 +37,7 @@ import java.awt.*;
 import java.util.ArrayList;
 import java.util.List;
 
+//@ApiStatus.Internal
 public final class ScrollingModelImpl implements ScrollingModelEx {
   private static final Logger LOG = Logger.getInstance(ScrollingModelImpl.class);
 
@@ -62,10 +64,12 @@ public final class ScrollingModelImpl implements ScrollingModelEx {
 
   private final ChangeListener viewportChangeListener = new MyChangeListener();
 
+  @ApiStatus.Internal
   public ScrollingModelImpl(EditorImpl editor) {
     this(new DefaultEditorSupplier(editor));
   }
 
+  @ApiStatus.Internal
   public ScrollingModelImpl(@NotNull ScrollingModel.Supplier supplier) {
     this.supplier = supplier;
   }
@@ -124,7 +128,7 @@ public final class ScrollingModelImpl implements ScrollingModelEx {
     }
 
     Editor editor = supplier.getEditor();
-    AsyncEditorLoader.performWhenLoaded(editor, (ContextAwareRunnable)() -> {
+    AsyncEditorLoader.Companion.performWhenLoaded(editor, (ContextAwareRunnable)() -> {
       VisualPosition visualPosition = editor.getCaretModel().getVisualPosition();
       LogicalPosition logicalPosition = editor.visualToLogicalPosition(visualPosition);
       for (ScrollRequestListener listener : scrollRequestListeners) {
@@ -148,13 +152,10 @@ public final class ScrollingModelImpl implements ScrollingModelEx {
 
   private @NotNull Point stickyPanelAdjust(@NotNull Point targetLocation, @NotNull Rectangle viewRect) {
     if (supplier.getEditor() instanceof EditorImpl editor) {
-      var stickyLinesManager = editor.getStickyLinesPanel();
-      if (stickyLinesManager != null && editor.getSettings().areStickyLinesShown()) {
-        int height = stickyLinesManager.panelHeight();
-        if (height > 0) {
-          viewRect.height -= height;
-          return new Point(targetLocation.x, targetLocation.y - height);
-        }
+      int height = editor.getStickyLinesPanelHeight();
+      if (height > 0) {
+        viewRect.height -= height;
+        return new Point(targetLocation.x, targetLocation.y - height);
       }
     }
     return targetLocation;
@@ -164,7 +165,7 @@ public final class ScrollingModelImpl implements ScrollingModelEx {
   @RequiresEdt
   public void scrollTo(@NotNull LogicalPosition logicalPosition, @NotNull ScrollType scrollType) {
     Editor editor = supplier.getEditor();
-    AsyncEditorLoader.performWhenLoaded(editor, (ContextAwareRunnable)() -> {
+    AsyncEditorLoader.Companion.performWhenLoaded(editor, (ContextAwareRunnable)() -> {
       for (ScrollRequestListener listener : scrollRequestListeners) {
         listener.scrollRequested(logicalPosition, scrollType);
       }
@@ -183,6 +184,7 @@ public final class ScrollingModelImpl implements ScrollingModelEx {
     action.run();
   }
 
+  @ApiStatus.Internal
   public boolean isAnimationEnabled() {
     return !animationDisabled;
   }
@@ -208,6 +210,7 @@ public final class ScrollingModelImpl implements ScrollingModelEx {
     return scrollPane.getVerticalScrollBar();
   }
 
+  @ApiStatus.Internal
   @RequiresEdt
   public @Nullable JScrollBar getHorizontalScrollBar() {
     return supplier.getScrollPane().getHorizontalScrollBar();
@@ -314,6 +317,7 @@ public final class ScrollingModelImpl implements ScrollingModelEx {
     LOG.assertTrue(success);
   }
 
+  @ApiStatus.Internal
   public void finishAnimation() {
     cancelAnimatedScrolling(true);
   }
@@ -327,15 +331,18 @@ public final class ScrollingModelImpl implements ScrollingModelEx {
     return request;
   }
 
+  @ApiStatus.Internal
   public void dispose() {
     supplier.getEditor().getDocument().removeDocumentListener(documentListener);
     supplier.getScrollPane().getViewport().removeChangeListener(viewportChangeListener);
   }
 
+  @ApiStatus.Internal
   public void beforeModalityStateChanged() {
     cancelAnimatedScrolling(true);
   }
 
+  @ApiStatus.Internal
   public boolean isScrollingNow() {
     return currentAnimationRequest != null;
   }
@@ -359,6 +366,7 @@ public final class ScrollingModelImpl implements ScrollingModelEx {
     cancelAnimatedScrolling(true);
   }
 
+  @ApiStatus.Internal
   public void addScrollRequestListener(ScrollRequestListener scrollRequestListener, Disposable parentDisposable) {
     scrollRequestListeners.add(scrollRequestListener);
     Disposer.register(parentDisposable, () -> scrollRequestListeners.remove(scrollRequestListener));

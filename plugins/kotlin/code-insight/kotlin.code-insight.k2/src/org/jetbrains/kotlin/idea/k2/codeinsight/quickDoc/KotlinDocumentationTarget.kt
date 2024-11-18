@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.kotlin.idea.k2.codeinsight.quickDoc
 
 import com.intellij.codeInsight.documentation.DocumentationManagerUtil
@@ -16,12 +16,15 @@ import com.intellij.psi.PsiMethod
 import com.intellij.psi.PsiWhiteSpace
 import com.intellij.psi.createSmartPointer
 import org.jetbrains.annotations.Nls
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
+import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
+import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.analyze
-import org.jetbrains.kotlin.analysis.api.calls.successfulFunctionCallOrNull
-import org.jetbrains.kotlin.analysis.api.calls.symbol
+import org.jetbrains.kotlin.analysis.api.resolution.KaCallableMemberCall
+import org.jetbrains.kotlin.analysis.api.resolution.successfulCallOrNull
+import org.jetbrains.kotlin.analysis.api.resolution.successfulFunctionCallOrNull
+import org.jetbrains.kotlin.analysis.api.resolution.symbol
 import org.jetbrains.kotlin.analysis.api.symbols.*
-import org.jetbrains.kotlin.analysis.api.symbols.markers.KtNamedSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.markers.KaNamedSymbol
 import org.jetbrains.kotlin.asJava.LightClassUtil
 import org.jetbrains.kotlin.asJava.elements.KtLightDeclaration
 import org.jetbrains.kotlin.builtins.StandardNames
@@ -32,7 +35,6 @@ import org.jetbrains.kotlin.idea.kdoc.KDocRenderer.createHighlightingManager
 import org.jetbrains.kotlin.idea.kdoc.KDocRenderer.generateJavadoc
 import org.jetbrains.kotlin.idea.kdoc.KDocRenderer.renderKDoc
 import org.jetbrains.kotlin.idea.references.mainReference
-import org.jetbrains.kotlin.idea.search.ExpectActualSupport
 import org.jetbrains.kotlin.kdoc.psi.api.KDoc
 import org.jetbrains.kotlin.kdoc.psi.impl.KDocSection
 import org.jetbrains.kotlin.lexer.KtTokens
@@ -77,7 +79,7 @@ private fun computeLocalDocumentation(element: PsiElement, originalElement: PsiE
                   renderKotlinDeclaration(
                       itReference.mainReference.resolve() as KtFunctionLiteral,
                       quickNavigation,
-                      symbolFinder = { (it as? KtFunctionLikeSymbol)?.valueParameters?.firstOrNull() })
+                      symbolFinder = { (it as? KaFunctionSymbol)?.valueParameters?.firstOrNull() })
               }
           }
       }
@@ -146,10 +148,10 @@ private fun computeLocalDocumentation(element: PsiElement, originalElement: PsiE
     return null
 }
 
-context(KtAnalysisSession)
+context(KaSession)
 private fun getContainerInfo(ktDeclaration: KtDeclaration): HtmlChunk {
-    val containingSymbol = ktDeclaration.getSymbol().getContainingSymbol()
-    val fqName = (containingSymbol as? KtClassLikeSymbol)?.classId?.asFqNameString()
+    val containingSymbol = ktDeclaration.symbol.containingDeclaration
+    val fqName = (containingSymbol as? KaClassLikeSymbol)?.classId?.asFqNameString()
         ?: (ktDeclaration.containingFile as? KtFile)?.packageFqName?.takeIf { !it.isRoot }?.asString()
 
     val fqNameSection = fqName?.let {
@@ -160,21 +162,28 @@ private fun getContainerInfo(ktDeclaration: KtDeclaration): HtmlChunk {
             it
         }
 
-        DocumentationManagerUtil.createHyperlink(link, it, highlighted, false, false)
+        DocumentationManagerUtil.createHyperlink(link, it, highlighted, false)
         HtmlChunk.fragment(
-            HtmlChunk.tag("icon").attr("src", "/org/jetbrains/kotlin/idea/icons/classKotlin.svg"),
+            HtmlChunk.tag("icon").attr(
+                "src",
+                if (ktDeclaration.isTopLevelKtOrJavaMember()) {
+                    "AllIcons.Nodes.Package"
+                } else {
+                    "KotlinBaseResourcesIcons.ClassKotlin"
+                }
+            ),
             HtmlChunk.nbsp(),
             HtmlChunk.raw(link.toString()),
             HtmlChunk.br()
         )
     } ?: HtmlChunk.empty()
 
-    val fileNameSection = ktDeclaration.containingFile
+    val fileNameSection = ktDeclaration.navigationElement.containingFile
         ?.name
-        ?.takeIf { containingSymbol == null }
+        ?.takeIf { ktDeclaration.isTopLevelKtOrJavaMember() }
         ?.let {
             HtmlChunk.fragment(
-                HtmlChunk.tag("icon").attr("src", "/org/jetbrains/kotlin/idea/icons/kotlin_file.svg"),
+                HtmlChunk.tag("icon").attr("src", "KotlinBaseResourcesIcons.Kotlin_file"),
                 HtmlChunk.nbsp(),
                 HtmlChunk.text(it),
                 HtmlChunk.br()
@@ -196,11 +205,11 @@ private fun @receiver:Nls StringBuilder.renderEnumSpecialFunction(
         // element is not an KtReferenceExpression, but KtClass of enum
         // so reference extracted from originalElement
         analyze(referenceExpression) {
-            val symbol = referenceExpression.resolveCall()?.successfulFunctionCallOrNull()?.partiallyAppliedSymbol?.symbol as? KtNamedSymbol
+            val symbol = referenceExpression.resolveToCall()?.successfulCallOrNull<KaCallableMemberCall<*, *>>()?.partiallyAppliedSymbol?.symbol as? KaNamedSymbol
             val name = symbol?.name?.asString()
-            if (name != null && symbol is KtDeclarationSymbol) {
-                val containingClass = symbol.getContainingSymbol() as? KtClassOrObjectSymbol
-                val superClasses = containingClass?.superTypes?.mapNotNull { t -> t.expandedClassSymbol }
+            if (name != null && symbol is KaDeclarationSymbol) {
+                val containingClass = symbol.containingDeclaration as? KaClassSymbol
+                val superClasses = containingClass?.superTypes?.mapNotNull { t -> t.expandedSymbol }
                 val kdoc = superClasses?.firstNotNullOfOrNull { superClass ->
                     val navigationElement = superClass.psi?.navigationElement
                     if (navigationElement is KtElement && navigationElement.containingKtFile.isCompiled) {
@@ -241,7 +250,7 @@ internal fun PsiElement?.isModifier() =
 private fun @receiver:Nls StringBuilder.renderKotlinDeclaration(
     declaration: KtDeclaration,
     onlyDefinition: Boolean,
-    symbolFinder: KtAnalysisSession.(KtSymbol) -> KtSymbol? = { it },
+    symbolFinder: KaSession.(KaSymbol) -> KaSymbol? = { it },
     preBuild: KDocTemplate.() -> Unit = {}
 ) {
     analyze(declaration) {
@@ -258,19 +267,19 @@ private fun @receiver:Nls StringBuilder.renderKotlinDeclaration(
             return
         }
 
-        val symbol = symbolFinder(declaration.getSymbol())
-        if (symbol !is KtDeclarationSymbol) return
+        val symbol = symbolFinder(declaration.symbol)
+        if (symbol !is KaDeclarationSymbol) return
 
         renderKotlinSymbol(symbol, declaration, onlyDefinition, true, preBuild)
     }
 }
 
-context(KtAnalysisSession)
+context(KaSession)
 private fun renderKDoc(
-    symbol: KtSymbol,
+    symbol: KaSymbol,
     stringBuilder: StringBuilder,
 ) {
-    val declaration = symbol.psi as? KtElement
+    val declaration = symbol.psi?.navigationElement as? KtElement
     val kDoc = findKDoc(symbol)
     if (kDoc != null) {
         stringBuilder.renderKDoc(kDoc.contentTag, kDoc.sections)
@@ -281,8 +290,8 @@ private fun renderKDoc(
             stringBuilder.renderKDoc(it.contentTag, it.sections)
         }
     } else if (declaration is KtFunction &&
-        symbol is KtCallableSymbol &&
-        symbol.getAllOverriddenSymbols().any { it.psi is PsiMethod }) {
+        symbol is KaCallableSymbol &&
+        symbol.allOverriddenSymbols.any { it.psi is PsiMethod }) {
         LightClassUtil.getLightClassMethod(declaration)?.let {
             stringBuilder.insert(KDocTemplate.DescriptionBodyTemplate.FromJava()) {
                 body = generateJavadoc(it)
@@ -291,36 +300,38 @@ private fun renderKDoc(
     }
 }
 
-context(KtAnalysisSession)
-private fun findKDoc(symbol: KtSymbol): KDocContent? {
+context(KaSession)
+@OptIn(KaExperimentalApi::class)
+private fun findKDoc(symbol: KaSymbol): KDocContent? {
     val ktElement = symbol.psi?.navigationElement as? KtElement
     ktElement?.findKDocByPsi()?.let {
         return it
     }
 
-    if (symbol is KtCallableSymbol) {
-        symbol.getAllOverriddenSymbols().forEach { overrider ->
+    if (symbol is KaCallableSymbol) {
+        symbol.allOverriddenSymbols.forEach { overrider ->
             findKDoc(overrider)?.let {
                 return it
             }
         }
     }
 
-    if (symbol is KtValueParameterSymbol) {
-        val containingSymbol = symbol.getContainingSymbol() as? KtFunctionSymbol
+    if (symbol is KaValueParameterSymbol) {
+        val containingSymbol = symbol.containingDeclaration as? KaNamedFunctionSymbol
         if (containingSymbol != null) {
             val idx = containingSymbol.valueParameters.indexOf(symbol)
-            containingSymbol.getExpectsForActual().filterIsInstance<KtFunctionSymbol>().mapNotNull { expectFunction ->
+            containingSymbol.getExpectsForActual().filterIsInstance<KaNamedFunctionSymbol>().mapNotNull { expectFunction ->
                 findKDoc(expectFunction.valueParameters[idx])
             }.firstOrNull()?.let { return it }
         }
     }
 
-    return (symbol as? KtDeclarationSymbol)?.getExpectsForActual()?.mapNotNull { declarationSymbol -> findKDoc(declarationSymbol) }?.firstOrNull()
+    return (symbol as? KaDeclarationSymbol)?.getExpectsForActual()?.mapNotNull { declarationSymbol -> findKDoc(declarationSymbol) }?.firstOrNull()
 }
 
-context(KtAnalysisSession)
-private fun @receiver:Nls StringBuilder.renderKotlinSymbol(symbol: KtDeclarationSymbol,
+context(KaSession)
+@OptIn(KaExperimentalApi::class)
+private fun @receiver:Nls StringBuilder.renderKotlinSymbol(symbol: KaDeclarationSymbol,
                                                            declaration: KtDeclaration,
                                                            onlyDefinition: Boolean,
                                                            passContainerInfo: Boolean = true,

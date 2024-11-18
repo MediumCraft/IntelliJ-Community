@@ -9,17 +9,22 @@ import com.intellij.ide.errorTreeView.HotfixData;
 import com.intellij.internal.statistic.StructuredIdeActivity;
 import com.intellij.notification.Notification;
 import com.intellij.notification.NotificationType;
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.DataContext;
+import com.intellij.openapi.actionSystem.Presentation;
+import com.intellij.openapi.actionSystem.impl.SimpleDataContext;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.options.Configurable;
 import com.intellij.openapi.progress.*;
-import com.intellij.openapi.progress.util.BackgroundTaskUtil;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.Ref;
+import com.intellij.openapi.util.text.HtmlBuilder;
+import com.intellij.openapi.util.text.HtmlChunk;
 import com.intellij.openapi.vcs.*;
 import com.intellij.openapi.vcs.actions.DescindingFilesFilter;
 import com.intellij.openapi.vcs.changes.RemoteRevisionsCache;
@@ -32,24 +37,22 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileManager;
 import com.intellij.psi.search.scope.packageSet.NamedScope;
 import com.intellij.util.containers.ContainerUtil;
+import com.intellij.util.containers.JBIterable;
 import com.intellij.util.containers.MultiMap;
 import com.intellij.util.ui.OptionsDialog;
 import com.intellij.vcs.VcsActivity;
 import com.intellij.vcs.ViewUpdateInfoNotification;
 import com.intellij.vcsUtil.VcsUtil;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.Nls;
+import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
 
 import java.io.File;
 import java.util.*;
-import java.util.stream.Collectors;
 
 import static com.intellij.configurationStore.StoreUtilKt.forPoorJavaClientOnlySaveProjectIndEdtDoNotUseThisMethod;
-import static com.intellij.openapi.util.Predicates.nonNull;
-import static com.intellij.openapi.util.text.StringUtil.notNullize;
-import static com.intellij.openapi.util.text.StringUtil.nullize;
-import static com.intellij.openapi.vcs.VcsNotifier.STANDARD_NOTIFICATION;
 import static com.intellij.openapi.vcs.changes.actions.VcsStatisticsCollector.UPDATE_ACTIVITY;
-import static com.intellij.util.ui.UIUtil.BR;
 
 public abstract class AbstractCommonUpdateAction extends DumbAwareAction {
   private final static Logger LOG = Logger.getInstance(AbstractCommonUpdateAction.class);
@@ -186,7 +189,7 @@ public abstract class AbstractCommonUpdateAction extends DumbAwareAction {
   }
 
   public LinkedHashMap<Configurable, AbstractVcs> getConfigurableToEnvMap(Project project) {
-    FilePath[] roots = getRoots(project, dataId -> CommonDataKeys.PROJECT.is(dataId) ? project : null);
+    FilePath[] roots = getRoots(project, SimpleDataContext.getProjectContext(project));
     Map<AbstractVcs, Collection<FilePath>> vcsToFilesMap = createVcsToFilesMap(roots, project);
     return createConfigurableToEnvMap(vcsToFilesMap);
   }
@@ -395,7 +398,7 @@ public abstract class AbstractCommonUpdateAction extends DumbAwareAction {
         }
         finally {
           myProjectLevelVcsManager.stopBackgroundVcsOperation();
-          BackgroundTaskUtil.syncPublisher(myProject, UpdatedFilesListener.UPDATED_FILES).
+          myProject.getMessageBus().syncPublisher(UpdatedFilesListener.UPDATED_FILES).
             consume(UpdatedFilesReverseSide.getPathsFromUpdatedFiles(myUpdatedFiles));
           activity.finished();
         }
@@ -437,7 +440,7 @@ public abstract class AbstractCommonUpdateAction extends DumbAwareAction {
     }
 
     private void notifyAnnotations() {
-      final VcsAnnotationRefresher refresher = BackgroundTaskUtil.syncPublisher(myProject, VcsAnnotationRefresher.LOCAL_CHANGES_CHANGED);
+      final VcsAnnotationRefresher refresher = myProject.getMessageBus().syncPublisher(VcsAnnotationRefresher.LOCAL_CHANGES_CHANGED);
       UpdateFilesHelper.iterateFileGroupFilesDeletedOnServerFirst(myUpdatedFiles, new UpdateFilesHelper.Callback() {
         @Override
         public void onFile(String filePath, String groupId) {
@@ -451,31 +454,36 @@ public abstract class AbstractCommonUpdateAction extends DumbAwareAction {
                                              boolean someSessionWasCancelled,
                                              @NotNull List<? extends UpdateSession> updateSessions) {
       int allFilesCount = getUpdatedFilesCount();
-      String additionalContent = nullize(updateSessions.stream().
-        map(UpdateSession::getAdditionalNotificationContent).
-        filter(nonNull()).
-        collect(Collectors.joining(", ")));
 
       String title = someSessionWasCancelled
                      ? VcsBundle.message("update.notification.title.project.partially.updated")
                      : VcsBundle.message("update.notification.title.count.files.updated", allFilesCount);
 
-      String content = someSessionWasCancelled
-                       ? VcsBundle.message("update.notification.content.files.updated", allFilesCount)
-                       : notNullize(prepareScopeUpdatedText(tree));
+      HtmlBuilder content = new HtmlBuilder();
+      content.append(someSessionWasCancelled
+                     ? HtmlChunk.text(VcsBundle.message("update.notification.content.files.updated", allFilesCount))
+                     : prepareScopeUpdatedText(tree));
+
+      List<HtmlChunk> additionalContent = JBIterable.from(updateSessions)
+        .map(UpdateSession::getAdditionalNotificationContent)
+        .filterNotNull()
+        .map(HtmlChunk::raw)
+        .toList();
+      if (!additionalContent.isEmpty()) {
+        if (!content.isEmpty()) {
+          content.append(HtmlChunk.br());
+        }
+        content.appendWithSeparators(HtmlChunk.text(", "), additionalContent);
+      }
+
 
       NotificationType type = someSessionWasCancelled
                               ? NotificationType.WARNING
                               : NotificationType.INFORMATION;
 
-      if (additionalContent != null) {
-        if (!content.isEmpty()) {
-          content += BR;
-        }
-        content += additionalContent;
-      }
 
-      return STANDARD_NOTIFICATION.createNotification(title, content, type).setDisplayId(VcsNotificationIdsHolder.PROJECT_PARTIALLY_UPDATED);
+      return VcsNotifier.standardNotification()
+        .createNotification(title, content.toString(), type).setDisplayId(VcsNotificationIdsHolder.PROJECT_PARTIALLY_UPDATED);
     }
 
     private int getUpdatedFilesCount() {
@@ -486,22 +494,19 @@ public abstract class AbstractCommonUpdateAction extends DumbAwareAction {
       return group.getFiles().size() + group.getChildren().stream().mapToInt(g -> getFilesCount(g)).sum();
     }
 
-    @Nullable
-    @Nls
-    private static String prepareScopeUpdatedText(@NotNull UpdateInfoTree tree) {
-      String scopeText = null;
+    private static @NotNull @Nls HtmlChunk prepareScopeUpdatedText(@NotNull UpdateInfoTree tree) {
       NamedScope scopeFilter = tree.getFilterScope();
       if (scopeFilter != null) {
         int filteredFiles = tree.getFilteredFilesCount();
         String filterName = scopeFilter.getPresentableName();
         if (filteredFiles == 0) {
-          scopeText = VcsBundle.message("update.file.name.wasn.t.modified", filterName);
+          return HtmlChunk.text(VcsBundle.message("update.file.name.wasn.t.modified", filterName));
         }
         else {
-          scopeText = VcsBundle.message("update.filtered.files.count.in.filter.name", filteredFiles, filterName);
+          return HtmlChunk.text(VcsBundle.message("update.filtered.files.count.in.filter.name", filteredFiles, filterName));
         }
       }
-      return scopeText;
+      return HtmlChunk.empty();
     }
 
     @Override
@@ -582,7 +587,8 @@ public abstract class AbstractCommonUpdateAction extends DumbAwareAction {
           type = NotificationType.INFORMATION;
         }
         VcsNotifier.getInstance(myProject).notify(
-          STANDARD_NOTIFICATION.createNotification(content, type).setDisplayId(VcsNotificationIdsHolder.PROJECT_UPDATE_FINISHED));
+          VcsNotifier.standardNotification().createNotification(content, type)
+            .setDisplayId(VcsNotificationIdsHolder.PROJECT_UPDATE_FINISHED));
       }
       else if (!myUpdatedFiles.isEmpty()) {
 

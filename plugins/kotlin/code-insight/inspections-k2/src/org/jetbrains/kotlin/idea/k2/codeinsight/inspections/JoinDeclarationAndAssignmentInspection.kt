@@ -14,12 +14,13 @@ import com.intellij.psi.PsiWhiteSpace
 import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.psi.util.parentOfType
 import com.intellij.psi.util.parents
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
-import org.jetbrains.kotlin.analysis.api.calls.singleVariableAccessCall
-import org.jetbrains.kotlin.analysis.api.calls.symbol
-import org.jetbrains.kotlin.analysis.api.symbols.KtValueParameterSymbol
-import org.jetbrains.kotlin.analysis.api.symbols.markers.KtPossiblyNamedSymbol
-import org.jetbrains.kotlin.analysis.api.types.KtType
+import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
+import org.jetbrains.kotlin.analysis.api.KaSession
+import org.jetbrains.kotlin.analysis.api.resolution.singleVariableAccessCall
+import org.jetbrains.kotlin.analysis.api.resolution.symbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaValueParameterSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.typeParameters
+import org.jetbrains.kotlin.analysis.api.types.KaType
 import org.jetbrains.kotlin.idea.base.analysis.api.utils.isPossiblySubTypeOf
 import org.jetbrains.kotlin.idea.base.psi.replaced
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
@@ -68,13 +69,14 @@ internal class JoinDeclarationAndAssignmentInspection :
         }
     }
 
-    context(KtAnalysisSession)
+    context(KaSession)
+    @OptIn(KaExperimentalApi::class)
     override fun prepareContext(element: KtProperty): Context? {
         val assignment = findFirstAssignment(element) ?: return null
         val initializer = assignment.right ?: return null
 
-        val initializerType = initializer.getKtType()
-        val propertyType = element.typeReference?.getKtType()
+        val initializerType = initializer.expressionType
+        val propertyType = element.typeReference?.type
 
         if (initializer.hasReference(element)) return null
         if (initializer.dependsOnNextSiblingsOfProperty(element)) return null
@@ -96,7 +98,7 @@ internal class JoinDeclarationAndAssignmentInspection :
             }
         }
 
-        val hasTypeParameters = !initializerType?.expandedClassSymbol?.typeParameters.isNullOrEmpty()
+        val hasTypeParameters = !initializerType?.expandedSymbol?.typeParameters.isNullOrEmpty()
         val canOmitDeclaredType =
             if (hasTypeParameters) false
             else equalTypes || !element.isVar && isSubtype
@@ -112,13 +114,13 @@ internal class JoinDeclarationAndAssignmentInspection :
         )
     }
 
-    context(KtAnalysisSession)
+    context(KaSession)
     private fun Sequence<PsiElement>.anyHasSmartCast(element: KtProperty): Boolean {
         val declarationName = element.name ?: return false
 
         fun PsiElement.hasSmartCast(element: KtProperty): Boolean {
             return anyDescendantOfType<KtNameReferenceExpression> {
-                it.text == declarationName && it.reference?.resolve() == element && it.getSmartCastInfo() != null
+                it.text == declarationName && it.reference?.resolve() == element && it.smartCastInfo != null
             }
         }
 
@@ -187,7 +189,7 @@ internal class JoinDeclarationAndAssignmentInspection :
         }
     }
 
-    context(KtAnalysisSession)
+    context(KaSession)
     private fun canBeMovedToConstructor(element: KtProperty, initializer: KtExpression): Boolean {
         if (element.isLocal) return false
         if (element.getter != null || element.setter != null || element.delegate != null) return false
@@ -197,7 +199,7 @@ internal class JoinDeclarationAndAssignmentInspection :
         val containingClass = constructor.getContainingClassOrObject()
         if (containingClass.isData()) return false
 
-        val paramSymbol = initializer.mainReference?.resolveToSymbol() as? KtValueParameterSymbol ?: return false
+        val paramSymbol = initializer.mainReference?.resolveToSymbol() as? KaValueParameterSymbol ?: return false
         if (element.nameAsName != paramSymbol.name) return false
 
         val parameter = paramSymbol.psi as? KtParameter ?: return false
@@ -259,7 +261,7 @@ internal class JoinDeclarationAndAssignmentInspection :
 
     private fun List<PsiElement>.hasComments(): Boolean = any { it is PsiComment }
 
-    context(KtAnalysisSession)
+    context(KaSession)
     private fun findFirstAssignment(property: KtProperty): KtBinaryExpression? {
         if (property.typeReference == null) return null
 
@@ -276,8 +278,8 @@ internal class JoinDeclarationAndAssignmentInspection :
             return null
         }
 
-        val assignmentCall = firstAssignment.left?.resolveCall()?.singleVariableAccessCall()?.symbol ?: return null
-        if (assignmentCall != property.getVariableSymbol()) return null
+        val assignmentCall = firstAssignment.left?.resolveToCall()?.singleVariableAccessCall()?.symbol ?: return null
+        if (assignmentCall != property.symbol) return null
 
         if (propertyContainer !is KtClassBody) return firstAssignment
 
@@ -344,19 +346,19 @@ internal class JoinDeclarationAndAssignmentInspection :
             .asSequence()
             .map { it.resolve() }
 
-    context(KtAnalysisSession)
+    context(KaSession)
     private fun Sequence<PsiElement>.anyOfHasReference(element: KtProperty) = any { it.hasReference(element) }
 
-    context(KtAnalysisSession)
+    context(KaSession)
     private fun PsiElement.hasReference(element: KtProperty): Boolean {
-        val declarationName = (element.getSymbol() as? KtPossiblyNamedSymbol)?.name.toString()
+        val declarationName = element.symbol?.name.toString()
         return anyDescendantOfType<KtNameReferenceExpression> {
             it.text == declarationName && it.reference?.isReferenceTo(element) ?: false
         }
     }
 
-    context(KtAnalysisSession)
-    private fun isSubtype(type: KtType?, superType: KtType?): Boolean {
+    context(KaSession)
+    private fun isSubtype(type: KaType?, superType: KaType?): Boolean {
         if (type == null || superType == null) return false
         return type.isPossiblySubTypeOf(superType)
     }
@@ -365,11 +367,11 @@ internal class JoinDeclarationAndAssignmentInspection :
 
     private fun PsiElement.nextSiblings(): Sequence<PsiElement> = siblings(forward = true, withItself = false)
 
-    context(KtAnalysisSession)
-    private fun equalNullableTypes(type1: KtType?, type2: KtType?): Boolean {
+    context(KaSession)
+    private fun equalNullableTypes(type1: KaType?, type2: KaType?): Boolean {
         if (type1 == null) return type2 == null
         if (type2 == null) return false
-        return type1.isEqualTo(type2)
+        return type1.semanticallyEquals(type2)
     }
 
     private fun ModPsiUpdater.update(newProperty: KtProperty, canOmitDeclaredType: Boolean) {

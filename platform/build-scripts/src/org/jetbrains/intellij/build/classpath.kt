@@ -3,13 +3,12 @@
 
 package org.jetbrains.intellij.build
 
-import com.intellij.platform.diagnostic.telemetry.helpers.useWithoutActiveScope
 import com.intellij.platform.util.putMoreLikelyPluginJarsFirst
 import com.intellij.util.lang.HashMapZipFile
 import io.opentelemetry.api.common.AttributeKey
+import io.opentelemetry.api.trace.Span
 import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap
 import org.jetbrains.annotations.VisibleForTesting
-import org.jetbrains.intellij.build.TraceManager.spanBuilder
 import org.jetbrains.intellij.build.impl.ModuleOutputPatcher
 import org.jetbrains.intellij.build.impl.PlatformJarNames
 import org.jetbrains.intellij.build.impl.PluginLayout
@@ -17,6 +16,8 @@ import org.jetbrains.intellij.build.impl.projectStructureMapping.DistributionFil
 import org.jetbrains.intellij.build.io.INDEX_FILENAME
 import org.jetbrains.intellij.build.io.PackageIndexBuilder
 import org.jetbrains.intellij.build.io.transformZipUsingTempFile
+import org.jetbrains.intellij.build.telemetry.TraceManager.spanBuilder
+import org.jetbrains.intellij.build.telemetry.use
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
 import java.io.InputStream
@@ -47,22 +48,22 @@ private val sourceToNames: Map<String, MutableList<String>> by lazy {
   sourceToNames
 }
 
-fun reorderJar(relativePath: String, file: Path) {
+suspend fun reorderJar(relativePath: String, file: Path) {
   val orderedNames = sourceToNames.get(relativePath) ?: return
   spanBuilder("reorder jar")
     .setAttribute("relativePath", relativePath)
     .setAttribute("file", file.toString())
-    .useWithoutActiveScope {
+    .use {
       reorderJar(jarFile = file, orderedNames = orderedNames)
     }
 }
 
 internal val excludedLibJars: Set<String> = java.util.Set.of(PlatformJarNames.TEST_FRAMEWORK_JAR)
 
-internal fun generateClasspath(homeDir: Path, libDir: Path): List<String> {
-  spanBuilder("generate classpath")
+internal suspend fun generateClasspath(homeDir: Path, libDir: Path): List<String> {
+  return spanBuilder("generate classpath")
     .setAttribute("dir", homeDir.toString())
-    .useWithoutActiveScope { span ->
+    .use { span ->
       val existing = HashSet<Path>()
       addJarsFromDir(dir = libDir) { paths ->
         paths.filterTo(existing) { !excludedLibJars.contains(it.fileName.toString()) }
@@ -70,7 +71,7 @@ internal fun generateClasspath(homeDir: Path, libDir: Path): List<String> {
       val files = computeAppClassPath(libDir = libDir, existing = existing, homeDir = homeDir)
       val result = files.map { libDir.relativize(it).toString() }
       span.setAttribute(AttributeKey.stringArrayKey("result"), result)
-      return result
+      result
     }
 }
 
@@ -111,6 +112,7 @@ fun readClassLoadingLog(classLoadingLog: InputStream, rootDir: Path): Map<Path, 
   return sourceToNames
 }
 
+@VisibleForTesting
 fun reorderJar(jarFile: Path, orderedNames: List<String>) {
   val orderedNameToIndex = Object2IntOpenHashMap<String>(orderedNames.size)
   orderedNameToIndex.defaultReturnValue(-1)
@@ -118,16 +120,21 @@ fun reorderJar(jarFile: Path, orderedNames: List<String>) {
     orderedNameToIndex.put(orderedName, index)
   }
 
-  return transformZipUsingTempFile(jarFile) { zipCreator ->
-    val packageIndexBuilder = PackageIndexBuilder()
+  val sourceZipFile = HashMapZipFile.loadIfNotEmpty(jarFile)
+  if (sourceZipFile == null) {
+    Span.current().addEvent("skip - file is empty")
+    return
+  }
 
-    HashMapZipFile.load(jarFile).use { sourceZip ->
+  sourceZipFile.use { sourceZip ->
+    val packageIndexBuilder = PackageIndexBuilder()
+    return transformZipUsingTempFile(jarFile, packageIndexBuilder.indexWriter) { zipCreator ->
       val entries = sourceZip.entries.filterTo(mutableListOf()) { !it.isDirectory && it.name != INDEX_FILENAME }
       // ignore the existing package index on reorder - a new one will be computed even if it is the same, do not optimize for simplicity
-      entries.sortWith(Comparator { o1, o2 ->
+      entries.sortWith { o1, o2 ->
         val o2p = o2.name
         if ("META-INF/plugin.xml" == o2p) {
-          return@Comparator Int.MAX_VALUE
+          return@sortWith Int.MAX_VALUE
         }
 
         val o1p = o1.name
@@ -144,14 +151,13 @@ fun reorderJar(jarFile: Path, orderedNames: List<String>) {
             if (i2 == -1) -1 else (i1 - i2)
           }
         }
-      })
+      }
 
       for (entry in entries) {
         packageIndexBuilder.addFile(entry.name)
         zipCreator.uncompressedData(
           nameString = entry.name,
-          data = entry.getByteBuffer(sourceZip),
-          indexWriter = packageIndexBuilder.indexWriter,
+          data = entry.getByteBuffer(sourceZip, null),
         )
       }
       packageIndexBuilder.writePackageIndex(zipCreator)
@@ -161,6 +167,7 @@ fun reorderJar(jarFile: Path, orderedNames: List<String>) {
 
 internal data class PluginBuildDescriptor(
   @JvmField val dir: Path,
+  @JvmField val os: OsFamily?,
   @JvmField val layout: PluginLayout,
   @JvmField val moduleNames: List<String>,
 )
@@ -217,7 +224,23 @@ internal fun generatePluginClassPath(pluginEntries: List<Pair<PluginBuildDescrip
       putMoreLikelyPluginJarsFirst(pluginDir.fileName.toString(), filesInLibUnderPluginDir = files)
     }
 
-    writeEntry(out = out, files = files, pluginDir = pluginDir, pluginDescriptorContent = moduleOutputPatcher.getPatchedPluginXml(pluginAsset.layout.mainModule))
+    var pluginDescriptorContent: ByteArray? = null
+    for (file in files) {
+      if (file.toString().endsWith(".jar")) {
+        pluginDescriptorContent = HashMapZipFile.load(file).use { zip ->
+          zip.getRawEntry("META-INF/plugin.xml")?.getData(zip)
+        }
+        if (pluginDescriptorContent != null) {
+          break
+        }
+      }
+    }
+
+    if (pluginDescriptorContent == null) {
+      pluginDescriptorContent = moduleOutputPatcher.getPatchedPluginXml(pluginAsset.layout.mainModule)
+    }
+
+    writeEntry(out = out, files = files, pluginDir = pluginDir, pluginDescriptorContent = pluginDescriptorContent)
   }
 
   out.close()

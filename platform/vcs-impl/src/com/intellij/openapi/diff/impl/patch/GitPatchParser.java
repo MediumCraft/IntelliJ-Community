@@ -8,10 +8,7 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.FileStatus;
 import com.intellij.openapi.vcs.VcsBundle;
 import com.intellij.vcsUtil.VcsFileUtil;
-import org.jetbrains.annotations.Nls;
-import org.jetbrains.annotations.NonNls;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.*;
 
 import java.util.ListIterator;
 import java.util.regex.Matcher;
@@ -20,6 +17,7 @@ import java.util.regex.Pattern;
 import static com.intellij.openapi.diff.impl.patch.PatchReader.HASH_PATTERN;
 import static com.intellij.openapi.diff.impl.patch.PatchReader.PatchContentParser.stripPatchNameIfNeeded;
 
+@ApiStatus.Internal
 public final class GitPatchParser {
   @NonNls private static final String DIFF_GIT_HEADER_LINE = "diff --git";
   @NonNls private static final Pattern SIMPLE_HEADER_PATTERN = Pattern.compile(DIFF_GIT_HEADER_LINE + "\\s+(\\S+)\\s+(\\S+).*"); // NB: can't handle whitespaces in file names
@@ -125,9 +123,11 @@ public final class GitPatchParser {
     // 'patch.getBeforeName() | getAfterName()' values pre-filled from '--- a/1.txt | +++ b/1.txt' lines
     if (patch.getBeforeName() == null || patchInfo.myPreferPatchInfoPaths) patch.setBeforeName(patchInfo.myBeforeName);
     if (patch.getAfterName() == null || patchInfo.myPreferPatchInfoPaths) patch.setAfterName(patchInfo.myAfterName);
-    //remember sha-1 as version ids or set null if no info
-    patch.setBeforeVersionId(patchInfo.myBeforeIndex);
-    patch.setAfterVersionId(patchInfo.myAfterIndex);
+    //remember sha-1 as version ids, but keep '(revision <hash>)' suffixes from TextPatchBuilder.REVISION_NAME_TEMPLATE
+    if (patchInfo.myBeforeIndex != null || patchInfo.myAfterIndex != null) {
+      patch.setBeforeVersionId(patchInfo.myBeforeIndex);
+      patch.setAfterVersionId(patchInfo.myAfterIndex);
+    }
     //set new file mode
     patch.setNewFileMode(patchInfo.myNewFileMode);
   }

@@ -6,8 +6,10 @@ import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.*
 import com.intellij.openapi.components.service
+import com.intellij.openapi.diagnostic.ControlFlowException
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.util.BackgroundTaskUtil
 import com.intellij.openapi.project.Project
@@ -23,6 +25,9 @@ import com.intellij.testFramework.LightVirtualFile
 import com.intellij.util.applyIf
 import com.intellij.util.ui.EDT.isCurrentThreadEdt
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.withContext
 import org.jetbrains.kotlin.idea.base.plugin.KotlinPluginModeProvider
 import org.jetbrains.kotlin.idea.core.KotlinPluginDisposable
 import org.jetbrains.kotlin.idea.core.script.ScriptDependenciesModificationTracker
@@ -34,7 +39,6 @@ import org.jetbrains.kotlin.scripting.resolve.ScriptCompilationConfigurationWrap
 import org.jetbrains.kotlin.utils.addToStdlib.ifFalse
 import org.jetbrains.kotlin.utils.addToStdlib.ifTrue
 import java.nio.file.Paths
-import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
@@ -59,10 +63,8 @@ abstract class ScriptClassRootsUpdater(
     val manager: CompositeScriptConfigurationManager,
     val scope: CoroutineScope
 ) {
-    private var lastSeen: ScriptClassRootsCache? = null
     private var invalidated: Boolean = false
     private var syncUpdateRequired: Boolean = false
-    private val concurrentUpdates = AtomicInteger()
     private val invalidationLock = ReentrantLock()
     private val updateState = AtomicReference(UpdateState.NONE)
 
@@ -75,11 +77,16 @@ abstract class ScriptClassRootsUpdater(
         // update process is scheduled for the future
         SCHEDULED,
         // update process runs right now
-        RUNNING }
+        RUNNING
+    }
 
     abstract fun gatherRoots(builder: ScriptClassRootsBuilder)
 
     abstract fun afterUpdate()
+
+    abstract fun onTrivialUpdate()
+
+    abstract fun onUpdateException(exception: Exception)
 
     private fun recreateRootsCache(): ScriptClassRootsCache {
         val builder = ScriptClassRootsBuilder(project)
@@ -126,7 +133,6 @@ abstract class ScriptClassRootsUpdater(
      */
     fun invalidate(synchronous: Boolean = false) {
         invalidationLock.withLock {
-            checkHasTransactionToHappen()
             invalidated = true
             if (synchronous) {
                 syncUpdateRequired = true
@@ -148,15 +154,10 @@ abstract class ScriptClassRootsUpdater(
      * @see performUpdate
      */
     fun isTransactionAboutToHappen(): Boolean {
-        return concurrentUpdates.get() > 0
-    }
-
-    fun checkHasTransactionToHappen() {
-        check(isTransactionAboutToHappen())
+        return updateState.get() != UpdateState.NONE
     }
 
     inline fun <T> update(body: () -> T): T {
-        beginUpdating()
         return try {
             body()
         } finally {
@@ -164,13 +165,7 @@ abstract class ScriptClassRootsUpdater(
         }
     }
 
-    fun beginUpdating() {
-        concurrentUpdates.incrementAndGet()
-    }
-
     fun commit() {
-        concurrentUpdates.decrementAndGet()
-
         // run update even in inner transaction
         // (outer transaction may be async, so it would be better to not wait it)
         scheduleUpdateIfInvalid()
@@ -204,21 +199,21 @@ abstract class ScriptClassRootsUpdater(
         val disposable = KotlinPluginDisposable.getInstance(project)
         if (disposable.disposed) return
 
-        beginUpdating()
         when {
             synchronous -> updateSynchronously()
             else -> ensureUpdateScheduled(disposable)
         }
     }
 
-
     private fun ensureUpdateScheduled(parentDisposable: Disposable) {
         if (updateState.compareAndSet(UpdateState.NONE, UpdateState.SCHEDULED)) {
             scheduledUpdate = BackgroundTaskUtil.submitTask(parentDisposable) {
                 if (updateState.compareAndSet(UpdateState.SCHEDULED, UpdateState.RUNNING)) {
-                    doUpdate()
+                    doUpdate(synchronous = false)
                 }
             }
+        } else {
+            LOG.debug("Will not schedule update, state: ${updateState.get()}")
         }
     }
 
@@ -227,71 +222,116 @@ abstract class ScriptClassRootsUpdater(
         if (previousState == UpdateState.SCHEDULED) {
             scheduledUpdate?.cancel()
         }
-        doUpdate()
+        doUpdate(synchronous = true)
     }
 
-    private fun doUpdate(underProgressManager: Boolean = true) {
+    private fun doUpdate(synchronous: Boolean, underProgressManager: Boolean = true) {
         val disposable = KotlinPluginDisposable.getInstance(project)
+        var shouldRescheduleOnException = false
         try {
-            val updates = recreateRootsCacheAndDiff()
-
-            if (!updates.changed) return
-
-            if (underProgressManager) {
-                ProgressManager.checkCanceled()
+            doUpdateImpl(underProgressManager, disposable)
+        } catch (ex: ProcessCanceledException) {
+            shouldRescheduleOnException = true
+            throw ex
+        } catch (ex: Exception) {
+            if (ex is ControlFlowException) {
+                throw ex
             }
-
-            if (disposable.disposed) return
-
-            val manager = VirtualFileManager.getInstance()
-            val updatedScriptPaths = when (updates) {
-                is ScriptClassRootsCache.IncrementalUpdates -> updates.updatedScripts
-                else -> updates.cache.scriptsPaths()
-            }
-
-            updatedScriptPaths.takeUnless { it.isEmpty() }?.asSequence()
-                ?.map {
-                    val byNioPath = manager.findFileByNioPath(Paths.get(it))
-                    if (byNioPath == null) { // e.g. jupyter notebooks have their .kts in memory only
-                        val path = it.applyIf(it.startsWith("/")) { it.replaceFirst("/", "") }
-                        LightVirtualFile(path)
-                    } else {
-                        byNioPath
-                    }
-                }
-                ?.let { updatedScriptFiles ->
-                    val actualScriptPaths = updates.cache.scriptsPaths()
-                    val (filesToAddOrUpdate, filesToRemove) = updatedScriptFiles.partition { actualScriptPaths.contains(it.path) }
-
-                    // Here we're sometimes under read-lock.
-                    // There is no way to acquire write-lock (on EDT) without releasing this thread.
-
-                    applyDiffToModelAsync(filesToAddOrUpdate, filesToRemove)
-                }
-
-            if (updates.hasNewRoots) {
-                runInEdt(ModalityState.nonModal()) {
-                    runWriteAction {
-                        if (project.isDisposed) return@runWriteAction
-                        ScriptDependenciesModificationTracker.getInstance(project).incModificationCount()
-                    }
-                }
-            }
-
-            runReadAction {
-                if (project.isDisposed) return@runReadAction
-
-                if (updates.hasUpdatedScripts) {
-                    updateHighlighting(project) { file -> updates.isScriptChanged(file.path) }
-                }
-
-                val scriptClassRootsCache = updates.cache
-                lastSeen = scriptClassRootsCache
-            }
+            LOG.error("Exception during script roots update", ex)
+            onUpdateException(ex)
         } finally {
             scheduledUpdate = null
             updateState.set(UpdateState.NONE)
-            concurrentUpdates.decrementAndGet()
+            // reschedule if happened in async call
+            if (shouldRescheduleOnException && !synchronous && !disposable.disposed) {
+                ensureUpdateScheduled(disposable)
+            }
+        }
+    }
+
+    private fun doUpdateImpl(underProgressManager: Boolean, disposable: KotlinPluginDisposable) {
+        val updates = recreateRootsCacheAndDiff()
+
+        if (!updates.changed) {
+            LOG.debug("Does not have any new updates, aborting")
+            return
+        }
+
+        if (underProgressManager) {
+            ProgressManager.checkCanceled()
+        }
+        if (disposable.disposed) return
+
+        updateConfigurationInScriptRoots(updates)
+        if (updates.hasNewRoots) {
+            updateModificationTracker()
+        }
+
+        launchHighlightingUpdateIfNeeded(updates)
+    }
+
+    private fun updateConfigurationInScriptRoots(updates: ScriptClassRootsCache.Updates) {
+        val manager = VirtualFileManager.getInstance()
+
+        val updatedScriptPaths = when (updates) {
+            is ScriptClassRootsCache.IncrementalUpdates -> updates.updatedScripts
+            else -> updates.cache.scriptsPaths()
+        }
+
+        val scriptVirtualFiles = updatedScriptPaths.takeUnless { it.isEmpty() }
+        // the current update is finished
+        if (scriptVirtualFiles == null) {
+            onTrivialUpdate()
+            return
+        }
+
+        val updatedScriptFiles = scriptVirtualFiles.asSequence()
+            .map {
+                val byNioPath = manager.findFileByNioPath(Paths.get(it))
+                if (byNioPath == null) { // e.g. jupyter notebooks have their .kts in memory only
+                    val path = it.applyIf(it.startsWith("/")) { it.replaceFirst("/", "") }
+                    LightVirtualFile(path)
+                } else {
+                    byNioPath
+                }
+            }
+
+        val actualScriptPaths = updates.cache.scriptsPaths()
+        val (filesToAddOrUpdate, filesToRemove) = updatedScriptFiles.partition { actualScriptPaths.contains(it.path) }
+
+        // Here we're sometimes under read-lock.
+        // There is no way to acquire write-lock (on EDT) without releasing this thread.
+        applyDiffToModelAsync(filesToAddOrUpdate, filesToRemove)
+    }
+
+    private fun launchHighlightingUpdateIfNeeded(updates: ScriptClassRootsCache.Updates) {
+        if (!updates.hasUpdatedScripts) {
+            return
+        }
+
+        scope.async {
+            readAction {
+                if (project.isDisposed) return@readAction
+
+                runCatching {
+                    updateHighlighting(project) { file -> updates.isScriptChanged(file.path) }
+                }.onFailure {
+                    if (it is ControlFlowException) {
+                        throw it
+                    }
+                    LOG.error("Failed to update highlighting", it)
+                }
+            }
+        }
+    }
+
+    private fun updateModificationTracker() = scope.async {
+        withContext(Dispatchers.EDT) {
+            writeAction {
+                if (project.isDisposed) return@writeAction
+
+                ScriptDependenciesModificationTracker.getInstance(project).incModificationCount()
+            }
         }
     }
 
@@ -327,6 +367,9 @@ abstract class ScriptClassRootsUpdater(
             if (!replaced) {
                 // initiate update once again
                 applyDiffToModelAsync(filesToAddOrUpdate, filesToRemove)
+            } else {
+                // notify after changes are applied
+                afterUpdate()
             }
         }
     }
@@ -336,8 +379,7 @@ abstract class ScriptClassRootsUpdater(
             val old = cache.get()
             val new = recreateRootsCache()
             if (cache.compareAndSet(old, new)) {
-                afterUpdate()
-                return new.diff(lastSeen)
+                return new.diff(old)
             }
         }
     }

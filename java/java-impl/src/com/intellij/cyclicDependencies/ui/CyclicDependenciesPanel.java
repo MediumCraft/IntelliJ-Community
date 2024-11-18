@@ -25,7 +25,6 @@ import com.intellij.ui.content.Content;
 import com.intellij.ui.treeStructure.Tree;
 import com.intellij.util.EditSourceOnDoubleClickHandler;
 import com.intellij.util.ui.tree.TreeUtil;
-import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -38,7 +37,7 @@ import java.awt.*;
 import java.util.List;
 import java.util.*;
 
-public final class CyclicDependenciesPanel extends JPanel implements Disposable, DataProvider {
+public final class CyclicDependenciesPanel extends JPanel implements Disposable, UiDataProvider {
   private static final Set<PsiFile> EMPTY_FILE_SET = new HashSet<>(0);
 
   private final HashMap<PsiPackage, Set<List<PsiPackage>>> myDependencies;
@@ -337,11 +336,8 @@ public final class CyclicDependenciesPanel extends JPanel implements Disposable,
   }
 
   @Override
-  public @Nullable @NonNls Object getData(@NotNull @NonNls String dataId) {
-    if (PlatformCoreDataKeys.HELP_ID.is(dataId)) {
-      return "dependency.viewer.tool.window";
-    }
-    return null;
+  public void uiDataSnapshot(@NotNull DataSink sink) {
+    sink.set(PlatformCoreDataKeys.HELP_ID, "dependency.viewer.tool.window");
   }
 
   private class MyTreeCellRenderer extends ColoredTreeCellRenderer {
@@ -492,14 +488,11 @@ public final class CyclicDependenciesPanel extends JPanel implements Disposable,
     }
   }
 
-  private static class MyTree extends Tree implements DataProvider {
+  private static class MyTree extends Tree implements UiDataProvider {
     @Override
-    public Object getData(@NotNull String dataId) {
+    public void uiDataSnapshot(@NotNull DataSink sink) {
       PackageDependenciesNode node = getSelectedNode();
-      if (CommonDataKeys.NAVIGATABLE.is(dataId)) {
-        return node;
-      }
-      return null;
+      sink.set(CommonDataKeys.NAVIGATABLE, node);
     }
 
     public @Nullable PackageDependenciesNode getSelectedNode() {

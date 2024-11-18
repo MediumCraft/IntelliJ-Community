@@ -2,15 +2,16 @@
 package org.jetbrains.kotlin.idea.codeinsight.utils
 
 import com.intellij.lang.jvm.JvmModifier
+import com.intellij.psi.PsiComment
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiMember
 import com.intellij.psi.PsiMethod
 import com.intellij.psi.tree.IElementType
 import org.jetbrains.kotlin.KtNodeTypes
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
-import org.jetbrains.kotlin.analysis.api.calls.singleFunctionCallOrNull
-import org.jetbrains.kotlin.analysis.api.calls.symbol
-import org.jetbrains.kotlin.analysis.api.symbols.KtSymbolOrigin
+import org.jetbrains.kotlin.analysis.api.KaSession
+import org.jetbrains.kotlin.analysis.api.resolution.singleFunctionCallOrNull
+import org.jetbrains.kotlin.analysis.api.resolution.symbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaSymbolOrigin
 import org.jetbrains.kotlin.builtins.StandardNames
 import org.jetbrains.kotlin.idea.base.psi.copied
 import org.jetbrains.kotlin.idea.base.psi.deleteBody
@@ -49,8 +50,9 @@ fun KtContainerNode.getControlFlowElementDescription(): String? {
  * TODO: We place this function in kotlin.code-insight.utils because it looks specific for redundant-getter-inspection.
  *       However, if we find some cases later that need this function for a general-purpose, we should move it to kotlin.base.psi.
  */
-fun KtPropertyAccessor.isRedundantGetter(): Boolean {
+fun KtPropertyAccessor.isRedundantGetter(respectComments: Boolean = true): Boolean {
     if (!isGetter) return false
+    if (respectComments && anyDescendantOfType<PsiComment>()) return false
     val expression = bodyExpression ?: return canBeCompletelyDeleted()
     if (expression.isBackingFieldReferenceTo(property)) return true
     if (expression is KtBlockExpression) {
@@ -111,8 +113,9 @@ fun renameToUnderscore(declaration: KtCallableDeclaration) {
 val KtParameter.isSetterParameter: Boolean
     get() = (parent.parent as? KtPropertyAccessor)?.isSetter == true
 
-fun KtPropertyAccessor.isRedundantSetter(): Boolean {
+fun KtPropertyAccessor.isRedundantSetter(respectComments: Boolean = true): Boolean {
     if (!isSetter) return false
+    if (respectComments && anyDescendantOfType<PsiComment>()) return false
     val expression = bodyExpression ?: return canBeCompletelyDeleted()
     if (expression is KtBlockExpression) {
         val statement = expression.statements.singleOrNull() ?: return false
@@ -280,13 +283,20 @@ fun KtConstantExpression.getClassId(): ClassId? {
     }
 }
 
-fun KtExpression.isIntegerConstantOfValue(value: Int): Boolean {
-    val deparenthesized = KtPsiUtil.deparenthesize(this) as? KtConstantExpression ?: return false
-    return deparenthesized.elementType == KtStubElementTypes.INTEGER_CONSTANT && deparenthesized.text.toIntOrNull() == value
+private fun KtExpression.isIntegerConstantOfValue(value: Int): Boolean {
+    val deparenthesized = KtPsiUtil.deparenthesize(this) as? KtConstantExpression
+        ?: return false
+
+    return deparenthesized.elementType == KtStubElementTypes.INTEGER_CONSTANT
+            && deparenthesized.text.toIntOrNull() == value
 }
 
-fun KtExpression.isZeroIntegerConstant() = isIntegerConstantOfValue(0)
-fun KtExpression.isOneIntegerConstant() = isIntegerConstantOfValue(1)
+val KtExpression.isZeroIntegerConstant: Boolean
+    get() = isIntegerConstantOfValue(0)
+
+
+val KtExpression.isOneIntegerConstant: Boolean
+    get() = isIntegerConstantOfValue(1)
 
 fun KtPsiFactory.appendSemicolonBeforeLambdaContainingElement(element: PsiElement) {
     val previousElement = KtPsiUtil.skipSiblingsBackwardByPredicate(element) {
@@ -352,20 +362,20 @@ tailrec fun KtDotQualifiedExpression.expressionWithoutClassInstanceAsReceiver():
 fun KtClass.isOpen(): Boolean = hasModifier(KtTokens.OPEN_KEYWORD)
 fun KtClass.isInheritable(): Boolean = isOpen() || isAbstract() || isSealed()
 
-context(KtAnalysisSession)
+context(KaSession)
 fun KtExpression.isSynthesizedFunction(): Boolean {
     val symbol =
-        resolveCall()?.singleFunctionCallOrNull()?.partiallyAppliedSymbol?.symbol ?: mainReference?.resolveToSymbol() ?: return false
-    return symbol.origin == KtSymbolOrigin.SOURCE_MEMBER_GENERATED
+        resolveToCall()?.singleFunctionCallOrNull()?.partiallyAppliedSymbol?.symbol ?: mainReference?.resolveToSymbol() ?: return false
+    return symbol.origin == KaSymbolOrigin.SOURCE_MEMBER_GENERATED
 }
 
-context(KtAnalysisSession)
+context(KaSession)
 fun KtCallExpression.isCalling(fqNames: Sequence<FqName>): Boolean {
     val calleeText = calleeExpression?.text ?: return false
     val targetFqNames = fqNames.filter { it.shortName().asString() == calleeText }
     if (targetFqNames.none()) return false
 
-    val fqName = resolveCall()
+    val fqName = resolveToCall()
         ?.singleFunctionCallOrNull()
         ?.partiallyAppliedSymbol
         ?.symbol
@@ -384,7 +394,7 @@ private val KOTLIN_BUILTIN_ENUM_FUNCTION_FQ_NAMES: Sequence<FqName> = sequenceOf
     "enumValueOf",
 ).map { StandardNames.BUILT_INS_PACKAGE_FQ_NAME + it }
 
-context(KtAnalysisSession)
+context(KaSession)
 fun KtTypeReference.isReferenceToBuiltInEnumFunction(): Boolean {
     val target = (parent.getStrictParentOfType<KtTypeArgumentList>() ?: this)
         .getParentOfTypes(true, KtCallExpression::class.java, KtCallableDeclaration::class.java)
@@ -392,7 +402,7 @@ fun KtTypeReference.isReferenceToBuiltInEnumFunction(): Boolean {
         is KtCallExpression -> target.isCalling(KOTLIN_BUILTIN_ENUM_FUNCTION_FQ_NAMES)
         is KtCallableDeclaration -> {
             target.anyDescendantOfType<KtCallExpression> {
-                it.isCalling(KOTLIN_BUILTIN_ENUM_FUNCTION_FQ_NAMES) && it.isUsedAsExpression()
+                it.isCalling(KOTLIN_BUILTIN_ENUM_FUNCTION_FQ_NAMES) && it.isUsedAsExpression
             }
         }
 
@@ -400,13 +410,13 @@ fun KtTypeReference.isReferenceToBuiltInEnumFunction(): Boolean {
     }
 }
 
-context(KtAnalysisSession)
+context(KaSession)
 fun KtCallExpression.isReferenceToBuiltInEnumFunction(): Boolean {
     val calleeExpression = this.calleeExpression ?: return false
     return (calleeExpression as? KtSimpleNameExpression)?.getReferencedNameAsName() in ENUM_STATIC_METHOD_NAMES && calleeExpression.isSynthesizedFunction()
 }
 
-context(KtAnalysisSession)
+context(KaSession)
 fun KtCallableReferenceExpression.isReferenceToBuiltInEnumFunction(): Boolean {
     return this.canBeReferenceToBuiltInEnumFunction() && this.callableReference.isSynthesizedFunction()
 }

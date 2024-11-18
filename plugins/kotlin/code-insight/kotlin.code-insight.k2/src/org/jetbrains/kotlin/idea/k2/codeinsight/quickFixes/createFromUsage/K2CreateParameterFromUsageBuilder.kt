@@ -11,14 +11,14 @@ import com.intellij.psi.SmartPointerManager
 import com.intellij.psi.SmartPsiElementPointer
 import com.intellij.psi.util.PsiUtil
 import com.intellij.psi.util.findParentOfType
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
+import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.analyze
-import org.jetbrains.kotlin.analysis.api.calls.singleFunctionCallOrNull
-import org.jetbrains.kotlin.analysis.api.calls.symbol
-import org.jetbrains.kotlin.analysis.api.types.KtErrorType
-import org.jetbrains.kotlin.analysis.api.types.KtType
+import org.jetbrains.kotlin.analysis.api.resolution.singleFunctionCallOrNull
+import org.jetbrains.kotlin.analysis.api.resolution.symbol
+import org.jetbrains.kotlin.analysis.api.types.KaErrorType
+import org.jetbrains.kotlin.analysis.api.types.KaType
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
-import org.jetbrains.kotlin.idea.k2.codeinsight.quickFixes.createFromUsage.K2CreateFromUsageUtil.convertToClass
+import org.jetbrains.kotlin.idea.k2.codeinsight.quickFixes.createFromUsage.K2CreateFunctionFromUsageUtil.convertToClass
 import org.jetbrains.kotlin.idea.k2.refactoring.introduce.K2ExtractableSubstringInfo
 import org.jetbrains.kotlin.idea.k2.refactoring.introduce.extractionEngine.approximateWithResolvableType
 import org.jetbrains.kotlin.idea.k2.refactoring.introduceParameter.KotlinFirIntroduceParameterHandler
@@ -54,7 +54,7 @@ object K2CreateParameterFromUsageBuilder {
         val expression = arg.getArgumentExpression()?: return null
         analyze (arg) {
             val callExpression = (arg.parent?.parent as? KtCallElement) ?: return null
-            val call = callExpression.resolveCall()?.singleFunctionCallOrNull() ?: return null
+            val call = callExpression.resolveToCall()?.singleFunctionCallOrNull() ?: return null
             val namedDeclaration = call.partiallyAppliedSymbol.symbol.psi as? KtNamedDeclaration ?: return null
             val namedDeclClass = if (namedDeclaration is KtConstructor<*>) namedDeclaration.getContainingClassOrObject() else namedDeclaration
             val valVar = if (namedDeclClass is KtClass && (namedDeclClass.isData() || namedDeclClass.isAnnotation()))
@@ -62,7 +62,7 @@ object K2CreateParameterFromUsageBuilder {
             return CreateParameterFromUsageAction(expression, name, valVar, namedDeclaration)
         }
     }
-    fun generateCreateParameterActionForComponentFunctionMissing(arg: PsiElement, destructingType: KtType): IntentionAction? {
+    fun generateCreateParameterActionForComponentFunctionMissing(arg: PsiElement, destructingType: KaType): IntentionAction? {
         val decl = arg.findParentOfType<KtDestructuringDeclaration>(strict = false) ?: return null
         val lastEntry = decl.entries.lastOrNull()
         val name = lastEntry?.name?:return null
@@ -93,33 +93,31 @@ object K2CreateParameterFromUsageBuilder {
         }
 
         override fun startInWriteAction(): Boolean = false
-        override fun isAvailable(project: Project, editor: Editor?, file: PsiFile?): Boolean {
-            return originalExprPointer.element != null
-        }
+        override fun isAvailable(project: Project, editor: Editor?, file: PsiFile?): Boolean = originalExprPointer.element != null
         override fun getFamilyName(): String = KotlinBundle.message("fix.create.from.usage.family")
 
-        context(KtAnalysisSession)
-        private fun getExpectedType(expression: KtExpression): KtType {
+        context(KaSession)
+        private fun getExpectedType(expression: KtExpression): KaType {
             if (expression is KtDestructuringDeclarationEntry) {
-                val type = expression.getReturnKtType()
-                return if (type is KtErrorType) builtinTypes.ANY else type
+                val type = expression.returnType
+                return if (type is KaErrorType) builtinTypes.any else type
             }
             val physicalExpression = expression.substringContextOrThis
             val type = if (physicalExpression is KtProperty && physicalExpression.isLocal) {
-                physicalExpression.getReturnKtType()
+                physicalExpression.returnType
             } else {
-                (expression.extractableSubstringInfo as? K2ExtractableSubstringInfo)?.guessLiteralType() ?: physicalExpression.getKtType()
+                (expression.extractableSubstringInfo as? K2ExtractableSubstringInfo)?.guessLiteralType() ?: physicalExpression.expressionType
             }
             val approximatedType = approximateWithResolvableType(type, physicalExpression)
-            if (approximatedType!=null && approximatedType != builtinTypes.UNIT) { return approximatedType }
+            if (approximatedType != null && !approximatedType.semanticallyEquals(builtinTypes.unit)) { return approximatedType }
 
-            expression.getExpectedType()?.let { return it }
+            expression.expectedType?.let { return it }
             val binaryExpression = expression.getAssignmentByLHS()
             val right = binaryExpression?.right
-            right?.getKtType()?.let { return it }
-            right?.getExpectedType()?.let { return it }
-            (expression.parent as? KtDeclaration)?.getReturnKtType()?.let { return it }
-            return builtinTypes.ANY
+            right?.expressionType?.let { return it }
+            right?.expectedType?.let { return it }
+            (expression.parent as? KtDeclaration)?.returnType?.let { return it }
+            return builtinTypes.any
         }
 
         private fun runChangeSignature(
@@ -141,7 +139,15 @@ object K2CreateParameterFromUsageBuilder {
                     return descriptor
                 }
             }
-            KotlinFirIntroduceParameterHandler(helper).addParameter(project, editor, originalExpression, container, { getExpectedType(originalExpression) }, { _ -> listOf(name) })
+            KotlinFirIntroduceParameterHandler(helper).addParameter(
+                project,
+                editor,
+                originalExpression,
+                container,
+                { getExpectedType(originalExpression) },
+                { _ -> listOf(name) },
+                true
+            )
         }
     }
 }

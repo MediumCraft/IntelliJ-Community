@@ -6,12 +6,14 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.*;
 import com.intellij.openapi.editor.event.CaretListener;
 import com.intellij.openapi.editor.markup.TextAttributes;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Collections;
 import java.util.List;
 
+@ApiStatus.Internal
 public class ImaginaryCaretModel implements CaretModel {
   private final ImaginaryEditor myEditor;
   private final ImaginaryCaret myCaret;
@@ -29,7 +31,7 @@ public class ImaginaryCaretModel implements CaretModel {
 
   @Override
   public @NotNull Caret getCurrentCaret() {
-    return myCaret;
+    return getPrimaryCaret();
   }
 
   protected RuntimeException notImplemented() {
@@ -73,7 +75,7 @@ public class ImaginaryCaretModel implements CaretModel {
 
   @Override
   public @NotNull List<Caret> getAllCarets() {
-    return Collections.singletonList(myCaret);
+    return Collections.singletonList(getCurrentCaret());
   }
 
   @Override
@@ -112,10 +114,10 @@ public class ImaginaryCaretModel implements CaretModel {
     }
     CaretState state = caretStates.get(0);
     if (state.getCaretPosition() != null) {
-      myCaret.moveToOffset(myEditor.logicalPositionToOffset(state.getCaretPosition()));
+      getCurrentCaret().moveToOffset(myEditor.logicalPositionToOffset(state.getCaretPosition()));
     }
     if (state.getSelectionStart() != null && state.getSelectionEnd() != null && !state.getSelectionStart().equals(state.getSelectionEnd())) {
-      myCaret.setSelection(myEditor.logicalPositionToOffset(state.getSelectionStart()),
+      getCurrentCaret().setSelection(myEditor.logicalPositionToOffset(state.getSelectionStart()),
                            myEditor.logicalPositionToOffset(state.getSelectionEnd()));
     }
   }
@@ -123,21 +125,21 @@ public class ImaginaryCaretModel implements CaretModel {
   @Override
   public @NotNull List<CaretState> getCaretsAndSelections() {
     return Collections.singletonList(
-      new CaretState(myCaret.getLogicalPosition(),
+      new CaretState(getCurrentCaret().getLogicalPosition(),
                      0,
-                     myEditor.offsetToLogicalPosition(myCaret.getSelectionStart()),
-                     myEditor.offsetToLogicalPosition(myCaret.getSelectionEnd()))
+                     myEditor.offsetToLogicalPosition(getCurrentCaret().getSelectionStart()),
+                     myEditor.offsetToLogicalPosition(getCurrentCaret().getSelectionEnd()))
     );
   }
 
   @Override
   public void runForEachCaret(@NotNull CaretAction action) {
-    action.perform(myCaret);
+    action.perform(getCurrentCaret());
   }
 
   @Override
   public void runForEachCaret(@NotNull CaretAction action, boolean reverseOrder) {
-    action.perform(myCaret);
+    action.perform(getCurrentCaret());
   }
 
   @Override

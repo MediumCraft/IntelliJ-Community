@@ -50,6 +50,8 @@ import java.util.Objects;
  * For example, instead of pushing <code>SomeLanguageDialect</code> instances, push <code>someLanguageDialect.getName()</code> and
  * restore <code>SomeLanguageDialect</code> by name where needed.
  */
+@ApiStatus.Experimental
+@ApiStatus.OverrideOnly
 public interface FilePropertyPusher<T> {
   ExtensionPointName<FilePropertyPusher<?>> EP_NAME = ExtensionPointName.create("com.intellij.filePropertyPusher");
 

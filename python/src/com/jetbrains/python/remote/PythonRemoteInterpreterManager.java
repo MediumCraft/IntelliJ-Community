@@ -62,12 +62,12 @@ public abstract class PythonRemoteInterpreterManager {
   }
 
   public static void addHelpersMapping(@NotNull RemoteSdkProperties data, @NotNull PyRemotePathMapper pathMapper) {
-    pathMapper.addMapping(PythonHelpersLocator.getHelpersRoot().getPath(), data.getHelpersPath(), PyPathMappingType.HELPERS);
+    pathMapper.addMapping(PythonHelpersLocator.getCommunityHelpersRoot().toString(), data.getHelpersPath(), PyPathMappingType.HELPERS);
   }
 
   public static @NotNull PyRemotePathMapper appendBasicMappings(@Nullable Project project,
                                                                 @Nullable PyRemotePathMapper pathMapper,
-                                                                @NotNull RemoteSdkAdditionalData<?> data) {
+                                                                @NotNull RemoteSdkAdditionalData data) {
     @NotNull PyRemotePathMapper newPathMapper = PyRemotePathMapper.cloneMapper(pathMapper);
 
     addHelpersMapping(data, newPathMapper);

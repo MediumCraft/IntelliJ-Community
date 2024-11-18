@@ -8,46 +8,41 @@ import com.intellij.openapi.externalSystem.model.task.ExternalSystemTaskType.RES
 import com.intellij.openapi.externalSystem.service.execution.ExternalSystemJdkUtil
 import com.intellij.openapi.externalSystem.util.ExternalSystemApiUtil
 import com.intellij.openapi.projectRoots.JdkUtil
-import com.intellij.openapi.vfs.VirtualFileManager
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.launch
 import org.jetbrains.kotlin.idea.base.plugin.KotlinPluginModeProvider
-import org.jetbrains.kotlin.idea.core.script.ScriptDefinitionContributor
-import org.jetbrains.kotlin.idea.core.script.ScriptModel
-import org.jetbrains.kotlin.idea.core.script.configureGradleScriptsK2
-import org.jetbrains.kotlin.idea.gradleJava.loadGradleDefinitions
 import org.jetbrains.kotlin.idea.gradleJava.scripting.GradleScriptDefinitionsContributor
 import org.jetbrains.kotlin.idea.gradleJava.scripting.roots.GradleBuildRootsManager
 import org.jetbrains.plugins.gradle.service.GradleInstallationManager
 import org.jetbrains.plugins.gradle.settings.GradleExecutionSettings
 import org.jetbrains.plugins.gradle.settings.GradleSettings
 import org.jetbrains.plugins.gradle.util.GradleConstants
-import java.nio.file.Path
 import java.util.*
 
-class KotlinDslSyncListener(val coroutineScope: CoroutineScope) : ExternalSystemTaskNotificationListener {
+val kotlinDslSyncListenerInstance: KotlinDslSyncListener?
+    get() =
+        ExternalSystemTaskNotificationListener.EP_NAME.findExtension(KotlinDslSyncListener::class.java)
+
+class KotlinDslSyncListener : ExternalSystemTaskNotificationListener {
     companion object {
         val instance: KotlinDslSyncListener?
             get() =
-                ExternalSystemTaskNotificationListener.EP_NAME.findExtension(KotlinDslSyncListener::class.java)
+                kotlinDslSyncListenerInstance
     }
 
     internal val tasks = WeakHashMap<ExternalSystemTaskId, KotlinDslGradleBuildSync>()
 
-    override fun onStart(id: ExternalSystemTaskId, workingDir: String?) {
+    override fun onStart(projectPath: String, id: ExternalSystemTaskId) {
         if (!id.isGradleRelatedTask()) return
 
-        if (workingDir == null) return
-        val task = KotlinDslGradleBuildSync(workingDir, id)
+        val task = KotlinDslGradleBuildSync(projectPath, id)
         synchronized(tasks) { tasks[id] = task }
 
         // project may be null in case of new project
         val project = id.findProject() ?: return
-        task.project = project
-        GradleBuildRootsManager.getInstance(project)?.markImportingInProgress(workingDir)
+        task.projectId = id.ideProjectId
+        GradleBuildRootsManager.getInstance(project)?.markImportingInProgress(projectPath)
     }
 
-    override fun onEnd(id: ExternalSystemTaskId) {
+    override fun onEnd(projectPath: String, id: ExternalSystemTaskId) {
         if (!id.isGradleRelatedTask()) return
 
         val sync = synchronized(tasks) { tasks.remove(id) } ?: return
@@ -73,24 +68,14 @@ class KotlinDslSyncListener(val coroutineScope: CoroutineScope) : ExternalSystem
                 val gradleJvm = GradleSettings.getInstance(project).getLinkedProjectSettings(sync.workingDir)?.gradleJvm
                 try {
                     ExternalSystemJdkUtil.getJdk(project, gradleJvm)?.homePath
-                } catch (e: Exception) {
+                } catch (_: Exception) {
                     null
                 }
             }
 
-        if (KotlinPluginModeProvider.isK2Mode()) {
-            val definitions = loadGradleDefinitions(sync.workingDir, sync.gradleHome, sync.javaHome, project)
-
-            val scripts = sync.models.mapNotNull {
-                val path = Path.of(it.file)
-                VirtualFileManager.getInstance().findFileByNioPath(path)?.let { virtualFile ->
-                    ScriptModel(virtualFile, it.classPath, it.sourcePath, it.imports)
-                }
-            }.toSet()
-            coroutineScope.launch { configureGradleScriptsK2(sync.javaHome, project, scripts, definitions) }
-        } else {
+        if (KotlinPluginModeProvider.isK1Mode()) {
             @Suppress("DEPRECATION")
-            ScriptDefinitionContributor.find<GradleScriptDefinitionsContributor>(project)?.reloadIfNeeded(
+            GradleScriptDefinitionsContributor.getInstance(project)?.reloadIfNeeded(
                 sync.workingDir, sync.gradleHome, sync.javaHome
             )
         }
@@ -98,14 +83,14 @@ class KotlinDslSyncListener(val coroutineScope: CoroutineScope) : ExternalSystem
         saveScriptModels(project, sync)
     }
 
-    override fun onFailure(id: ExternalSystemTaskId, e: Exception) {
+    override fun onFailure(projectPath: String, id: ExternalSystemTaskId, exception: Exception) {
         if (!id.isGradleRelatedTask()) return
 
         val sync = synchronized(tasks) { tasks[id] } ?: return
         sync.failed = true
     }
 
-    override fun onCancel(id: ExternalSystemTaskId) {
+    override fun onCancel(projectPath: String, id: ExternalSystemTaskId) {
         if (!id.isGradleRelatedTask()) return
 
         val sync = synchronized(tasks) { tasks[id] } ?: return

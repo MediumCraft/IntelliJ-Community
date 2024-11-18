@@ -14,6 +14,7 @@ import com.intellij.openapi.projectRoots.JavaSdk;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.projectRoots.SdkTypeId;
 import com.intellij.openapi.roots.ModifiableRootModel;
+import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.roots.ui.configuration.ModulesProvider;
 import com.intellij.openapi.util.InvalidDataException;
@@ -27,7 +28,6 @@ import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.idea.maven.importing.MavenProjectImporter;
 import org.jetbrains.idea.maven.importing.workspaceModel.WorkspaceModuleImporter;
 import org.jetbrains.idea.maven.model.MavenArchetype;
 import org.jetbrains.idea.maven.model.MavenId;
@@ -39,12 +39,14 @@ import org.jetbrains.idea.maven.utils.MavenLog;
 import org.jetbrains.idea.maven.utils.MavenUtil;
 
 import javax.swing.*;
-import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
 
 import static icons.OpenapiIcons.RepositoryLibraryLogo;
 
@@ -91,8 +93,7 @@ public abstract class AbstractMavenModuleBuilder extends ModuleBuilder implement
   @Override
   protected void setupModule(Module module) throws ConfigurationException {
     super.setupModule(module);
-    boolean isWorkspaceImportEnabled = MavenProjectImporter.isImportToWorkspaceModelEnabled(module.getProject());
-    var moduleVersion = isWorkspaceImportEnabled ? WorkspaceModuleImporter.ExternalSystemData.VERSION : null;
+    var moduleVersion = WorkspaceModuleImporter.ExternalSystemData.VERSION;
     ExternalSystemUtil.markModuleAsMaven(module, moduleVersion, true);
   }
 
@@ -110,24 +111,28 @@ public abstract class AbstractMavenModuleBuilder extends ModuleBuilder implement
     }
 
     MavenUtil.runWhenInitialized(project, (DumbAwareRunnable)() -> {
-      if (myEnvironmentForm != null) {
-        myEnvironmentForm.setData(MavenProjectsManager.getInstance(project).getGeneralSettings());
-      }
-
-      var future = sdkDownloadedFuture;
-      if (null != future) {
-        try {
-          future.get(); // maven sync uses project JDK
-        }
-        catch (Exception e) {
-          MavenLog.LOG.error(e);
-        }
-      }
-
-      new MavenModuleBuilderHelper(myProjectId, myAggregatorProject, myParentProject, myInheritGroupId,
-                                   myInheritVersion, myArchetype, myPropertiesToCreateByArtifact,
-                                   MavenProjectBundle.message("command.name.create.new.maven.module")).configure(project, root, false);
+      configure(project, root);
     });
+  }
+
+  private void configure(Project project, VirtualFile root) {
+    if (myEnvironmentForm != null) {
+      myEnvironmentForm.setData(MavenProjectsManager.getInstance(project).getGeneralSettings());
+    }
+
+    var future = sdkDownloadedFuture;
+    if (null != future) {
+      try {
+        future.get(); // maven sync uses project JDK
+      }
+      catch (Exception e) {
+        MavenLog.LOG.error(e);
+      }
+    }
+
+    new MavenModuleBuilderHelper(myProjectId, myAggregatorProject, myParentProject, myInheritGroupId,
+                                 myInheritVersion, myArchetype, myPropertiesToCreateByArtifact,
+                                 MavenProjectBundle.message("command.name.create.new.maven.module")).configure(project, root, false);
   }
 
   protected static void setupNewProject(Project project) {
@@ -187,7 +192,7 @@ public abstract class AbstractMavenModuleBuilder extends ModuleBuilder implement
   }
 
   @Override
-  public ModuleType getModuleType() {
+  public ModuleType<?> getModuleType() {
     return StdModuleTypes.JAVA;
   }
 
@@ -203,7 +208,12 @@ public abstract class AbstractMavenModuleBuilder extends ModuleBuilder implement
 
   protected VirtualFile createAndGetContentEntry() {
     String path = FileUtil.toSystemIndependentName(getContentEntryPath());
-    new File(path).mkdirs();
+    try {
+      Files.createDirectory(Path.of(path));
+    }
+    catch (IOException e) {
+      // ignore
+    }
     return LocalFileSystem.getInstance().refreshAndFindFileByPath(path);
   }
 
@@ -320,5 +330,13 @@ public abstract class AbstractMavenModuleBuilder extends ModuleBuilder implement
   public Project createProject(String name, String path) {
     setCreatingNewProject(true);
     return super.createProject(name, path);
+  }
+
+  @Override
+  public @Nullable Consumer<Module> createModuleConfigurator() {
+    return module -> {
+      VirtualFile root = ModuleRootManager.getInstance(module).getContentEntries()[0].getFile();
+      configure(module.getProject(), root);
+    };
   }
 }

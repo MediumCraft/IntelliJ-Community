@@ -3,6 +3,7 @@
 package org.jetbrains.kotlin.findUsages
 
 import com.intellij.codeInsight.TargetElementUtil
+import com.intellij.diagnostic.ThreadDumper
 import com.intellij.find.FindManager
 import com.intellij.find.findUsages.FindUsagesHandler
 import com.intellij.find.findUsages.FindUsagesOptions
@@ -14,6 +15,7 @@ import com.intellij.lang.jvm.JvmModifier
 import com.intellij.lang.properties.psi.PropertiesFile
 import com.intellij.lang.properties.psi.Property
 import com.intellij.openapi.application.runReadAction
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.editor.markup.TextAttributes
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
@@ -34,9 +36,11 @@ import com.intellij.usages.impl.FileStructureGroupRuleProvider
 import com.intellij.usages.impl.rules.UsageType
 import com.intellij.usages.impl.rules.UsageTypeProvider
 import com.intellij.usages.rules.ImportFilteringRule
+import com.intellij.usages.rules.UsageFilteringRule
 import com.intellij.usages.rules.UsageGroupingRule
 import com.intellij.util.CommonProcessors
 import org.jetbrains.kotlin.asJava.unwrapped
+import org.jetbrains.kotlin.config.AnalysisFlag
 import org.jetbrains.kotlin.descriptors.DeclarationDescriptor
 import org.jetbrains.kotlin.executeOnPooledThreadInReadAction
 import org.jetbrains.kotlin.findUsages.AbstractFindUsagesTest.Companion.FindUsageTestType
@@ -64,6 +68,7 @@ import org.jetbrains.kotlin.psi.psiUtil.getNonStrictParentOfType
 import org.jetbrains.kotlin.resolve.diagnostics.Diagnostics
 import org.jetbrains.kotlin.resolve.lazy.BodyResolveMode
 import java.io.File
+import java.io.StringWriter
 
 
 abstract class AbstractFindUsagesWithDisableComponentSearchTest : AbstractFindUsagesTest() {
@@ -284,6 +289,10 @@ abstract class AbstractFindUsagesTest : KotlinLightCodeInsightFixtureTestCase(),
 
                         val navigationElement = caretElement.navigationElement
                         if (navigationElement !== originalElement) {
+                            if (navigationElement.originalElement != originalElement) {
+                               println(originalElement.text)
+                               println(navigationElement.text)
+                            }
                             findUsagesAndCheckResults(
                                 mainFileText,
                                 prefixForCheck,
@@ -324,12 +333,12 @@ abstract class AbstractFindUsagesTest : KotlinLightCodeInsightFixtureTestCase(),
         private val SUPPORTED_EXTENSIONS = setOf("kt", "kts", "java", "xml", "properties", "txt", "groovy")
 
         internal fun getUsageAdapters(
-            filters: Collection<ImportFilteringRule>,
+            filters: Collection<(UsageInfo2UsageAdapter) -> Boolean>,
             usageInfos: Collection<UsageInfo>
         ): Collection<UsageInfo2UsageAdapter> = usageInfos
           .map(::UsageInfo2UsageAdapter)
           .onEach { it.updateCachedPresentation() }
-          .filter { usageAdapter -> filters.all { it.isVisible(usageAdapter) } }
+          .filter { usageAdapter -> filters.all { it(usageAdapter) } }
 
         val KtDeclaration.descriptor: DeclarationDescriptor?
             get() = if (this is KtParameter) this.resolveToParameterDescriptorIfAny(BodyResolveMode.FULL) else this.resolveToDescriptorIfAny(BodyResolveMode.FULL)
@@ -349,7 +358,11 @@ abstract class AbstractFindUsagesTest : KotlinLightCodeInsightFixtureTestCase(),
             it as T
         }): Collection<T> =
             InTextDirectivesUtils.findLinesWithPrefixesRemoved(mainFileText, directive).map {
-                mapper(Class.forName(it).getDeclaredConstructor().newInstance())
+                try {
+                  mapper(Class.forName(it).getDeclaredConstructor().newInstance())
+                } catch (e: Throwable) {
+                    mapper(Class.forName(it).kotlin.objectInstance as Any)
+                }
             }
     }
 }
@@ -394,13 +407,18 @@ internal fun <T : PsiElement> findUsagesAndCheckResults(
         ExpressionsOfTypeProcessor.mode = ExpressionsOfTypeProcessor.Mode.ALWAYS_SMART
     }
 
-    val filteringRules = AbstractFindUsagesTest.instantiateClasses<ImportFilteringRule>(mainFileText, "// FILTERING_RULES: ")
+    val importFilteringRules: List<(UsageInfo2UsageAdapter) -> Boolean> = AbstractFindUsagesTest.instantiateClasses<ImportFilteringRule>(mainFileText, "// FILTERING_RULES: ")
+        .map { rule -> { usageInfo -> rule.isVisible(usageInfo) } }
+    val filteringRules: List<(UsageInfo2UsageAdapter) -> Boolean> = AbstractFindUsagesTest.instantiateClasses<UsageFilteringRule>(mainFileText, "// USAGE_FILTERING_RULES: ")
+        .map { rule -> { usageInfo -> rule.isVisible(usageInfo, emptyArray()) } }
+
     val groupingRules =
         AbstractFindUsagesTest.instantiateClasses<UsageGroupingRule>(mainFileText, "// GROUPING_RULES: ") {
             (it as? UsageGroupingRule) ?: (it as? FileStructureGroupRuleProvider)?.getUsageGroupingRule(project) ?: error("UsageGroupingRule is expected, actual is ${it.javaClass.name}")
         }
 
-    val filteredUsages = AbstractFindUsagesTest.getUsageAdapters(filteringRules, usageInfos)
+
+    val filteredUsages = AbstractFindUsagesTest.getUsageAdapters(filteringRules + importFilteringRules, usageInfos)
 
     val usageFiles = filteredUsages.map { it.file.name }.distinct()
     val appendFileName = alwaysAppendFileName || usageFiles.size > 1
@@ -533,9 +551,31 @@ internal fun findUsages(
                 ProgressManager.getInstance().run(
                     object : Task.Modal(project, "", false) {
                         override fun run(indicator: ProgressIndicator) {
+                            val currentThread = Thread.currentThread()
+                            val thread = object : Thread("waiter") {
+                                override fun run() {
+                                    try {
+                                        sleep(10000)
+                                        if (!indicator.isCanceled) {
+
+                                            val logger = Logger.getInstance(AbstractFindUsagesTest::class.java)
+                                            logger.debug("Find usages are cancelled by timeout with the thread dump:")
+                                            val stackTrace = StringWriter()
+                                            ThreadDumper.dumpCallStack(currentThread, stackTrace, currentThread.stackTrace)
+                                            logger.debug(stackTrace.toString())
+
+                                            indicator.cancel()
+                                        }
+                                    } catch (_: InterruptedException) {
+                                        //ignore, all good
+                                    }
+                                }
+                            }
+                            thread.start()
                             runReadAction {
                                 handler.processElementUsages(psiElement, processor, options)
                             }
+                            thread.interrupt()
                         }
                     },
                 )

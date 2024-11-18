@@ -2,7 +2,6 @@
 package com.intellij.ui
 
 import com.intellij.icons.AllIcons
-import com.intellij.icons.ExpUiIcons
 import com.intellij.ide.IdeBundle
 import com.intellij.ide.IdeCoreBundle
 import com.intellij.openapi.actionSystem.ActionManager
@@ -12,6 +11,7 @@ import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.ui.popup.IconButton
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.labels.LinkLabel
+import com.intellij.ui.components.labels.LinkLabel.LEADING
 import com.intellij.ui.components.labels.LinkListener
 import com.intellij.ui.components.panels.HorizontalLayout
 import com.intellij.ui.scale.JBUIScale
@@ -62,7 +62,7 @@ open class InlineBanner private constructor(
   ) : this(messageText, status, JBUI.scale(8))
 
   init {
-    myCloseButton = createInplaceButton(IdeBundle.message("editor.banner.close.tooltip"), ExpUiIcons.General.Close) {
+    myCloseButton = createInplaceButton(IdeBundle.message("editor.banner.close.tooltip"), AllIcons.General.Close) {
       close()
     }
 

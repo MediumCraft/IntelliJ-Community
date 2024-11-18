@@ -2,6 +2,7 @@
 package com.intellij.psi.templateLanguages;
 
 import com.intellij.lang.LangBundle;
+import com.intellij.lang.Language;
 import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
@@ -11,10 +12,15 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.FileViewProvider;
 import com.intellij.psi.PsiManager;
 import com.intellij.ui.popup.list.ListPopupImpl;
+import com.intellij.util.containers.ContainerUtil;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
+
+import java.util.Comparator;
 
 import static com.intellij.psi.templateLanguages.TemplateDataLanguageMappings.getTemplateableLanguages;
 
+@ApiStatus.Internal
 public final class ChangeTemplateDataLanguageAction extends AnAction {
   @Override
   public void update(final @NotNull AnActionEvent e) {
@@ -49,7 +55,8 @@ public final class ChangeTemplateDataLanguageAction extends AnAction {
     VirtualFile virtualFile = e.getData(CommonDataKeys.VIRTUAL_FILE);
     if (project == null || virtualFile == null) return;
 
-    new ListPopupImpl(project, new TemplateDataLanguageChooserPopupStep(getTemplateableLanguages(), virtualFile, project))
+    var sortedLanguages = ContainerUtil.sorted(getTemplateableLanguages(), Comparator.comparing(Language::getDisplayName));
+    new ListPopupImpl(project, new TemplateDataLanguageChooserPopupStep(sortedLanguages, virtualFile, project))
       .showInBestPositionFor(e.getDataContext());
   }
 }

@@ -1,7 +1,11 @@
 // Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+@file:ApiStatus.Internal
+
 package com.intellij.formatting.visualLayer
 
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.components.service
+import com.intellij.openapi.components.serviceAsync
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.EditorCustomElementRenderer
 import com.intellij.openapi.editor.Inlay
@@ -11,13 +15,41 @@ import com.intellij.openapi.editor.ex.FoldingModelEx
 import com.intellij.openapi.util.Key
 import com.intellij.openapi.util.registry.Registry
 import com.intellij.psi.codeStyle.CodeStyleSettings
+import com.intellij.util.application
+import org.jetbrains.annotations.ApiStatus
 
 val visualFormattingElementKey: Key<Boolean> = Key.create("visual.formatting.element")
 
 private val EDITOR_VISUAL_FORMATTING_LAYER_CODE_STYLE_SETTINGS = Key.create<CodeStyleSettings>("visual.formatting.layer.info")
 
+/**
+ * This is an interface that might be used by the non-platform virtual formatting providers to make friends with the indent guides.
+ */
+interface VirtualFormattingIndentGuideInfo {
+
+  companion object {
+    @JvmStatic
+    fun getInstance(): VirtualFormattingIndentGuideInfo = application.service<VirtualFormattingIndentGuideInfo>()
+  }
+
+  fun isVirtualFormattingEnabled(editor: Editor): Boolean
+
+  fun getVisualFormattingInlineInlays(editor: Editor, startOffset: Int, endOffset: Int): List<Inlay<*>>
+}
+
+@ApiStatus.Internal
+class PlatformVirtualFormattingIndentGuideInfo : VirtualFormattingIndentGuideInfo {
+  override fun isVirtualFormattingEnabled(editor: Editor): Boolean {
+    return VisualFormattingLayerService.isEnabledForEditor(editor)
+  }
+
+  override fun getVisualFormattingInlineInlays(editor: Editor, startOffset: Int, endOffset: Int): List<Inlay<*>> {
+    return VisualFormattingLayerService.getVisualFormattingInlineInlays(editor, startOffset, endOffset)
+  }
+}
 
 abstract class VisualFormattingLayerService {
+
   abstract fun collectVisualFormattingLayerElements(editor: Editor): List<VisualFormattingLayerElement>
 
   abstract fun applyVisualFormattingLayerElementsToEditor(editor: Editor, elements: List<VisualFormattingLayerElement>)
@@ -51,7 +83,6 @@ abstract class VisualFormattingLayerService {
       editor.visualFormattingLayerCodeStyleSettings = null
     }
 
-    @Suppress("UNCHECKED_CAST")
     @JvmStatic
     fun getVisualFormattingInlineInlays(editor: Editor, startOffset: Int, endOffset: Int): List<Inlay<out InlayPresentation>> =
       editor.inlayModel
@@ -62,6 +93,7 @@ abstract class VisualFormattingLayerService {
 
 }
 
+@ApiStatus.Internal
 sealed class VisualFormattingLayerElement {
 
   abstract fun applyToEditor(editor: Editor)
@@ -103,6 +135,7 @@ sealed class VisualFormattingLayerElement {
   }
 }
 
+@ApiStatus.Internal
 data class InlayPresentation(val editor: Editor,
                              val fillerLength: Int,
                              val vertical: Boolean = false) : EditorCustomElementRenderer {

@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.xdebugger.impl.evaluate.quick;
 
 import com.intellij.codeInsight.hint.HintUtil;
@@ -6,7 +6,8 @@ import com.intellij.execution.console.LanguageConsoleView;
 import com.intellij.execution.impl.ConsoleViewImpl;
 import com.intellij.execution.ui.ConsoleView;
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.IdeActions;
+import com.intellij.openapi.actionSystem.ShortcutSet;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
@@ -40,9 +41,11 @@ import com.intellij.xdebugger.impl.evaluate.quick.common.ValueHintType;
 import com.intellij.xdebugger.impl.frame.XValueMarkers;
 import com.intellij.xdebugger.impl.ui.XDebuggerUIConstants;
 import com.intellij.xdebugger.impl.ui.XValueTextProvider;
+import com.intellij.xdebugger.impl.ui.tree.nodes.*;
 import com.intellij.xdebugger.impl.ui.tree.nodes.XEvaluationCallbackBase;
 import com.intellij.xdebugger.impl.ui.tree.nodes.XValueNodeImpl;
 import com.intellij.xdebugger.impl.ui.tree.nodes.XValueNodePresentationConfigurator;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -65,6 +68,7 @@ public class XValueHint extends AbstractValueHint {
   private final PsiElement myElement;
   private final XSourcePosition myExpressionPosition;
   private Disposable myDisposable;
+  private Disposable myXValueDisposable;
 
   public XValueHint(@NotNull Project project,
                     @NotNull Editor editor,
@@ -77,7 +81,8 @@ public class XValueHint extends AbstractValueHint {
     this(project, session.getDebugProcess().getEditorsProvider(), editor, point, type, expressionInfo, evaluator, session, fromKeyboard);
   }
 
-  protected XValueHint(@NotNull Project project,
+  @ApiStatus.Internal
+  public XValueHint(@NotNull Project project,
                        @NotNull XDebuggerEditorsProvider editorsProvider,
                        @NotNull Editor editor,
                        @NotNull Point point,
@@ -120,6 +125,10 @@ public class XValueHint extends AbstractValueHint {
 
   @Override
   protected void onHintHidden() {
+    if (myXValueDisposable != null && !myInsideShow) {
+      Disposer.dispose(myXValueDisposable);
+      myXValueDisposable = null;
+    }
     disposeVisibleHint();
   }
 
@@ -140,80 +149,7 @@ public class XValueHint extends AbstractValueHint {
       }
     }, 200, TimeUnit.MILLISECONDS);
 
-    XEvaluationCallbackBase callback = new XEvaluationCallbackBase() {
-      @Override
-      public void evaluated(@NotNull final XValue result) {
-        result.computePresentation(new XValueNodePresentationConfigurator.ConfigurableXValueNodeImpl() {
-          private XFullValueEvaluator myFullValueEvaluator;
-          private boolean myShown = false;
-
-          @Override
-          public void applyPresentation(@Nullable Icon icon,
-                                        @NotNull XValuePresentation valuePresenter,
-                                        boolean hasChildren) {
-            showEvaluating.set(false);
-            if (isHintHidden()) {
-              return;
-            }
-
-            SimpleColoredText text = new SimpleColoredText();
-            XValueNodeImpl.buildText(valuePresenter, text, false);
-
-            if (!hasChildren) {
-              showTooltipPopup(createHintComponent(icon, text, valuePresenter, myFullValueEvaluator));
-            }
-            else if (getType() == ValueHintType.MOUSE_CLICK_HINT) {
-              if (!myShown) {
-                Runnable showPopupRunnable = getShowPopupRunnable(result, myFullValueEvaluator);
-                showPopupRunnable.run();
-              }
-            }
-            else {
-              if (getType() == ValueHintType.MOUSE_OVER_HINT) {
-                if (myFromKeyboard) {
-                  text.insert(0, "(" + KeymapUtil.getFirstKeyboardShortcutText("ShowErrorDescription") + ") ",
-                              SimpleTextAttributes.GRAYED_ATTRIBUTES);
-                }
-
-                // first remove a shortcut created for any previous presentation (like "Collecting data...")
-                disposeVisibleHint();
-                myDisposable = Disposer.newDisposable();
-                ShortcutSet shortcut = KeymapUtil.getActiveKeymapShortcuts(IdeActions.ACTION_SHOW_ERROR_DESCRIPTION);
-                DumbAwareAction.create(e -> showTree(result))
-                               .registerCustomShortcutSet(shortcut, getEditor().getContentComponent(), myDisposable);
-              }
-
-              showTooltipPopup(createExpandableHintComponent(icon, text, getShowPopupRunnable(result, myFullValueEvaluator), myFullValueEvaluator));
-            }
-            myShown = true;
-          }
-
-          @Override
-          public void setFullValueEvaluator(@NotNull XFullValueEvaluator fullValueEvaluator) {
-            myFullValueEvaluator = fullValueEvaluator;
-          }
-
-          @Override
-          public boolean isObsolete() {
-            return isHintHidden();
-          }
-        }, XValuePlace.TOOLTIP);
-      }
-
-      @Override
-      public void errorOccurred(@NotNull final String errorMessage) {
-        showEvaluating.set(false);
-        ApplicationManager.getApplication().invokeLater(() -> {
-          if (getType() == ValueHintType.MOUSE_CLICK_HINT) {
-            showHint(HintUtil.createErrorLabel(errorMessage));
-          }
-          else {
-            hideCurrentHint();
-          }
-        });
-        LOG.debug("Cannot evaluate '" + myExpression + "':" + errorMessage);
-      }
-    };
+    XEvaluationCallbackBase callback = new MyEvaluationCallback(showEvaluating);
     if (myElement != null && myEvaluator instanceof XDebuggerPsiEvaluator) {
       ((XDebuggerPsiEvaluator)myEvaluator).evaluate(myElement, callback);
     }
@@ -274,5 +210,118 @@ public class XValueHint extends AbstractValueHint {
   @Override
   public String toString() {
     return myExpression;
+  }
+
+  private class MyEvaluationCallback extends XEvaluationCallbackBase implements XEvaluationCallbackWithOrigin {
+    private final AtomicBoolean myShowEvaluating;
+
+    MyEvaluationCallback(AtomicBoolean showEvaluating) { myShowEvaluating = showEvaluating; }
+
+    @Override
+    public XEvaluationOrigin getOrigin() {
+      return XEvaluationOrigin.EDITOR;
+    }
+
+    @Override
+    public void evaluated(@NotNull final XValue result) {
+      LOG.assertTrue(myXValueDisposable == null, "XValue wasn't disposed before evaluating new one.");
+      myXValueDisposable = Disposer.newDisposable();
+      if (result instanceof HintXValue) {
+        Disposer.register(myXValueDisposable, (Disposable)result);
+      }
+
+      result.computePresentation(new XValueNodePresentationConfigurator.ConfigurableXValueNodeImpl() {
+        private XFullValueEvaluator myFullValueEvaluator;
+        private boolean myShown = false;
+        private SimpleColoredComponent mySimpleColoredComponent;
+
+        @Override
+        public void applyPresentation(@Nullable Icon icon,
+                                      @NotNull XValuePresentation valuePresenter,
+                                      boolean hasChildren) {
+          myShowEvaluating.set(false);
+          if (isHintHidden()) {
+            return;
+          }
+
+          SimpleColoredText text = new SimpleColoredText();
+          XValueNodeImpl.buildText(valuePresenter, text, false);
+
+          if (!hasChildren) {
+            showTooltipPopup(createHintComponent(icon, text, valuePresenter, myFullValueEvaluator));
+          }
+          else if (getType() == ValueHintType.MOUSE_CLICK_HINT) {
+            if (!myShown) {
+              Runnable showPopupRunnable = getShowPopupRunnable(result, myFullValueEvaluator);
+              showPopupRunnable.run();
+            }
+          }
+          else {
+            if (getType() == ValueHintType.MOUSE_OVER_HINT) {
+              if (myFromKeyboard) {
+                text.insert(0, "(" + KeymapUtil.getFirstKeyboardShortcutText("ShowErrorDescription") + ") ",
+                            SimpleTextAttributes.GRAYED_ATTRIBUTES);
+              }
+
+              // first remove a shortcut created for any previous presentation (like "Collecting data...")
+              disposeVisibleHint();
+              myDisposable = Disposer.newDisposable();
+              ShortcutSet shortcut = KeymapUtil.getActiveKeymapShortcuts(IdeActions.ACTION_SHOW_ERROR_DESCRIPTION);
+              DumbAwareAction.create(e -> showTree(result))
+                             .registerCustomShortcutSet(shortcut, getEditor().getContentComponent(), myDisposable);
+            }
+
+            // On presentation change we update our shown popup and resize if needed
+            if (mySimpleColoredComponent != null) {
+              if (mySimpleColoredComponent instanceof SimpleColoredComponentWithProgress) {
+                ((SimpleColoredComponentWithProgress)mySimpleColoredComponent).stopLoading();
+              }
+              Icon previousIcon = mySimpleColoredComponent.getIcon();
+              var previousPreferredWidth = mySimpleColoredComponent.getPreferredSize().width;
+
+              mySimpleColoredComponent.clear();
+              fillSimpleColoredComponent(mySimpleColoredComponent, previousIcon, text, myFullValueEvaluator);
+
+              var delta = mySimpleColoredComponent.getPreferredSize().width - previousPreferredWidth;
+              if (delta < 0) return;
+
+              resizePopup(delta, 0);
+              return;
+            }
+
+            mySimpleColoredComponent = createExpandableHintComponent(icon, text, getShowPopupRunnable(result, myFullValueEvaluator), myFullValueEvaluator, valuePresenter);
+            if (mySimpleColoredComponent instanceof SimpleColoredComponentWithProgress) {
+              ((SimpleColoredComponentWithProgress)mySimpleColoredComponent).startLoading();
+            }
+            showTooltipPopup(mySimpleColoredComponent);
+          }
+          myShown = true;
+        }
+
+        @Override
+        public void setFullValueEvaluator(@NotNull XFullValueEvaluator fullValueEvaluator) {
+          myFullValueEvaluator = fullValueEvaluator;
+        }
+
+        @Override
+        public boolean isObsolete() {
+          return isHintHidden();
+        }
+      }, XValuePlace.TOOLTIP);
+    }
+
+    @Override
+    public void errorOccurred(@NotNull final String errorMessage) {
+      myShowEvaluating.set(false);
+      ApplicationManager.getApplication().invokeLater(() -> {
+        if (getType() == ValueHintType.MOUSE_CLICK_HINT) {
+          showHint(HintUtil.createErrorLabel(errorMessage));
+        }
+        else {
+          hideCurrentHint();
+        }
+      });
+      LOG.debug("Cannot evaluate '" + myExpression + "':" + errorMessage);
+    }
   }
 }

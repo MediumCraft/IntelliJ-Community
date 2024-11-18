@@ -37,7 +37,7 @@ object KotlinPluginBuilder {
     "kotlin.base.project-structure",
     "kotlin.base.external-build-system",
     "kotlin.base.scripting",
-    "kotlin.base.analysis-api-providers",
+    "kotlin.base.analysis-api-platform",
     "kotlin.base.analysis",
     "kotlin.base.code-insight",
     "kotlin.base.jps",
@@ -47,7 +47,7 @@ object KotlinPluginBuilder {
     "kotlin.base.statistics",
     "kotlin.base.fe10.plugin",
     "kotlin.base.fe10.analysis",
-    "kotlin.base.fe10.analysis-api-providers",
+    "kotlin.base.fe10.analysis-api-platform",
     "kotlin.base.fe10.kdoc",
     "kotlin.base.fe10.code-insight",
     "kotlin.base.fe10.obsolete-compat",
@@ -71,6 +71,7 @@ object KotlinPluginBuilder {
     "kotlin.compiler-plugins.kapt",
     "kotlin.compiler-plugins.kotlinx-serialization.common",
     "kotlin.compiler-plugins.kotlinx-serialization.gradle",
+    "kotlin.compiler-plugins.kotlinx-serialization.k2",
     "kotlin.compiler-plugins.kotlinx-serialization.maven",
     "kotlin.compiler-plugins.noarg.common",
     "kotlin.compiler-plugins.noarg.gradle",
@@ -96,6 +97,7 @@ object KotlinPluginBuilder {
     "kotlin.gradle.code-insight-common",
     "kotlin.gradle.gradle-java",
     "kotlin.gradle.code-insight-groovy",
+    "kotlin.gradle.code-insight-toml",
     "kotlin.native",
     "kotlin.grazie",
     "kotlin.run-configurations.jvm",
@@ -121,6 +123,7 @@ object KotlinPluginBuilder {
     "kotlin.j2k.k1.new",
     "kotlin.j2k.k2",
     "kotlin.onboarding",
+    "kotlin.onboarding.gradle",
     "kotlin.plugin-updater",
     "kotlin.preferences",
     "kotlin.project-configuration",
@@ -132,12 +135,13 @@ object KotlinPluginBuilder {
     "kotlin.project-wizard.gradle",
     "kotlin.project-wizard.compose",
     "kotlin.jvm-debugger.base.util",
-    "kotlin.jvm-debugger.util",
     "kotlin.jvm-debugger.core",
     "kotlin.jvm-debugger.core-fe10",
     "kotlin.jvm-debugger.evaluation",
+    "kotlin.jvm-debugger.evaluation.k1",
+    "kotlin.jvm-debugger.evaluation.k2",
     "kotlin.jvm-debugger.coroutines",
-    "kotlin.jvm-debugger.sequence",
+    "kotlin.jvm-debugger.sequence.k1",
     "kotlin.jvm-debugger.eval4j",
     "kotlin.uast.uast-kotlin-base",
     "kotlin.uast.uast-kotlin",
@@ -148,7 +152,7 @@ object KotlinPluginBuilder {
     "kotlin.inspections",
     "kotlin.inspections-fe10",
     "kotlin.features-trainer",
-    "kotlin.base.fir.analysis-api-providers",
+    "kotlin.base.fir.analysis-api-platform",
     "kotlin.base.fir.code-insight",
     "kotlin.base.fir.project-structure",
     "kotlin.code-insight.api",
@@ -184,7 +188,6 @@ object KotlinPluginBuilder {
     "kotlin.highlighting.k2",
     "kotlin.uast.uast-kotlin.k2",
     "kotlin.uast.uast-kotlin-idea.k2",
-    "kotlin.fir.fir-low-level-api-ide-impl",
     "kotlin.navigation",
     "kotlin.refactorings.common",
     "kotlin.refactorings.k2",
@@ -192,7 +195,8 @@ object KotlinPluginBuilder {
     "kotlin.refactorings.rename.k2",
     "kotlin.performanceExtendedPlugin",
     "kotlin.bundled-compiler-plugins-support",
-    "kotlin.jsr223"
+    "kotlin.jsr223",
+    "kotlin.k2.internal",
   )
 
   private val KOTLIN_SCRIPTING_LIBRARIES = java.util.List.of(
@@ -208,15 +212,15 @@ object KotlinPluginBuilder {
     )
 
   private val LIBRARIES = java.util.List.of(
-    "kotlinc.analysis-api-providers",
-    "kotlinc.analysis-project-structure",
-    "kotlinc.high-level-api",
-    "kotlinc.high-level-api-fe10",
-    "kotlinc.high-level-api-impl-base",
+    "kotlinc.analysis-api-platform-interface",
+    "kotlinc.analysis-api",
+    "kotlinc.analysis-api-fe10",
+    "kotlinc.analysis-api-impl-base",
     "kotlinc.kotlin-scripting-compiler-impl",
     "kotlinc.kotlin-scripting-common",
+    "kotlinc.kotlin-scripting-dependencies",
     "kotlinc.kotlin-gradle-statistics",
-    "kotlinc.high-level-api-fir",
+    "kotlinc.analysis-api-k2",
     "kotlinc.kotlin-compiler-fir",
     "kotlinc.low-level-api-fir",
     "kotlinc.symbol-light-classes",
@@ -243,6 +247,8 @@ object KotlinPluginBuilder {
     "kotlinc.kotlinx-serialization-compiler-plugin",
     "kotlinc.parcelize-compiler-plugin",
     "kotlinc.lombok-compiler-plugin",
+    "kotlinc.compose-compiler-plugin",
+    "kotlinc.js-plain-objects-compiler-plugin",
   )
 
   fun kotlinPlugin(ultimateSources: KotlinUltimateSources, addition: ((PluginLayout.PluginLayoutSpec) -> Unit)? = null): PluginLayout {
@@ -312,7 +318,7 @@ object KotlinPluginBuilder {
       spec.withProjectLibrary("kotlinc.kotlin-jps-plugin-classpath", "jps/kotlin-jps-plugin.jar")
       spec.withProjectLibrary("kotlinc.kotlin-jps-common")
       //noinspection SpellCheckingInspection
-      spec.withProjectLibrary("javaslang")
+      spec.withProjectLibrary("vavr")
       spec.withProjectLibrary("javax-inject")
 
       withKotlincInPluginDirectory(spec)

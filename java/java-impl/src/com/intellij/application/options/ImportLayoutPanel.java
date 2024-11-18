@@ -18,7 +18,7 @@ import com.intellij.psi.codeStyle.PackageEntryTable;
 import com.intellij.ui.*;
 import com.intellij.ui.components.JBCheckBox;
 import com.intellij.ui.table.JBTable;
-import com.intellij.util.ui.JBInsets;
+import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -37,6 +37,7 @@ import java.awt.*;
 public abstract class ImportLayoutPanel extends JPanel {
   private final JBCheckBox myCbLayoutStaticImportsSeparately =
     new JBCheckBox(JavaBundle.message("import.layout.static.imports.separately"));
+  @Nullable private final JBCheckBox myCbLayoutOnDemandImportsFromSamePackageFirst;
   private final JBTable myImportLayoutTable;
 
   private final PackageEntryTable myImportLayoutList = new PackageEntryTable();
@@ -53,9 +54,13 @@ public abstract class ImportLayoutPanel extends JPanel {
     return myCbLayoutStaticImportsSeparately;
   }
 
-  public ImportLayoutPanel() {
+  @Nullable
+  public JBCheckBox getCbLayoutOnDemandImportsFromSamePackageFirst() {
+    return myCbLayoutOnDemandImportsFromSamePackageFirst;
+  }
+
+  public ImportLayoutPanel(boolean showLayoutOnDemandImportFromSamePackageFirstCheckbox) {
     super(new BorderLayout());
-    setBorder(IdeBorderFactory.createTitledBorder(JavaBundle.message("title.import.layout"), false, JBInsets.emptyInsets()));
 
     myCbLayoutStaticImportsSeparately.addItemListener(e -> {
       if (areStaticImportsEnabled()) {
@@ -86,10 +91,8 @@ public abstract class ImportLayoutPanel extends JPanel {
       refresh();
     });
 
-    add(myCbLayoutStaticImportsSeparately, BorderLayout.NORTH);
-
     ActionGroup addGroup = new DefaultActionGroup(new AddPackageAction(), new AddBlankLineAction());
-    addGroup.getTemplatePresentation().setIcon(LayeredIcon.ADD_WITH_DROPDOWN);
+    addGroup.getTemplatePresentation().setIcon(AllIcons.General.Add);
     addGroup.getTemplatePresentation().setText(JavaBundle.messagePointer("button.add"));
     addGroup.getTemplatePresentation().setPopupGroup(true);
     addGroup.registerCustomShortcutSet(CommonShortcuts.getNewForDialogs(), null);
@@ -108,10 +111,17 @@ public abstract class ImportLayoutPanel extends JPanel {
                            IdeBundle.message("action.remove"),
                            JavaBundle.message("import.layout.panel.up.button"),
                            JavaBundle.message("import.layout.panel.down.button"))
-      .setPreferredSize(new Dimension(-1, 100)).createPanel();
+      .setPreferredSize(new Dimension(-1, JBUI.scale(180)))
+      .createPanel();
 
-
-    add(importLayoutPanel, BorderLayout.CENTER);
+    myCbLayoutOnDemandImportsFromSamePackageFirst =
+      showLayoutOnDemandImportFromSamePackageFirstCheckbox
+      ? new JBCheckBox(JavaBundle.message("import.layout.on.demand.import.from.same.package.first"))
+      : null;
+    final ImportLayoutPanelUI UI = new ImportLayoutPanelUI(myCbLayoutStaticImportsSeparately,
+                                                           myCbLayoutOnDemandImportsFromSamePackageFirst,
+                                                           importLayoutPanel);
+    add(UI.getPanel(), BorderLayout.CENTER);
   }
 
   private class AddPackageAction extends DumbAwareAction {
@@ -217,6 +227,10 @@ public abstract class ImportLayoutPanel extends JPanel {
     return myCbLayoutStaticImportsSeparately.isSelected();
   }
 
+  public boolean isLayoutOnDemandImportsFromSamePackageFirst() {
+    return myCbLayoutOnDemandImportsFromSamePackageFirst != null && myCbLayoutOnDemandImportsFromSamePackageFirst.isSelected();
+  }
+
   public static JBTable createTableForPackageEntries(final PackageEntryTable packageTable, final ImportLayoutPanel panel) {
     final String[] names = {
       JavaBundle.message("listbox.import.package"),
@@ -259,7 +273,7 @@ public abstract class ImportLayoutPanel extends JPanel {
       }
 
       @Override
-      public Class getColumnClass(int col) {
+      public Class<?> getColumnClass(int col) {
         col += panel.areStaticImportsEnabled() ? 0 : 1;
         if (col == 0) {
           return Boolean.class;
@@ -294,7 +308,7 @@ public abstract class ImportLayoutPanel extends JPanel {
         }
         else if (col == 2) {
           PackageEntry newPackageEntry =
-            new PackageEntry(packageEntry.isStatic(), packageEntry.getPackageName(), ((Boolean)aValue).booleanValue());
+            new PackageEntry(packageEntry.isStatic(), packageEntry.getPackageName(), (Boolean)aValue);
           packageTable.setEntryAt(newPackageEntry, row);
         }
         else {
@@ -375,7 +389,7 @@ public abstract class ImportLayoutPanel extends JPanel {
   private static void fixColumnWidthToHeader(JBTable result, int columnIdx) {
     final TableColumn column = result.getColumnModel().getColumn(columnIdx);
     final int width =
-      15 + result.getTableHeader().getFontMetrics(result.getTableHeader().getFont()).stringWidth(result.getColumnName(columnIdx));
+      16 + result.getTableHeader().getFontMetrics(result.getTableHeader().getFont()).stringWidth(result.getColumnName(columnIdx));
     column.setMinWidth(width);
     column.setMaxWidth(width);
   }

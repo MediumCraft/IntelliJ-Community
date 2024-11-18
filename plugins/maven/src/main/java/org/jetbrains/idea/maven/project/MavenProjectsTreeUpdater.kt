@@ -6,25 +6,29 @@ import com.intellij.openapi.util.Comparing
 import com.intellij.openapi.util.Ref
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.platform.diagnostic.telemetry.helpers.useWithScope
 import com.intellij.platform.util.progress.RawProgressReporter
 import kotlinx.coroutines.*
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.idea.maven.model.MavenConstants
 import org.jetbrains.idea.maven.model.MavenExplicitProfiles
 import org.jetbrains.idea.maven.project.MavenProjectChangesBuilder.Companion.merged
+import org.jetbrains.idea.maven.telemetry.tracer
 import org.jetbrains.idea.maven.utils.MavenLog
 import org.jetbrains.idea.maven.utils.MavenUtil
-import java.io.File
+import java.nio.file.Path
 import java.util.concurrent.ConcurrentHashMap
 
 @ApiStatus.Internal
-internal class MavenProjectsTreeUpdater(private val tree: MavenProjectsTree,
-                                        private val explicitProfiles: MavenExplicitProfiles,
-                                        private val updateContext: MavenProjectsTreeUpdateContext,
-                                        private val reader: MavenProjectReader,
-                                        private val generalSettings: MavenGeneralSettings,
-                                        private val process: RawProgressReporter?,
-                                        private val updateModules: Boolean) {
+internal class MavenProjectsTreeUpdater(
+  private val tree: MavenProjectsTree,
+  private val explicitProfiles: MavenExplicitProfiles,
+  private val updateContext: MavenProjectsTreeUpdateContext,
+  private val reader: MavenProjectReader,
+  private val generalSettings: MavenGeneralSettings,
+  private val process: RawProgressReporter?,
+  private val updateModules: Boolean,
+) {
   private val updated = ConcurrentHashMap<VirtualFile, Boolean>()
   private val createdMavenProjects = ConcurrentHashMap<VirtualFile, MavenProject>()
   private val userSettingsFile = generalSettings.effectiveUserSettingsIoFile
@@ -66,7 +70,9 @@ internal class MavenProjectsTreeUpdater(private val tree: MavenProjectsTree,
     if (readPom) {
       val oldProjectId = if (mavenProject.isNew) null else mavenProject.mavenId
       val oldParentId = mavenProject.parentId
-      val readerResult = reader.readProjectAsync(generalSettings, mavenProject.file, explicitProfiles, tree.projectLocator)
+      val readerResult = tracer.spanBuilder("readPom").useWithScope {
+        reader.readProjectAsync(generalSettings, mavenProject.file, explicitProfiles, tree.projectLocator)
+      }
       val readChanges = mavenProject.updateFromReaderResult(readerResult, generalSettings, true)
 
       tree.putVirtualFileToProjectMapping(mavenProject, oldProjectId)
@@ -247,8 +253,12 @@ internal class MavenProjectsTreeUpdater(private val tree: MavenProjectsTree,
 
     coroutineScope {
       withContext(Dispatchers.IO) {
-        specs.forEach {
-          launch(CoroutineName("reading ${it.mavenProjectFile}")) { update(it.mavenProjectFile, it.forceRead) }
+        specs.forEach { spec ->
+          launch(CoroutineName("reading ${spec.mavenProjectFile}")) {
+            tracer.spanBuilder("updateProjectSpec").useWithScope {
+              update(spec.mavenProjectFile, spec.forceRead)
+            }
+          }
         }
       }
     }
@@ -259,8 +269,8 @@ internal class MavenProjectsTreeUpdater(private val tree: MavenProjectsTree,
     return file.timeStamp
   }
 
-  private fun getFileTimestamp(file: File?): Long {
-    return getFileTimestamp(if (file == null) null else LocalFileSystem.getInstance().findFileByIoFile(file))
+  private fun getFileTimestamp(file: Path?): Long {
+    return getFileTimestamp(if (file == null) null else LocalFileSystem.getInstance().findFileByNioFile(file))
   }
 
   @ApiStatus.Internal

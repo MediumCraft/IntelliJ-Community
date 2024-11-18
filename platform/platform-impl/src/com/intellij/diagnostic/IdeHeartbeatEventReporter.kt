@@ -1,6 +1,7 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.diagnostic
 
+import com.intellij.diagnostic.VMOptions.MemoryKind
 import com.intellij.diagnostic.opentelemetry.SafepointBean
 import com.intellij.ide.PowerSaveMode
 import com.intellij.internal.statistic.eventLog.EventLogGroup
@@ -57,6 +58,7 @@ private class IdeHeartbeatEventReporterService(cs: CoroutineScope) {
     var lastGcTime: Long = -1
     var lastTimeToSafepoint: Long = 0
     var lastTimeAtSafepoint: Long = 0
+    var lastSafepointsCount: Long = 0
     val gcBeans = ManagementFactory.getGarbageCollectorMXBeans()
     while (true) {
       val mxBean = ManagementFactory.getOperatingSystemMXBean() as OperatingSystemMXBean
@@ -89,10 +91,15 @@ private class IdeHeartbeatEventReporterService(cs: CoroutineScope) {
         lastTimeToSafepoint = totalTimeToSafepointMs
         currentTimeToSafepoint
       } ?: -1
-      val timeAtSafepointMs = SafepointBean.totalTimeAtSafepointMs() ?.let { totalTimeAtSafepointMs ->
+      val timeAtSafepointMs = SafepointBean.totalTimeAtSafepointMs()?.let { totalTimeAtSafepointMs ->
         val currentTimeAtSafepoint = (totalTimeAtSafepointMs - lastTimeAtSafepoint).toInt()
         lastTimeAtSafepoint = totalTimeAtSafepointMs
         currentTimeAtSafepoint
+      } ?: -1
+      val safepointsCount = SafepointBean.safepointCount()?.let { totalSafepointCount ->
+        val currentSafepointsCount = (totalSafepointCount - lastSafepointsCount).toInt()
+        lastSafepointsCount = totalSafepointCount
+        currentSafepointsCount
       } ?: -1
 
       // don't report total GC time in the first 5 minutes of IJ execution
@@ -102,8 +109,10 @@ private class IdeHeartbeatEventReporterService(cs: CoroutineScope) {
         UILatencyLogger.CPU_TIME.with(TimeUnit.NANOSECONDS.toMillis(thisCpuTime).toInt()),
 
         UILatencyLogger.GC_TIME.with(thisGcTime.toInt()),
+
         UILatencyLogger.TIME_TO_SAFEPOINT.with(timeToSafepointMs),
         UILatencyLogger.TIME_AT_SAFEPOINT.with(timeAtSafepointMs),
+        UILatencyLogger.SAFEPOINTS_COUNT.with(safepointsCount),
 
         UILatencyLogger.POWER_SOURCE.with(PowerStatus.getPowerStatus()),
         UILatencyLogger.POWER_SAVE_MODE.with(PowerSaveMode.isEnabled())
@@ -115,14 +124,17 @@ private class IdeHeartbeatEventReporterService(cs: CoroutineScope) {
 }
 
 internal object UILatencyLogger : CounterUsagesCollector() {
-  private val GROUP = EventLogGroup("performance", 71)
+  private val GROUP = EventLogGroup("performance", 74)
 
   internal val SYSTEM_CPU_LOAD: IntEventField = Int("system_cpu_load")
   internal val SWAP_LOAD: IntEventField = Int("swap_load")
   internal val CPU_TIME: IntEventField = Int("cpu_time_ms")
   internal val GC_TIME: IntEventField = Int("gc_time_ms")
+
   internal val TIME_TO_SAFEPOINT: IntEventField = Int("time_to_safepoint_ms")
   internal val TIME_AT_SAFEPOINT: IntEventField = Int("time_at_safepoint_ms")
+  internal val SAFEPOINTS_COUNT: IntEventField = Int("safepoints_count")
+
   internal val POWER_SOURCE: EnumEventField<PowerStatus> = Enum<PowerStatus>("power_source")
   internal val POWER_SAVE_MODE: BooleanEventField = Boolean("power_save_mode")
   internal val HEARTBEAT: VarargEventId = GROUP.registerVarargEvent(
@@ -134,6 +146,7 @@ internal object UILatencyLogger : CounterUsagesCollector() {
     GC_TIME,
     TIME_TO_SAFEPOINT,
     TIME_AT_SAFEPOINT,
+    SAFEPOINTS_COUNT,
 
     POWER_SOURCE,
     POWER_SAVE_MODE
@@ -159,6 +172,10 @@ internal object UILatencyLogger : CounterUsagesCollector() {
   @JvmField
   val MAIN_MENU_LATENCY: EventId1<Long> = GROUP.registerEvent("mainmenu.latency", EventFields.DurationMs)
 
+  @JvmField
+  val LOW_MEMORY_CONDITION: EventId2<MemoryKind, Int> = GROUP.registerEvent("low.memory",
+                                                                            Enum("type", MemoryKind::class.java),
+                                                                            Int("heap_size_gigabytes"))
 
   // ==== JVMResponsivenessMonitor: overall system run-time-variability sampling
 
@@ -183,6 +200,8 @@ internal object UILatencyLogger : CounterUsagesCollector() {
     SAMPLES_COUNT
   )
 
+  override fun getGroup(): EventLogGroup = GROUP
+
   @JvmStatic
   fun reportResponsiveness(avg_ns: Double, p50_ns: Long, p99_ns: Long, p999_ns: Long, max_ns: Long, samplesCount: Int) {
     RESPONSIVENESS_EVENT.log(
@@ -197,6 +216,8 @@ internal object UILatencyLogger : CounterUsagesCollector() {
     )
   }
 
-
-  override fun getGroup(): EventLogGroup = GROUP
+  @JvmStatic
+  fun lowMemory(kind: MemoryKind, currentXmxMegabytes: Int) {
+    LOW_MEMORY_CONDITION.log(kind, (currentXmxMegabytes.toDouble() / 1024).roundToInt())
+  }
 }

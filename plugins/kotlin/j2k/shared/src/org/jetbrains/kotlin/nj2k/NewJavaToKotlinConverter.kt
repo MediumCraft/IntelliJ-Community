@@ -7,14 +7,14 @@ import com.intellij.openapi.module.Module
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.project.Project
 import com.intellij.psi.*
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
+import com.intellij.util.concurrency.ThreadingAssertions
+import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.analyze
-import org.jetbrains.kotlin.analysis.api.permissions.KaAllowAnalysisOnEdt
-import org.jetbrains.kotlin.analysis.api.permissions.allowAnalysisOnEdt
+import org.jetbrains.kotlin.analysis.api.projectStructure.KaModuleProvider
 import org.jetbrains.kotlin.config.LanguageVersionSettingsImpl
+import org.jetbrains.kotlin.idea.base.projectStructure.toKaSourceModuleForProductionOrTest
 import org.jetbrains.kotlin.idea.base.projectStructure.languageVersionSettings
-import org.jetbrains.kotlin.idea.base.projectStructure.productionOrTestSourceModuleInfo
-import org.jetbrains.kotlin.idea.base.projectStructure.toKtModule
+import org.jetbrains.kotlin.idea.base.projectStructure.toKaSourceModuleForProduction
 import org.jetbrains.kotlin.j2k.*
 import org.jetbrains.kotlin.j2k.PostProcessingTarget.MultipleFilesPostProcessingTarget
 import org.jetbrains.kotlin.name.FqName
@@ -37,58 +37,72 @@ class NewJavaToKotlinConverter(
 ) : JavaToKotlinConverter() {
     val phasesCount = J2KConversionPhase.entries.size
     val referenceSearcher: ReferenceSearcher = IdeaReferenceSearcher
-    private val phaseDescription: String = KotlinNJ2KBundle.message("phase.converting.j2k")
+    private val phaseDescription: String = KotlinNJ2KBundle.message("j2k.phase.converting")
 
     override fun filesToKotlin(
         files: List<PsiJavaFile>,
         postProcessor: PostProcessor,
-        progressIndicator: ProgressIndicator
-    ): FilesResult = filesToKotlin(files, postProcessor, progressIndicator, bodyFilter = null)
+        progressIndicator: ProgressIndicator,
+        preprocessorExtensions: List<J2kPreprocessorExtension>,
+        postprocessorExtensions: List<J2kPostprocessorExtension>
+    ): FilesResult =
+        filesToKotlin(files, postProcessor, progressIndicator, bodyFilter = null, preprocessorExtensions, postprocessorExtensions)
 
     fun filesToKotlin(
         files: List<PsiJavaFile>,
         postProcessor: PostProcessor,
         progressIndicator: ProgressIndicator,
         bodyFilter: ((PsiElement) -> Boolean)?,
+        preprocessorExtensions: List<J2kPreprocessorExtension>,
+        postprocessorExtensions: List<J2kPostprocessorExtension>
     ): FilesResult {
-        val withProgressProcessor = NewJ2kWithProgressProcessor(progressIndicator, files, postProcessor.phasesCount + phasesCount)
-        return withProgressProcessor.process {
-            val (results, externalCodeProcessing, context) = runReadAction {
-                elementsToKotlin(files, withProgressProcessor, bodyFilter)
-            }
-            val kotlinFiles = results.mapIndexed { i, result ->
-                runUndoTransparentActionInEdt(inWriteAction = true) {
-                    val javaFile = files[i]
-                    withProgressProcessor.updateState(fileIndex = i, phase = CREATE_FILES, phaseDescription)
-                    KtPsiFactory.contextual(files[i]).createPhysicalFile(javaFile.name.replace(".java", ".kt"), result!!.text)
-                        .also { it.addImports(result.importsToAdd) }
-                }
-            }
+        ThreadingAssertions.assertBackgroundThread()
 
-            postProcessor.doAdditionalProcessing(MultipleFilesPostProcessingTarget(kotlinFiles), context) { phase, description ->
-                withProgressProcessor.updateState(fileIndex = null, phase = phase + phasesCount, description = description)
-            }
-            FilesResult(kotlinFiles.map { it.text }, externalCodeProcessing)
+        val withProgressProcessor = NewJ2kWithProgressProcessor(progressIndicator, files, postProcessor.phasesCount + phasesCount)
+
+        // TODO looks like the progress dialog doesn't appear immediately, but should
+        withProgressProcessor.updateState(fileIndex = null, phase = PREPROCESSING, KotlinNJ2KBundle.message("j2k.phase.preprocessing"))
+
+        PreprocessorExtensionsRunner.runProcessors(project, files, preprocessorExtensions)
+
+        val (results, externalCodeProcessing, context) = runReadAction {
+            elementsToKotlin(files, withProgressProcessor, bodyFilter)
         }
+
+        val kotlinFiles = results.mapIndexed { i, result ->
+            val javaFile = files[i]
+            withProgressProcessor.updateState(fileIndex = i, phase = CREATE_FILES, phaseDescription)
+            runUndoTransparentActionInEdt(inWriteAction = true) {
+                KtPsiFactory.contextual(files[i]).createPhysicalFile(javaFile.name.replace(".java", ".kt"), result!!.text)
+                    .also { it.addImports(result.importsToAdd) }
+            }
+        }
+
+        postProcessor.doAdditionalProcessing(MultipleFilesPostProcessingTarget(kotlinFiles), context) { phase, description ->
+            withProgressProcessor.updateState(fileIndex = null, phase = phase + phasesCount, description = description)
+        }
+
+        PostprocessorExtensionsRunner.runProcessors(project, kotlinFiles, postprocessorExtensions)
+
+        return FilesResult(kotlinFiles.map { it.text }, externalCodeProcessing)
     }
 
-    @OptIn(KaAllowAnalysisOnEdt::class)
     fun elementsToKotlin(
         inputElements: List<PsiElement>,
         processor: WithProgressProcessor,
         bodyFilter: ((PsiElement) -> Boolean)?,
         forInlining: Boolean = false
-    ): Result = allowAnalysisOnEdt {
+    ): Result {
         val contextElement = inputElements.firstOrNull() ?: return Result.EMPTY
-        val targetKtModule = targetModule?.productionOrTestSourceModuleInfo?.toKtModule()
+        val targetKaModule = targetModule?.toKaSourceModuleForProductionOrTest()
 
         // TODO
         // val originKtModule = ProjectStructureProvider.getInstance(project).getModule(contextElement, contextualModule = null)
         // doesn't work for copy-pasted code, in this case the module is NotUnderContentRootModuleByModuleInfo, which can't be analyzed
 
-        when {
-            targetKtModule != null -> {
-                analyze(targetKtModule) {
+        return when {
+            targetKaModule != null -> {
+                analyze(targetKaModule) {
                     doConvertElementsToKotlin(contextElement, inputElements, processor, bodyFilter, forInlining)
                 }
             }
@@ -103,7 +117,7 @@ class NewJavaToKotlinConverter(
         }
     }
 
-    context(KtAnalysisSession)
+    context(KaSession)
     private fun doConvertElementsToKotlin(
         contextElement: PsiElement,
         inputElements: List<PsiElement>,
@@ -122,7 +136,12 @@ class NewJavaToKotlinConverter(
             else -> LanguageVersionSettingsImpl.DEFAULT
         }
 
-        val importStorage = JKImportStorage(languageVersionSettings)
+        val kaModule =
+            targetFile?.let { KaModuleProvider.getModule(project, it, useSiteModule = null) }
+                ?: targetModule?.toKaSourceModuleForProduction()
+                ?: KaModuleProvider.getModule(project, contextElement, useSiteModule = null)
+
+        val importStorage = JKImportStorage(kaModule.targetPlatform, project)
         val treeBuilder = JavaToJKTreeBuilder(symbolProvider, typeFactory, referenceSearcher, importStorage, bodyFilter, forInlining)
 
         // we want to leave all imports as is in the case when user is converting only imports
@@ -252,8 +271,9 @@ private fun WithProgressProcessor.updateState(fileIndex: Int?, phase: J2KConvers
 }
 
 private enum class J2KConversionPhase(val phaseNumber: Int) {
-    BUILD_AST(0),
-    RUN_CONVERSIONS(1),
-    PRINT_CODE(2),
-    CREATE_FILES(3)
+    PREPROCESSING(0),
+    BUILD_AST(1),
+    RUN_CONVERSIONS(2),
+    PRINT_CODE(3),
+    CREATE_FILES(4)
 }

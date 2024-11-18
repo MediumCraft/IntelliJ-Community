@@ -5,25 +5,22 @@ package org.jetbrains.kotlin.idea.debugger.test
 import com.intellij.debugger.DebuggerManagerEx
 import com.intellij.debugger.DefaultDebugEnvironment
 import com.intellij.debugger.engine.DebugProcessImpl
-import com.intellij.debugger.engine.RemoteStateState
-import com.intellij.debugger.impl.*
+import com.intellij.debugger.impl.DebuggerSession
+import com.intellij.debugger.impl.DescriptorTestCase
+import com.intellij.debugger.impl.GenericDebuggerRunnerSettings
+import com.intellij.debugger.impl.OutputChecker
 import com.intellij.debugger.settings.DebuggerSettings
 import com.intellij.execution.ExecutionTestCase
-import com.intellij.execution.configurations.JavaCommandLineState
 import com.intellij.execution.configurations.JavaParameters
 import com.intellij.execution.executors.DefaultDebugExecutor
 import com.intellij.execution.process.ProcessAdapter
 import com.intellij.execution.process.ProcessEvent
 import com.intellij.execution.process.ProcessOutputTypes
-import com.intellij.execution.runners.ExecutionEnvironment
 import com.intellij.execution.runners.ExecutionEnvironmentBuilder
-import com.intellij.execution.target.TargetEnvironmentRequest
-import com.intellij.execution.target.TargetedCommandLineBuilder
 import com.intellij.openapi.application.invokeAndWaitIfNeeded
 import com.intellij.openapi.application.runInEdt
 import com.intellij.openapi.application.runReadAction
 import com.intellij.openapi.application.runWriteAction
-import com.intellij.openapi.observable.util.whenDisposed
 import com.intellij.openapi.roots.LibraryOrderEntry
 import com.intellij.openapi.roots.ModifiableRootModel
 import com.intellij.openapi.roots.ModuleRootManager
@@ -37,7 +34,6 @@ import com.intellij.testFramework.IndexingTestUtil
 import com.intellij.testFramework.runInEdtAndGet
 import com.intellij.util.ThrowableRunnable
 import com.intellij.util.containers.addIfNotNull
-import com.intellij.util.io.delete
 import com.intellij.xdebugger.XDebugSession
 import org.jetbrains.kotlin.config.*
 import org.jetbrains.kotlin.fileClasses.JvmFileClassUtil
@@ -51,10 +47,6 @@ import org.jetbrains.kotlin.idea.compiler.configuration.KotlinCommonCompilerArgu
 import org.jetbrains.kotlin.idea.compiler.configuration.KotlinCompilerSettings
 import org.jetbrains.kotlin.idea.compiler.configuration.KotlinPluginLayout
 import org.jetbrains.kotlin.idea.debugger.evaluate.KotlinEvaluator
-import org.jetbrains.kotlin.idea.debugger.test.ArtUtils.buildCommandLine
-import org.jetbrains.kotlin.idea.debugger.test.ArtUtils.buildDexFile
-import org.jetbrains.kotlin.idea.debugger.test.ArtUtils.getTestTimeoutMillis
-import org.jetbrains.kotlin.idea.debugger.test.ArtUtils.runTestOnArt
 import org.jetbrains.kotlin.idea.debugger.test.preference.*
 import org.jetbrains.kotlin.idea.debugger.test.util.BreakpointCreator
 import org.jetbrains.kotlin.idea.debugger.test.util.KotlinOutputChecker
@@ -68,11 +60,8 @@ import org.jetbrains.kotlin.name.ClassId
 import org.jetbrains.kotlin.psi.KtNamedFunction
 import org.jetbrains.kotlin.psi.KtTreeVisitorVoid
 import org.jetbrains.kotlin.psi.psiUtil.containingClassOrObject
-import org.jetbrains.kotlin.test.TargetBackend
 import org.junit.ComparisonFailure
 import java.io.File
-import java.lang.ProcessBuilder.Redirect.PIPE
-import kotlin.io.path.pathString
 
 internal const val KOTLIN_LIBRARY_NAME = "KotlinJavaRuntime"
 internal const val TEST_LIBRARY_NAME = "TestLibrary"
@@ -105,6 +94,7 @@ abstract class KotlinDescriptorTestCase : DescriptorTestCase(),
     private var logPropagator: LogPropagator? = null
 
     private var oldValues: OldValuesStorage? = null
+    private val vmAttacher = VmAttacher.getInstance()
 
     override fun runBare(testRunnable: ThrowableRunnable<Throwable>) {
         testAppDirectory = tmpDir("debuggerTestSources")
@@ -135,30 +125,6 @@ abstract class KotlinDescriptorTestCase : DescriptorTestCase(),
 
     protected open fun getK2IgnoreDirective(): String = IgnoreTests.DIRECTIVES.IGNORE_K2
 
-    var originalUseIrBackendForEvaluation = true
-    private var originalDisableFallbackToOldEvaluator = false
-
-    private fun registerEvaluatorBackend() {
-        val useIrBackendForEvaluation = Registry.get("debugger.kotlin.evaluator.use.new.jvm.ir.backend")
-        originalUseIrBackendForEvaluation = useIrBackendForEvaluation.asBoolean()
-
-        val isJvmIrBackend = fragmentCompilerBackend() == FragmentCompilerBackend.JVM_IR
-        useIrBackendForEvaluation.setValue(isJvmIrBackend)
-
-        if (isJvmIrBackend) {
-            val disableFallbackToOldEvaluator = Registry.get("debugger.kotlin.evaluator.disable.fallback.to.old.backend")
-            originalDisableFallbackToOldEvaluator = disableFallbackToOldEvaluator.asBoolean()
-            disableFallbackToOldEvaluator.setValue(true)
-        }
-    }
-
-    private fun restoreEvaluatorBackend() {
-        Registry.get("debugger.kotlin.evaluator.use.new.jvm.ir.backend")
-            .setValue(originalUseIrBackendForEvaluation)
-        Registry.get("debugger.kotlin.evaluator.disable.fallback.to.old.backend")
-            .setValue(originalDisableFallbackToOldEvaluator)
-    }
-
     protected open val compileWithK2: Boolean get() = false
 
     protected open val useInlineScopes: Boolean get() = false
@@ -166,11 +132,8 @@ abstract class KotlinDescriptorTestCase : DescriptorTestCase(),
     override fun setUp() {
         setUpWithKotlinPlugin { super.setUp() }
 
-        registerEvaluatorBackend()
-
         KotlinEvaluator.LOG_COMPILATIONS = true
         logPropagator = LogPropagator(::systemLogger).apply { attach() }
-        atDebuggerTearDown { restoreEvaluatorBackend() }
         atDebuggerTearDown { logPropagator = null }
         atDebuggerTearDown { logPropagator?.detach() }
         atDebuggerTearDown { detachLibraries() }
@@ -178,6 +141,9 @@ abstract class KotlinDescriptorTestCase : DescriptorTestCase(),
         atDebuggerTearDown { invokeAndWaitIfNeeded { oldValues?.revertValues() } }
         atDebuggerTearDown { KotlinEvaluator.LOG_COMPILATIONS = false }
         atDebuggerTearDown { restoreIdeCompilerSettings() }
+
+        vmAttacher.setUp()
+        atDebuggerTearDown { vmAttacher.tearDown() }
     }
 
     protected fun dataFile(fileName: String): File = File(getTestDataPath(), fileName)
@@ -188,20 +154,7 @@ abstract class KotlinDescriptorTestCase : DescriptorTestCase(),
 
     fun getTestDataPath(): String = getTestsRoot(this::class.java)
 
-    enum class FragmentCompilerBackend {
-        JVM,
-        JVM_IR
-    }
-
-    open fun fragmentCompilerBackend() = FragmentCompilerBackend.JVM_IR
-
     open fun lambdasGenerationScheme() = JvmClosureGenerationScheme.CLASS
-
-    protected open fun targetBackend(): TargetBackend =
-        when (fragmentCompilerBackend()) {
-            FragmentCompilerBackend.JVM -> TargetBackend.JVM_IR_WITH_OLD_EVALUATOR
-            FragmentCompilerBackend.JVM_IR -> TargetBackend.JVM_IR_WITH_IR_EVALUATOR
-        }
 
     protected open fun configureProjectByTestFiles(testFiles: List<TestFileWithModule>, testAppDirectory: File) {
     }
@@ -235,8 +188,6 @@ abstract class KotlinDescriptorTestCase : DescriptorTestCase(),
         val enabledLanguageFeatures = preferences[DebuggerPreferenceKeys.ENABLED_LANGUAGE_FEATURE]
             .map { LanguageFeature.fromString(it) ?: error("Not found language feature $it") }
 
-        updateIdeCompilerSettingsForEvaluator(languageVersion, enabledLanguageFeatures)
-
         val compilerFacility = createDebuggerTestCompilerFacility(
             testFiles, jvmTarget,
             TestCompileConfiguration(
@@ -246,6 +197,8 @@ abstract class KotlinDescriptorTestCase : DescriptorTestCase(),
                 useInlineScopes
             )
         )
+
+        updateIdeCompilerSettingsForEvaluator(languageVersion, enabledLanguageFeatures, compilerFacility.getCompilerPlugins())
 
         compileLibrariesAndTestSources(preferences, compilerFacility)
 
@@ -369,10 +322,8 @@ abstract class KotlinDescriptorTestCase : DescriptorTestCase(),
             .runProfile(MockConfiguration(myProject))
             .build()
 
-        val debuggerSession = when (runTestOnArt()) {
-            true -> createArtLocalProcess(javaParameters, environment)
-            false -> createJvmLocalProcess(javaParameters, environment)
-        }
+        environment.putUserData(DefaultDebugEnvironment.DEBUGGER_TRACE_MODE, traceMode)
+        val debuggerSession = vmAttacher.attachVirtualMachine(this, javaParameters, environment)
 
         val processHandler = debuggerSession.process.processHandler
         debuggerSession.process.addProcessListener(object : ProcessAdapter() {
@@ -405,81 +356,13 @@ abstract class KotlinDescriptorTestCase : DescriptorTestCase(),
         return debuggerSession
     }
 
-    private fun createJvmLocalProcess(javaParameters: JavaParameters, environment: ExecutionEnvironment): DebuggerSession {
-        val debuggerRunnerSettings = (environment.runnerSettings as GenericDebuggerRunnerSettings)
-        val javaCommandLineState: JavaCommandLineState = object : JavaCommandLineState(environment) {
-            override fun createJavaParameters() = javaParameters
-
-            override fun createTargetedCommandLine(request: TargetEnvironmentRequest): TargetedCommandLineBuilder {
-                return getJavaParameters().toCommandLine(request)
-            }
-        }
-
-        val debugParameters =
-            RemoteConnectionBuilder(
-                debuggerRunnerSettings.LOCAL,
-                debuggerRunnerSettings.transport,
-                debuggerRunnerSettings.debugPort
-            )
-                .checkValidity(true)
-                .asyncAgent(true)
-                .create(javaCommandLineState.javaParameters)
-
-        val env = javaCommandLineState.environment
-        env.putUserData(DefaultDebugEnvironment.DEBUGGER_TRACE_MODE, traceMode)
-
-        return attachVirtualMachine(javaCommandLineState, env, debugParameters, false)
-    }
-
-    private fun createArtLocalProcess(javaParameters: JavaParameters, environment: ExecutionEnvironment): DebuggerSession {
-        println("Running on ART VM")
-        setTimeout(getTestTimeoutMillis())
-        val mainClass = javaParameters.mainClass
-        val dexFile = buildDexFile(javaParameters.classPath.pathList)
-        val command = buildCommandLine(dexFile.pathString, mainClass)
-        testRootDisposable.whenDisposed {
-            dexFile.delete()
-        }
-        val art = ProcessBuilder()
-            .command(command)
-            .redirectOutput(PIPE)
-            .start()
-
-        val port: String = art.inputStream.bufferedReader().use {
-            while (true) {
-                val line = it.readLine() ?: break
-                if (line.startsWith("Listening for transport")) {
-                    val port = line.substringAfterLast(" ")
-                    return@use port
-                }
-            }
-            throw IllegalStateException("Failed to read listening port from ART")
-        }
-
-        val debugParameters =
-            RemoteConnectionBuilder(false, DebuggerSettings.SOCKET_TRANSPORT, port)
-                .checkValidity(true)
-                .asyncAgent(true)
-                .create(javaParameters)
-
-        val remoteState = RemoteStateState(project, debugParameters)
-
-        return attachVirtualMachine(remoteState, environment, debugParameters, false)
-    }
-
     open fun addMavenDependency(compilerFacility: DebuggerTestCompilerFacility, library: String) {
     }
 
     abstract fun doMultiFileTest(files: TestFiles, preferences: DebuggerPreferences)
 
     override fun initOutputChecker(): OutputChecker {
-        return KotlinOutputChecker(
-            getTestDataPath(),
-            testAppPath,
-            appOutputPath,
-            targetBackend(),
-            getExpectedOutputFile()
-        )
+        return KotlinOutputChecker(getTestDataPath(), testAppPath, appOutputPath, getExpectedOutputFile())
     }
 
     override fun setUpModule() {
@@ -527,11 +410,18 @@ abstract class KotlinDescriptorTestCase : DescriptorTestCase(),
         }
     }
 
-    private fun updateIdeCompilerSettingsForEvaluator(languageVersion: LanguageVersion?, enabledLanguageFeatures: List<LanguageFeature>) {
+    private fun updateIdeCompilerSettingsForEvaluator(
+        languageVersion: LanguageVersion?,
+        enabledLanguageFeatures: List<LanguageFeature>,
+        compilerPlugins: List<String>,
+    ) {
         if (languageVersion != null) {
             KotlinCommonCompilerArgumentsHolder.getInstance(project).update {
                 this.languageVersion = languageVersion.versionString
             }
+        }
+        KotlinCommonCompilerArgumentsHolder.getInstance(project).update {
+            this.pluginClasspaths = compilerPlugins.toTypedArray()
         }
         KotlinCompilerSettings.getInstance(project).update {
             this.additionalArguments = enabledLanguageFeatures.joinToString(" ") { "-XXLanguage:+${it.name}" }

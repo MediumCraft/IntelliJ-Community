@@ -2,18 +2,20 @@
 package org.jetbrains.kotlin.idea.k2.codeinsight.inspections.dfa
 
 import com.intellij.psi.SyntaxTraverser
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
-import org.jetbrains.kotlin.analysis.api.calls.KtCallableMemberCall
-import org.jetbrains.kotlin.analysis.api.calls.KtImplicitReceiverValue
-import org.jetbrains.kotlin.analysis.api.calls.KtSmartCastedReceiverValue
-import org.jetbrains.kotlin.analysis.api.calls.singleCallOrNull
-import org.jetbrains.kotlin.analysis.api.symbols.KtSymbol
-import org.jetbrains.kotlin.analysis.api.types.KtType
+import org.jetbrains.kotlin.analysis.api.KaNonPublicApi
+import org.jetbrains.kotlin.analysis.api.KaSession
+import org.jetbrains.kotlin.analysis.api.resolution.KaCallableMemberCall
+import org.jetbrains.kotlin.analysis.api.resolution.KaImplicitReceiverValue
+import org.jetbrains.kotlin.analysis.api.resolution.KaSmartCastedReceiverValue
+import org.jetbrains.kotlin.analysis.api.resolution.singleCallOrNull
+import org.jetbrains.kotlin.analysis.api.symbols.KaSymbol
+import org.jetbrains.kotlin.analysis.api.types.KaType
 import org.jetbrains.kotlin.idea.references.mainReference
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.psi.*
 
-context(KtAnalysisSession)
+context(KaSession)
+@OptIn(KaNonPublicApi::class)
 internal fun isSmartCastNecessary(expr: KtExpression, value: Boolean): Boolean {
     val values = getValuesInExpression(expr)
     if (values.isEmpty()) return false
@@ -23,26 +25,27 @@ internal fun isSmartCastNecessary(expr: KtExpression, value: Boolean): Boolean {
         .filterIsInstance(KtExpression::class.java)
         .any { e ->
             if (e is KtReferenceExpression) {
-                val info = e.getSmartCastInfo()
+                val info = e.smartCastInfo
                 if (info != null) {
-                    val expectedType = (if (e.parent is KtThisExpression) e.parent else e).getExpectedType()
+                    val expectedType = (if (e.parent is KtThisExpression) e.parent else e).expectedType
                     val ktType = values[e.mainReference.resolveToSymbol()]
-                    return@any ktType != null && !info.smartCastType.isEqualTo(ktType)
-                            && (expectedType == null || !ktType.isSubTypeOf(expectedType))
+                    return@any ktType != null && !info.smartCastType.semanticallyEquals(ktType)
+                            && (expectedType == null || !ktType.isSubtypeOf(expectedType))
                 }
             }
 
-            val implicitReceiverSmartCastList = e.getImplicitReceiverSmartCast()
+            val implicitReceiverSmartCastList = e.implicitReceiverSmartCasts
             if (implicitReceiverSmartCastList.isNotEmpty()) {
-                val symbol = e.resolveCall()?.singleCallOrNull<KtCallableMemberCall<*, *>>()?.partiallyAppliedSymbol
+                val symbol = e.resolveToCall()?.singleCallOrNull<KaCallableMemberCall<*, *>>()?.partiallyAppliedSymbol
                 if (symbol != null) {
                     var receiver = symbol.dispatchReceiver ?: symbol.extensionReceiver
-                    if (receiver is KtSmartCastedReceiverValue) {
+                    if (receiver is KaSmartCastedReceiverValue) {
                         receiver = receiver.original
                     }
-                    if (receiver is KtImplicitReceiverValue) {
+                    if (receiver is KaImplicitReceiverValue) {
                         val ktType = values[receiver.symbol]
-                        return@any ktType != null && implicitReceiverSmartCastList.none { smartCast -> smartCast.type.isEqualTo(ktType) }
+                        return@any ktType != null
+                                && implicitReceiverSmartCastList.none { smartCast -> smartCast.type.semanticallyEquals(ktType) }
                     }
                 }
             }
@@ -50,15 +53,15 @@ internal fun isSmartCastNecessary(expr: KtExpression, value: Boolean): Boolean {
         }
 }
 
-context(KtAnalysisSession)
-private fun getValuesInExpression(expr: KtExpression): Map<KtSymbol, KtType> {
-    val map = hashMapOf<KtSymbol, KtType>()
+context(KaSession)
+private fun getValuesInExpression(expr: KtExpression): Map<KaSymbol, KaType> {
+    val map = hashMapOf<KaSymbol, KaType>()
     SyntaxTraverser.psiTraverser(expr)
         .filter(KtReferenceExpression::class.java)
         .forEach { e ->
             val symbol = e.mainReference.resolveToSymbol()
             if (symbol != null) {
-                val type = e.getKtType()
+                val type = e.expressionType
                 if (type != null) {
                     map[symbol] = type
                 }
@@ -70,7 +73,7 @@ private fun getValuesInExpression(expr: KtExpression): Map<KtSymbol, KtType> {
 }
 
 
-context(KtAnalysisSession)
+context(KaSession)
 private fun getConditionScopes(expr: KtExpression, value: Boolean?): List<KtElement> {
     // TODO: reuse more standard utility to collect scopes
     return when (val parent = expr.parent) {
@@ -111,8 +114,8 @@ private fun getConditionScopes(expr: KtExpression, value: Boolean?): List<KtElem
                         val result = mutableListOf<KtExpression>()
                         if (thenExpression != null && value != false) result += thenExpression
                         if (elseExpression != null && value != true) result += elseExpression
-                        val nothingType = thenExpression?.getKotlinType()?.isNothing == true ||
-                                elseExpression?.getKotlinType()?.isNothing == true
+                        val nothingType = thenExpression?.getKotlinType()?.isNothingType == true ||
+                                elseExpression?.getKotlinType()?.isNothingType == true
                         if (nothingType) {
                             var next = gParent.nextSibling
                             while (next != null) {

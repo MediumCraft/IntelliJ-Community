@@ -10,8 +10,8 @@ import com.intellij.find.findUsages.similarity.MostCommonUsagePatternsComponent.
 import com.intellij.ide.IdeTooltipManager
 import com.intellij.lang.injection.InjectedLanguageManager
 import com.intellij.openapi.actionSystem.CommonDataKeys
-import com.intellij.openapi.actionSystem.DataProvider
-import com.intellij.openapi.actionSystem.PlatformCoreDataKeys
+import com.intellij.openapi.actionSystem.DataSink
+import com.intellij.openapi.actionSystem.UiCompatibleDataProvider
 import com.intellij.openapi.application.*
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.editor.*
@@ -36,7 +36,6 @@ import com.intellij.openapi.util.*
 import com.intellij.openapi.util.registry.Registry
 import com.intellij.openapi.util.text.HtmlBuilder
 import com.intellij.openapi.util.text.StringUtil
-import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.platform.util.coroutines.childScope
 import com.intellij.pom.Navigatable
 import com.intellij.psi.PsiDocumentManager
@@ -53,6 +52,7 @@ import com.intellij.usages.UsageContextPanel
 import com.intellij.usages.UsageView
 import com.intellij.usages.UsageViewPresentation
 import com.intellij.usages.similarity.clustering.ClusteringSearchSession
+import com.intellij.util.SlowOperations
 import com.intellij.util.concurrency.NonUrgentExecutor
 import com.intellij.util.concurrency.ThreadingAssertions
 import com.intellij.util.concurrency.annotations.RequiresBackgroundThread
@@ -70,7 +70,6 @@ import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.ApiStatus.Internal
 import org.jetbrains.annotations.Contract
-import org.jetbrains.annotations.NonNls
 import java.awt.BorderLayout
 import java.awt.Font
 import java.awt.Graphics
@@ -88,7 +87,7 @@ import kotlin.Pair
 open class UsagePreviewPanel @JvmOverloads constructor(project: Project,
                                                        presentation: UsageViewPresentation,
                                                        private val myIsEditor: Boolean = false)
-  : UsageContextPanelBase(presentation), DataProvider {
+  : UsageContextPanelBase(presentation), UiCompatibleDataProvider {
 
   private var myEditor: Editor? = null
   private var myLineHeight = 0
@@ -103,18 +102,15 @@ open class UsagePreviewPanel @JvmOverloads constructor(project: Project,
   private val cs = UsageViewCoroutineScopeProvider.getInstance(project).coroutineScope.childScope()
   private var myShowTooltipBalloon = Registry.`is`("ide.find.show.tooltip.in.preview")
 
-  override fun getData(dataId: @NonNls String): Any? {
-    if (myEditor == null) return null
-    if (CommonDataKeys.EDITOR.`is`(dataId)) {
-      return myEditor
+  override fun uiDataSnapshot(sink: DataSink) {
+    val editor = myEditor ?: return
+    sink[CommonDataKeys.EDITOR] = editor
+    val position = editor.caretModel.logicalPosition
+    val project = editor.project ?: return
+    sink.lazy(CommonDataKeys.NAVIGATABLE_ARRAY) {
+      val file = FileDocumentManager.getInstance().getFile(editor.document) ?: return@lazy null
+      arrayOf<Navigatable>(OpenFileDescriptor(project, file, position.line, position.column))
     }
-    if (PlatformCoreDataKeys.BGT_DATA_PROVIDER.`is`(dataId)) {
-      val file = FileDocumentManager.getInstance().getFile(myEditor!!.document) ?: return null
-      val position = myEditor!!.caretModel.logicalPosition
-      val project = myEditor!!.project ?: return null
-      return DataProvider { slowId: String -> getSlowData(slowId, project, file, position) }
-    }
-    return null
   }
 
   fun setShowTooltipBalloon(showTooltipBalloon: Boolean) {
@@ -136,29 +132,34 @@ open class UsagePreviewPanel @JvmOverloads constructor(project: Project,
     }
   }
 
-  private suspend fun resetEditor(project: Project, infos: List<UsageInfo>) {
+  private suspend fun resetEditor(infos: List<UsageInfo>) {
     val pair: Pair<PsiFile, Document> = readAction {
       val psiElement = infos[0].element ?: return@readAction null
       var psiFile = psiElement.containingFile ?: return@readAction null
+      val project = psiFile.project
       val host = InjectedLanguageManager.getInstance(project).getInjectionHost(psiFile)
       if (host != null) {
         psiFile = host.containingFile ?: return@readAction null
       }
-      val document = PsiDocumentManager.getInstance(psiFile.project).getDocument(psiFile) ?: return@readAction null
+      val document = PsiDocumentManager.getInstance(project).getDocument(psiFile) ?: return@readAction null
       psiFile to document
     } ?: return
 
     withContext(Dispatchers.EDT) {
       val (psiFile, document) = pair
+      val project = psiFile.project
 
       if (myEditor == null || document !== myEditor!!.document) {
         releaseEditor()
         removeAll()
         if (isDisposed) return@withContext
-        myEditor = createEditor(psiFile, document)
-        lineHeight = myEditor!!.lineHeight
-        myEditor!!.setBorder(if (myIsEditor) null else JBEmptyBorder(0, UIUtil.LARGE_VGAP, 0, 0))
-        add(myEditor!!.component, BorderLayout.CENTER)
+        //maybe readaction
+        writeIntentReadAction {
+          myEditor = createEditor(psiFile, document)
+          lineHeight = myEditor!!.lineHeight
+          myEditor!!.setBorder(if (myIsEditor) null else JBEmptyBorder(0, UIUtil.LARGE_VGAP, 0, 0))
+          add(myEditor!!.component, BorderLayout.CENTER)
+        }
         invalidate()
         validate()
       }
@@ -167,7 +168,11 @@ open class UsagePreviewPanel @JvmOverloads constructor(project: Project,
         if (infos != myCachedSelectedUsageInfos // avoid moving viewport
             || !UsageViewPresentation.arePatternsEqual(myCachedSearchPattern, myPresentation.searchPattern)
             || myCachedReplaceString != myPresentation.replaceString || myCachedCaseSensitive != myPresentation.isCaseSensitive) {
-          highlight(infos, myEditor!!, project, myShowTooltipBalloon, HighlighterLayer.ADDITIONAL_SYNTAX)
+          SlowOperations.knownIssue("IJPL-162820").use {
+            ReadAction.run<RuntimeException> {
+              highlight(infos, myEditor!!, project, myShowTooltipBalloon, HighlighterLayer.ADDITIONAL_SYNTAX)
+            }
+          }
           myCachedSelectedUsageInfos = infos
           myCachedSearchPattern = myPresentation.searchPattern
           myCachedCaseSensitive = myPresentation.isCaseSensitive
@@ -281,7 +286,7 @@ open class UsagePreviewPanel @JvmOverloads constructor(project: Project,
   }
 
   @RequiresEdt
-  public override fun updateLayoutLater(project: Project, infos: List<UsageInfo>, usageView: UsageView) {
+  public override fun updateLayoutLater(infos: List<UsageInfo>, usageView: UsageView) {
     disposeAndRemoveSimilarUsagesToolbar()
     val usageViewImpl = usageView as? UsageViewImpl
     if (ClusteringSearchSession.isSimilarUsagesClusteringEnabled() && usageViewImpl != null) {
@@ -291,13 +296,13 @@ open class UsagePreviewPanel @JvmOverloads constructor(project: Project,
         showMostCommonUsagePatterns(usageViewImpl, selectedGroupNodes, sessionInUsageView)
       }
       else {
-        updateLayoutLater(project, infos)
+        updateLayoutLater(infos)
         updateSimilarUsagesToolBar(infos, usageView)
       }
       myPreviousSelectedGroupNodes = selectedGroupNodes
     }
     else {
-      updateLayoutLater(project, infos)
+      updateLayoutLater(infos)
     }
   }
 
@@ -331,16 +336,16 @@ open class UsagePreviewPanel @JvmOverloads constructor(project: Project,
     }
   }
 
-  override fun updateLayoutLater(project: Project, infos: List<UsageInfo>?) {
+  override fun updateLayoutLater(infos: List<UsageInfo>?) {
     cs.launch(ModalityState.current().asContextElement()) {
-      previewUsages(project, infos)
+      previewUsages(infos)
     }
   }
 
-  private suspend fun previewUsages(project: Project, infos: List<UsageInfo>?) {
+  private suspend fun previewUsages(infos: List<UsageInfo>?) {
     val cannotPreviewMessage = readAction { cannotPreviewMessage(infos) }
     if (cannotPreviewMessage == null) {
-      resetEditor(project, infos!!)
+      resetEditor(infos!!)
     }
     else {
       withContext(Dispatchers.EDT) {
@@ -414,15 +419,6 @@ open class UsagePreviewPanel @JvmOverloads constructor(project: Project,
   companion object {
     const val LINE_HEIGHT_PROPERTY = "UsageViewPanel.lineHeightProperty"
     private val LOG = Logger.getInstance(UsagePreviewPanel::class.java)
-    private fun getSlowData(dataId: String,
-                            project: Project,
-                            file: VirtualFile,
-                            position: LogicalPosition): Any? {
-      return if (CommonDataKeys.NAVIGATABLE_ARRAY.`is`(dataId)) {
-        arrayOf<Navigatable>(OpenFileDescriptor(project, file, position.line, position.column))
-      }
-      else null
-    }
 
     private val IN_PREVIEW_USAGE_FLAG = Key.create<Boolean>("IN_PREVIEW_USAGE_FLAG")
 

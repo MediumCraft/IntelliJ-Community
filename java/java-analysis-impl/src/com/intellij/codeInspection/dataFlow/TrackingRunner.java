@@ -17,7 +17,6 @@ import com.intellij.codeInspection.dataFlow.java.anchor.JavaExpressionAnchor;
 import com.intellij.codeInspection.dataFlow.java.inst.AssignInstruction;
 import com.intellij.codeInspection.dataFlow.java.inst.CheckNotNullInstruction;
 import com.intellij.codeInspection.dataFlow.java.inst.InstanceofInstruction;
-import com.intellij.codeInspection.dataFlow.java.inst.JvmPushInstruction;
 import com.intellij.codeInspection.dataFlow.jvm.FieldChecker;
 import com.intellij.codeInspection.dataFlow.jvm.JvmPsiRangeSetUtil;
 import com.intellij.codeInspection.dataFlow.jvm.SpecialField;
@@ -35,10 +34,7 @@ import com.intellij.java.analysis.JavaAnalysisBundle;
 import com.intellij.lang.ASTNode;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.progress.ProgressManager;
-import com.intellij.openapi.util.Condition;
-import com.intellij.openapi.util.Pair;
-import com.intellij.openapi.util.Segment;
-import com.intellij.openapi.util.TextRange;
+import com.intellij.openapi.util.*;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.source.tree.ChildRole;
@@ -235,7 +231,7 @@ public final class TrackingRunner extends StandardDataFlowRunner {
   }
 
   public static class CauseItem {
-    private static final String PLACE_POINTER = "___PLACE___";
+    private static final @NlsSafe String PLACE_POINTER = "___PLACE___";
     final @NotNull List<CauseItem> myChildren;
     final @NotNull DfaProblemType myProblem;
     final @Nullable SmartPsiFileRange myTarget;
@@ -339,7 +335,9 @@ public final class TrackingRunner extends StandardDataFlowRunner {
       }
       int childIndex = parent == null ? 0 : parent.myChildren.indexOf(this);
       if (childIndex > 0) {
-        title = (parent.myProblem instanceof PossibleExecutionDfaProblemType ? "or " : "and ") + title;
+        title = (parent.myProblem instanceof PossibleExecutionDfaProblemType
+                 ? JavaAnalysisBundle.message("dfa.find.cause.or.another", title)
+                 : JavaAnalysisBundle.message("dfa.find.cause.and.another", title));
       } else {
         title = StringUtil.capitalize(title);
       }
@@ -348,7 +346,6 @@ public final class TrackingRunner extends StandardDataFlowRunner {
 
     @Override
     public @Nls String toString() {
-      //noinspection HardCodedStringLiteral
       return getProblemName().replaceFirst(PLACE_POINTER, JavaAnalysisBundle.message("dfa.find.cause.place.here"));
     }
 
@@ -550,7 +547,7 @@ public final class TrackingRunner extends StandardDataFlowRunner {
     public CauseItem[] findCauses(TrackingRunner runner, PsiExpression expression, MemoryStateChange history) {
       DfaValue topOfStack = history.myTopOfStack;
       DfaValue value = myField.createValue(runner.getFactory(), topOfStack);
-      MemoryStateChange change = MemoryStateChange.create(history, new JvmPushInstruction(value, null), Map.of(), value);
+      MemoryStateChange change = MemoryStateChange.create(history, new PushInstruction(value, null), Map.of(), value);
       return runner.findConstantValueCause(expression, change, 0);
     }
 
@@ -1449,12 +1446,12 @@ public final class TrackingRunner extends StandardDataFlowRunner {
         right = rightVal.makeDfaValue(getFactory(), arguments);
       }
       if (leftPush == null && left != top) {
-        leftPush = MemoryStateChange.create(history.getPrevious(), new JvmPushInstruction(left, null), Collections.emptyMap(), left);
+        leftPush = MemoryStateChange.create(history.getPrevious(), new PushInstruction(left, null), Collections.emptyMap(), left);
       }
       PsiExpression rightPlace = rightVal.findPlace(call);
       MemoryStateChange rightPush = history.findSubExpressionPush(rightPlace);
       if (rightPush == null && right != top) {
-        rightPush = MemoryStateChange.create(history.getPrevious(), new JvmPushInstruction(right, null), Collections.emptyMap(), right);
+        rightPush = MemoryStateChange.create(history.getPrevious(), new PushInstruction(right, null), Collections.emptyMap(), right);
       }
       if (leftPush != null && rightPush != null) {
         causeItem.addChildren(findRelationCause(type,

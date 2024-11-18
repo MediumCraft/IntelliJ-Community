@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.util.ui;
 
 import com.intellij.icons.AllIcons;
@@ -11,6 +11,7 @@ import com.intellij.ui.border.NamedBorderKt;
 import com.intellij.ui.scale.DerivedScaleType;
 import com.intellij.ui.scale.JBUIScale;
 import com.intellij.util.ui.components.BorderLayoutPanel;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -432,12 +433,28 @@ public final class JBUI {
         return JBColor.namedColor("Button.endBackground", JBColor.namedColor("Button.darcula.endColor", 0x414648));
       }
 
+      public static @NotNull Color buttonForeground() {
+        return JBColor.namedColor("Button.foreground", 0x000000, 0xDFE1E5);
+      }
+
+      public static @NotNull Color buttonLoadingForeground() {
+        return JBColor.namedColor("Button.loadingForeground", 0x818594, 0x868A91);
+      }
+
       public static @NotNull Color defaultButtonColorStart() {
         return JBColor.namedColor("Button.default.startBackground", JBColor.namedColor("Button.darcula.defaultStartColor", 0x384f6b));
       }
 
       public static @NotNull Color defaultButtonColorEnd() {
         return JBColor.namedColor("Button.default.endBackground", JBColor.namedColor("Button.darcula.defaultEndColor", 0x233143));
+      }
+
+      public static @NotNull Color defaultButtonForeground() {
+        return JBColor.namedColor("Button.default.foreground", 0xFFFFFF, 0xFFFFFF);
+      }
+
+      public static @NotNull Color defaultButtonLoadingForeground() {
+        return JBColor.namedColor("Button.default.loadingForeground", 0xD3D5DB, 0xCED0D6);
       }
 
       public static @NotNull Color focusBorderColor(boolean isDefaultButton) {
@@ -666,7 +683,7 @@ public final class JBUI {
         return "EditorTabs.verticalTabInsets";
       }
 
-      public static Insets tabContentInsets(Boolean actionsOnTheRight) {
+      public static Insets tabContentInsets(@Nullable Boolean actionsOnTheRight) {
         if (actionsOnTheRight == null) {
           return insets(tabContentInsetsActionsNoneKey(), isNewUI() ? insetsLeft(4) : insets(0, 4));
         }
@@ -914,6 +931,28 @@ public final class JBUI {
       }
     }
 
+    public static final class ProgressBar {
+      public static final Color PROGRESS = JBColor.namedColor("ProgressBar.progressColor", new JBColor(0x808080, 0xA0A0A0));
+
+      public static final Color INDETERMINATE_START = JBColor.namedColor("ProgressBar.indeterminateStartColor", new JBColor(0xC4C4C4, 0x696969));
+      public static final Color INDETERMINATE_END = JBColor.namedColor("ProgressBar.indeterminateEndColor", new JBColor(0x808080, 0x838383));
+
+      public static final Color PASSED = JBColor.namedColor("ProgressBar.passedColor", new JBColor(0x55A76A, 0x4E8052));
+      public static final Color WARNING = JBColor.namedColor("ProgressBar.warningColor", new JBColor(0xF0A732, 0xD9A343));
+      public static final Color FAILED = JBColor.namedColor("ProgressBar.failedColor", new JBColor(0xE55765, 0x9C4E4E));
+
+      public static final Color PASSED_END = JBColor.namedColor("ProgressBar.passedEndColor", new JBColor(0x7ee8a5, 0x5dc48f));
+      public static final Color WARNING_END = JBColor.namedColor("ProgressBar.warningEndColor", new JBColor(0xEAD2A1, 0xEAD2A1));
+      public static final Color FAILED_END = JBColor.namedColor("ProgressBar.failedEndColor", new JBColor(0xfb8f89, 0xf4a2a0));
+
+      public static final Color TRACK = JBColor.namedColor("ProgressBar.trackColor", new JBColor(0x55A76A, 0x4E8052));
+
+      public static @NotNull String statusKey() { return "ProgressBar.status"; }
+      public static @NotNull String passedStatusValue() { return "passed"; }
+      public static @NotNull String warningStatusValue() { return "value"; }
+      public static @NotNull String failedStatusValue() { return "failed"; }
+    }
+
     public static final class Spinner {
       public static @NotNull Dimension minimumSize() {
         return size("Spinner.minimumSize", size(72, 0));
@@ -1108,7 +1147,7 @@ public final class JBUI {
       }
 
       public static int defaultHeaderHeight() {
-        return 42;
+        return 41;
       }
 
       public static JBInsets headerLabelLeftRightInsets() {
@@ -1258,12 +1297,12 @@ public final class JBUI {
         return 20;
       }
 
-      public static @NotNull Insets stripeToolbarButtonIconPadding() {
-        return insets(stripeToolbarButtonIconPaddingKey(), defaultStripeToolbarButtonIconPadding());
-      }
-
-      public static @NotNull Insets stripeToolbarButtonIconPaddingForCompactMode() {
-        return insets(stripeToolbarButtonIconPaddingKey(), defaultStripeToolbarButtonIconPaddingForCompactMode());
+      public static @NotNull Insets stripeToolbarButtonIconPadding(boolean compactMode, boolean showNames) {
+        return insets(stripeToolbarButtonIconPaddingKey(), showNames
+                                                           ? compactMode
+                                                             ? defaultStripeToolbarButtonIconPaddingForCompactMode()
+                                                             : defaultStripeToolbarButtonIconPaddingForNames()
+                                                           : defaultStripeToolbarButtonIconPadding());
       }
 
       public static @NotNull String stripeToolbarButtonIconPaddingKey() {
@@ -1272,6 +1311,10 @@ public final class JBUI {
 
       public static @NotNull JBInsets defaultStripeToolbarButtonIconPadding() {
         return insets(5);
+      }
+
+      public static @NotNull JBInsets defaultStripeToolbarButtonIconPaddingForNames() {
+        return insets(4);
       }
 
       public static @NotNull JBInsets defaultStripeToolbarButtonIconPaddingForCompactMode() {
@@ -1346,6 +1389,14 @@ public final class JBUI {
 
       public static @NotNull Color disabledForeground() {
         return disabledForeground(false);
+      }
+
+      public static @NotNull Color errorForeground() {
+        return NamedColorUtil.getErrorForeground();
+      }
+
+      public static @NotNull Color warningForeground() {
+        return JBColor.namedColor("Label.warningForeground", 0xA46704, 0xBA9752);
       }
     }
 
@@ -1514,7 +1565,7 @@ public final class JBUI {
       }
 
       public static Insets separatorInsets() {
-        return insets("Popup.separatorInsets", insets(4, 12));
+        return insets("Popup.separatorInsets", insets(4, 8));
       }
 
       public static Insets separatorLabelInsets() {
@@ -2428,6 +2479,60 @@ public final class JBUI {
 
       public static @NotNull Color getBadgeBackground(boolean hover) {
         return hover ? BADGE_BACKGROUND_HOVER : BADGE_BACKGROUND;
+      }
+    }
+
+    @ApiStatus.Internal
+    public static final class LicenseDialog {
+      private static final @NotNull Color TERMS_AND_CONDITIONS_COLOR =
+        JBColor.namedColor("LicenseDialog.termsAndConditionsForeground", 0x818594, 0x6F737A);
+
+      private static final @NotNull Color WAITING_LABEL_COLOR =
+        JBColor.namedColor("LicenseDialog.waitingLabelForeground", 0x818594, 0x6F737A);
+
+      private static final @NotNull Color SEPARATOR_COLOR =
+        JBColor.namedColor("LicenseDialog.separatorColor", 0xEBECF0, 0x393B40);
+
+      public static @NotNull Color getTermsAndConditionsForeground() {
+        return TERMS_AND_CONDITIONS_COLOR;
+      }
+
+      public static @NotNull Color getWaitingLabelColor() {
+        return WAITING_LABEL_COLOR;
+      }
+
+      public static @NotNull Color getSeparatorColor() {
+        return SEPARATOR_COLOR;
+      }
+
+      public static final class LicenseList {
+        private static final @NotNull Color LICENSE_DETAILS_COLOR =
+          JBColor.namedColor("LicenseDialog.LicenseList.licenseDetailsForeground", 0xC9CCD6, 0x9DA0A8);
+        private static final @NotNull Color LICENSE_ID_COLOR =
+          JBColor.namedColor("LicenseDialog.LicenseList.licenseIdForeground", 0xD3D5DB, 0x43454A);
+        private static final @NotNull Color SEPARATOR_COLOR =
+          JBColor.namedColor("LicenseDialog.LicenseList.separatorColor", 0xD3D5DB, 0x43454A);
+
+        public static @NotNull Color getLicenseDetailsColor() {
+          return LICENSE_DETAILS_COLOR;
+        }
+
+        public static @NotNull Color getLicenseIdColor() {
+          return LICENSE_ID_COLOR;
+        }
+
+        public static @NotNull Color getSeparatorColor() {
+          return SEPARATOR_COLOR;
+        }
+      }
+
+      public static final class LicenseServer {
+        private static final @NotNull Color SEPARATOR_COLOR =
+          JBColor.namedColor("LicenseDialog.LicenseServer.separatorColor", 0xD3D5DB, 0x43454A);
+
+        public static @NotNull Color getSeparatorColor() {
+          return SEPARATOR_COLOR;
+        }
       }
     }
   }

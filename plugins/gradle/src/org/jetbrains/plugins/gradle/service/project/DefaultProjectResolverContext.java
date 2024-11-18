@@ -1,4 +1,4 @@
-// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.plugins.gradle.service.project;
 
 import com.intellij.build.events.MessageEvent;
@@ -15,7 +15,6 @@ import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.UserDataHolderBase;
 import com.intellij.openapi.util.registry.Registry;
-import com.intellij.util.concurrency.annotations.RequiresBlockingContext;
 import com.intellij.util.containers.CollectionFactory;
 import org.gradle.tooling.CancellationToken;
 import org.gradle.tooling.CancellationTokenSource;
@@ -28,11 +27,13 @@ import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.gradle.model.GradleLightBuild;
-import org.jetbrains.plugins.gradle.service.modelAction.GradleIdeaModelHolder;
+import org.jetbrains.plugins.gradle.properties.GradlePropertiesFile;
 import org.jetbrains.plugins.gradle.service.execution.GradleUserHomeUtil;
+import org.jetbrains.plugins.gradle.service.modelAction.GradleIdeaModelHolder;
 import org.jetbrains.plugins.gradle.settings.GradleExecutionSettings;
 
 import java.io.File;
+import java.nio.file.Path;
 import java.util.Collection;
 import java.util.function.Supplier;
 
@@ -50,6 +51,7 @@ public class DefaultProjectResolverContext extends UserDataHolderBase implements
   @Nullable private GradleIdeaModelHolder myModels;
   private File myGradleUserHome;
   @Nullable private String myProjectGradleVersion;
+  private final boolean myBuildSrcProject;
   @Nullable private String myBuildSrcGroup;
   @Nullable private BuildEnvironment myBuildEnvironment;
   @Nullable private final GradlePartialResolverPolicy myPolicy;
@@ -67,7 +69,8 @@ public class DefaultProjectResolverContext extends UserDataHolderBase implements
     @Nullable GradleExecutionSettings settings,
     @NotNull ExternalSystemTaskNotificationListener listener,
     @Nullable GradlePartialResolverPolicy resolverPolicy,
-    @NotNull GradleProjectResolverIndicator projectResolverIndicator
+    @NotNull GradleProjectResolverIndicator projectResolverIndicator,
+    boolean isBuildSrcProject
   ) {
     myExternalSystemTaskId = externalSystemTaskId;
     myProjectPath = projectPath;
@@ -76,12 +79,14 @@ public class DefaultProjectResolverContext extends UserDataHolderBase implements
     myListener = listener;
     myPolicy = resolverPolicy;
     myProjectResolverIndicator = projectResolverIndicator;
+    myBuildSrcProject = isBuildSrcProject;
   }
 
   public DefaultProjectResolverContext(
     @NotNull DefaultProjectResolverContext resolverContext,
     @NotNull String projectPath,
-    @Nullable GradleExecutionSettings settings
+    @Nullable GradleExecutionSettings settings,
+    boolean isBuildSrcProject
   ) {
     this(
       resolverContext.myExternalSystemTaskId,
@@ -89,7 +94,8 @@ public class DefaultProjectResolverContext extends UserDataHolderBase implements
       settings,
       resolverContext.myListener,
       resolverContext.myPolicy,
-      resolverContext.myProjectResolverIndicator
+      resolverContext.myProjectResolverIndicator,
+      isBuildSrcProject
     );
     resolverContext.copyUserDataTo(this);
   }
@@ -141,7 +147,6 @@ public class DefaultProjectResolverContext extends UserDataHolderBase implements
     return myProjectResolverIndicator.token();
   }
 
-  @RequiresBlockingContext
   public <R> R computeCancellable(@NotNull Supplier<R> action) {
     var result = new Ref<R>();
     runCancellable(() -> {
@@ -150,7 +155,6 @@ public class DefaultProjectResolverContext extends UserDataHolderBase implements
     return result.get();
   }
 
-  @RequiresBlockingContext
   public void runCancellable(@NotNull Runnable action) {
     try {
       ProgressManager.getInstance().executeProcessUnderProgress(() -> {
@@ -206,6 +210,12 @@ public class DefaultProjectResolverContext extends UserDataHolderBase implements
       LOG.debug("The streaming Gradle model fetching isn't applicable: disabled by registry");
       return false;
     }
+    var project = context.getExternalSystemTaskId().findProject();
+    if (project == null) {
+      String projectId = context.getExternalSystemTaskId().getIdeProjectId();
+      LOG.debug("The streaming Gradle model fetching isn't applicable: project is closed: " + projectId);
+      return false;
+    }
     var gradleVersion = context.getProjectGradleVersion();
     if (gradleVersion == null) {
       LOG.debug("The streaming Gradle model fetching isn't applicable: Gradle version cannot be determined");
@@ -214,6 +224,15 @@ public class DefaultProjectResolverContext extends UserDataHolderBase implements
     if (GradleVersionUtil.isGradleOlderThan(gradleVersion, "8.6")) {
       LOG.debug("The streaming Gradle model fetching isn't applicable: unsupported Gradle version: " + gradleVersion);
       return false;
+    }
+    if (GradleVersionUtil.isGradleOlderThan(gradleVersion, "8.9")) {
+      var projectPath = Path.of(context.getProjectPath());
+      var properties = GradlePropertiesFile.getProperties(project, projectPath);
+      var isolatedProjects = properties.getIsolatedProjects();
+      if (isolatedProjects != null && isolatedProjects.getValue()) {
+        LOG.debug("The streaming Gradle model fetching isn't applicable: unsupported isolated-projects mode: " + isolatedProjects);
+        return false;
+      }
     }
     return true;
   }
@@ -294,6 +313,10 @@ public class DefaultProjectResolverContext extends UserDataHolderBase implements
       }
     }
     return myProjectGradleVersion;
+  }
+
+  public boolean isBuildSrcProject() {
+    return myBuildSrcProject;
   }
 
   public void setBuildSrcGroup(@Nullable String groupId) {

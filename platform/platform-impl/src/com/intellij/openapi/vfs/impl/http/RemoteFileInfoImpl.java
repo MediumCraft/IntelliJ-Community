@@ -12,6 +12,7 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.newvfs.VfsImplUtil;
 import com.intellij.util.Url;
 import com.intellij.util.containers.ContainerUtil;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -26,6 +27,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.jetbrains.concurrency.Promises.rejectedPromise;
 
+@ApiStatus.Internal
 public final class RemoteFileInfoImpl implements RemoteContentProvider.DownloadingCallback, RemoteFileInfo {
   private static final Logger LOG = Logger.getInstance(RemoteFileInfoImpl.class);
   private final Object myLock = new Object();
@@ -127,7 +129,21 @@ public final class RemoteFileInfoImpl implements RemoteContentProvider.Downloadi
     }
 
     VfsImplUtil.refreshAndFindFileByPath(LocalFileSystem.getInstance(), localIOFile.toString(), localFile -> {
-      LOG.assertTrue(localFile != null, "Virtual local file not found for " + localIOFile.getAbsolutePath());
+      if (localFile == null) {
+        LOG.warn("Virtual local file not found for " + localIOFile.getAbsolutePath());
+        var errorMessage = IdeCoreBundle.message("vfs.file.not.exist.error", localIOFile.getAbsolutePath());
+        synchronized (myLock) {
+          myLocalVirtualFile = null;
+          myPrevLocalFile = null;
+          myState = RemoteFileState.ERROR_OCCURRED;
+          myErrorMessage = errorMessage;
+        }
+        for (FileDownloadingListener listener : myListeners) {
+          listener.errorOccurred(errorMessage);
+        }
+        return;
+      }
+
       LOG.debug("Virtual local file: " + localFile + ", size = " + localFile.getLength());
       synchronized (myLock) {
         myLocalVirtualFile = localFile;

@@ -27,6 +27,7 @@ import com.intellij.util.containers.ContainerUtil;
 import com.intellij.vcs.ViewUpdateInfoNotification;
 import com.intellij.xml.util.XmlStringUtil;
 import git4idea.GitNotificationIdsHolder;
+import git4idea.GitTag;
 import git4idea.GitVcs;
 import git4idea.branch.GitBranchUtil;
 import git4idea.i18n.GitBundle;
@@ -116,8 +117,8 @@ final class GitPushResultNotification extends Notification {
     }
 
     NotificationGroup group = type == NotificationType.INFORMATION ?
-                              VcsNotifier.STANDARD_NOTIFICATION :
-                              VcsNotifier.IMPORTANT_ERROR_NOTIFICATION;
+                              VcsNotifier.standardNotification() :
+                              VcsNotifier.importantNotification();
 
     GitPushResultNotification notification = new GitPushResultNotification(group.getDisplayId(), title, description, type);
 
@@ -240,35 +241,43 @@ final class GitPushResultNotification extends Notification {
   }
 
   private static @NlsContexts.NotificationContent String formRepoDescription(@NotNull GitPushRepoResult result) {
-    String sourceBranch = GitBranchUtil.stripRefsPrefix(result.getSourceBranch());
-    String targetBranch = GitBranchUtil.stripRefsPrefix(result.getTargetBranch());
+    @NotNull HtmlChunk sourceBranch = HtmlChunk.text(GitBranchUtil.stripRefsPrefix(result.getSourceBranch()));
+    @NotNull HtmlChunk targetBranch = HtmlChunk.text(GitBranchUtil.stripRefsPrefix(result.getTargetBranch()));
+    @NotNull HtmlChunk remoteName = HtmlChunk.text(result.getTargetRemote());
     @NotNull List<String> pushedTags = result.getPushedTags();
-    @NotNull String remoteName = result.getTargetRemote();
 
+    boolean sourceIsTag = result.getSourceBranch().startsWith(GitTag.REFS_TAGS_PREFIX);
+    final HtmlChunk tagName = !pushedTags.isEmpty() ? HtmlChunk.text(tagName(pushedTags)) : HtmlChunk.empty();
     return switch (result.getType()) {
       case SUCCESS -> {
         int commitNum = result.getNumberOfPushedCommits();
         yield selectBundleMessageWithTags(
           pushedTags,
           () -> GitBundle.message("push.notification.description.pushed", commitNum, targetBranch),
-          () -> GitBundle.message("push.notification.description.pushed.with.single.tag", commitNum, targetBranch, tagName(pushedTags),
+          () -> GitBundle.message("push.notification.description.pushed.with.single.tag", commitNum, targetBranch, tagName,
                                   remoteName),
           () -> GitBundle.message("push.notification.description.pushed.with.many.tags", commitNum, targetBranch, pushedTags.size(),
                                   remoteName)
         );
       }
-      case NEW_BRANCH -> selectBundleMessageWithTags(
-        pushedTags,
-        () -> GitBundle.message("push.notification.description.new.branch", sourceBranch, targetBranch),
-        () -> GitBundle.message("push.notification.description.new.branch.with.single.tag", sourceBranch, targetBranch, tagName(pushedTags),
-                                remoteName),
-        () -> GitBundle.message("push.notification.description.new.branch.with.many.tags", sourceBranch, targetBranch, pushedTags.size(),
-                                remoteName)
-      );
+      case NEW_BRANCH -> {
+        if (sourceIsTag && result.getPushedTags().size() == 1) {
+          yield GitBundle.message("push.notification.description.pushed.single.tag", tagName, remoteName);
+        }
+
+        yield selectBundleMessageWithTags(
+          pushedTags,
+          () -> GitBundle.message("push.notification.description.new.branch", sourceBranch, targetBranch),
+          () -> GitBundle.message("push.notification.description.new.branch.with.single.tag", sourceBranch, targetBranch, tagName,
+                                  remoteName),
+          () -> GitBundle.message("push.notification.description.new.branch.with.many.tags", sourceBranch, targetBranch, pushedTags.size(),
+                                  remoteName)
+        );
+      }
       case UP_TO_DATE -> selectBundleMessageWithTags(
         pushedTags,
         () -> GitBundle.message("push.notification.description.up.to.date"),
-        () -> GitBundle.message("push.notification.description.pushed.single.tag", tagName(pushedTags), remoteName),
+        () -> GitBundle.message("push.notification.description.pushed.single.tag", tagName, remoteName),
         () -> GitBundle.message("push.notification.description.pushed.many.tags", pushedTags.size(), remoteName)
       );
       case FORCED -> GitBundle.message("push.notification.description.force.pushed", sourceBranch, targetBranch);
@@ -283,7 +292,11 @@ final class GitPushResultNotification extends Notification {
         };
       }
       case REJECTED_STALE_INFO -> GitBundle.message("push.notification.description.push.with.lease.rejected", sourceBranch, targetBranch);
-      case REJECTED_OTHER -> GitBundle.message("push.notification.description.rejected.by.remote", sourceBranch, targetBranch);
+      case REJECTED_OTHER -> {
+        yield sourceIsTag ?
+              GitBundle.message("push.notification.description.rejected.by.remote.without.target", sourceBranch) :
+              GitBundle.message("push.notification.description.rejected.by.remote", sourceBranch, targetBranch);
+      }
       case ERROR -> XmlStringUtil.escapeString(result.getError());
       default -> {
         LOG.error("Unexpected push result: " + result);
@@ -296,7 +309,7 @@ final class GitPushResultNotification extends Notification {
     private final @NotNull Project myProject;
     private final @NotNull GitPushOperation myOperation;
     private final @NotNull List<GitRepository> myRepositories;
-    private final @NotNull  Map<String, VcsPushOptionValue> customParams;
+    private final @NotNull Map<String, VcsPushOptionValue> customParams;
 
     private ForcePushNotificationAction(@NotNull Project project,
                                         @NotNull GitPushOperation pushOperation,

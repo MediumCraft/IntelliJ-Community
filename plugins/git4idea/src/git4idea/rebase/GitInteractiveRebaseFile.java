@@ -12,6 +12,7 @@ import git4idea.util.StringScanner;
 import org.jetbrains.annotations.NotNull;
 
 import java.io.*;
+import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -27,12 +28,15 @@ class GitInteractiveRebaseFile {
   }
 
   public @NotNull List<GitRebaseEntry> load() throws IOException, NoopException, VcsException {
-    String encoding = GitConfigUtil.getLogEncoding(myProject, myRoot);
+    String commentChar = GitVersionSpecialty.KNOWS_CORE_COMMENT_CHAR.existsIn(myProject) ?
+                         GitUtil.COMMENT_CHAR : "#";
+
+    Charset encoding = GitConfigUtil.getLogEncodingCharset(myProject, myRoot);
     List<GitRebaseEntry> entries = new ArrayList<>();
     final StringScanner s = new StringScanner(FileUtil.loadFile(myFile, encoding));
     boolean noop = false;
     while (s.hasMoreData()) {
-      if (s.isEol() || isComment(s)) {
+      if (s.isEol() || isComment(s, commentChar)) {
         s.nextLine();
         continue;
       }
@@ -42,11 +46,19 @@ class GitInteractiveRebaseFile {
         continue;
       }
       String command = s.spaceToken();
-      String hash = s.spaceToken();
-      String comment = s.line();
+      final GitRebaseEntry.Action action = GitRebaseEntry.parseAction(command);
 
-      GitRebaseEntry.Action action = GitRebaseEntry.parseAction(command);
-      entries.add(new GitRebaseEntry(action, hash, comment));
+      String hash = s.spaceToken();
+      while (true) {
+        boolean paramConsumed = action.consumeParameter(hash);
+        if (!paramConsumed) break;
+        hash = s.spaceToken();
+      }
+
+      String comment = s.line();
+      String subject = trimCommentIfNeeded(comment, commentChar);
+
+      entries.add(new GitRebaseEntry(action, hash, subject));
     }
     if (noop && entries.isEmpty()) {
       throw new NoopException();
@@ -54,10 +66,15 @@ class GitInteractiveRebaseFile {
     return entries;
   }
 
-  private boolean isComment(@NotNull StringScanner s) {
-    String commentChar = GitVersionSpecialty.KNOWS_CORE_COMMENT_CHAR.existsIn(myProject) ?
-                         GitUtil.COMMENT_CHAR : "#";
+  private static boolean isComment(@NotNull StringScanner s, @NotNull String commentChar) {
     return s.startsWith(commentChar);
+  }
+
+  private static String trimCommentIfNeeded(@NotNull String line, @NotNull String commentChar) {
+    // Ex: 'f efefef subject # empty' for commits created with '--allow-empty'
+    int i = line.indexOf(commentChar);
+    if (i == -1) return line;
+    return line.substring(0, i).trim();
   }
 
   public void cancel() throws IOException {
@@ -67,7 +84,7 @@ class GitInteractiveRebaseFile {
   }
 
   public void save(@NotNull List<? extends GitRebaseEntry> entries) throws IOException {
-    String encoding = GitConfigUtil.getLogEncoding(myProject, myRoot);
+    Charset encoding = GitConfigUtil.getLogEncodingCharset(myProject, myRoot);
     try (PrintWriter out = new PrintWriter(new OutputStreamWriter(new FileOutputStream(myFile), encoding))) {
       boolean knowsDropAction = GitVersionSpecialty.KNOWS_REBASE_DROP_ACTION.existsIn(myProject);
       for (GitRebaseEntry e : entries) {

@@ -10,6 +10,7 @@ import org.jetbrains.kotlin.idea.base.plugin.KotlinPluginMode
 import org.jetbrains.kotlin.idea.base.plugin.KotlinPluginModeProvider
 import org.jetbrains.kotlin.idea.base.plugin.useK2Plugin
 import org.junit.Assert
+import org.junit.AssumptionViolatedException
 
 @TestOnly
 interface ExpectedPluginModeProvider {
@@ -17,17 +18,19 @@ interface ExpectedPluginModeProvider {
     val pluginMode: KotlinPluginMode
 }
 
-// do not expose
-private fun ExpectedPluginModeProvider.assertKotlinPluginMode() {
-    val expectedPluginMode = pluginMode
-    val actualPluginMode = KotlinPluginModeProvider.currentPluginMode
+fun ExpectedPluginModeProvider.assertKotlinPluginMode() = assertKotlinPluginMode(
+    expectedPluginMode = pluginMode,
+)
 
-    Assert.assertEquals(
-        "Invalid Kotlin plugin detected: $actualPluginMode, but $expectedPluginMode was expected",
-        expectedPluginMode,
-        actualPluginMode,
-    )
-}
+// do not expose
+internal fun assertKotlinPluginMode(
+    expectedPluginMode: KotlinPluginMode,
+    actualPluginMode: KotlinPluginMode = KotlinPluginModeProvider.currentPluginMode,
+) = Assert.assertEquals(
+    "Invalid Kotlin plugin detected: $actualPluginMode, but $expectedPluginMode was expected",
+    expectedPluginMode,
+    actualPluginMode,
+)
 
 /**
  * Executes a [setUp] function after enabling the K1 or K2 Kotlin plugin in system properties.
@@ -44,10 +47,29 @@ fun ExpectedPluginModeProvider.setUpWithKotlinPlugin(
         useK2Plugin = oldUseK2Plugin
     }
 
-    setUp.run()
+    try {
+        setUp.run()
+    } catch (e: Throwable) {
+        val wrappedAssumptionViolationException = e.cause
+        if (wrappedAssumptionViolationException !is AssumptionViolatedException) {
+            if (e is NoClassDefFoundError && e.cause is ExceptionInInitializerError) {
+                val message = e.cause!!.message
+                unloadedDependenciesException?.let {
+                    if (message != null && message.contains(it.javaClass.name)) {
+                        throw it
+                    }
+                }
+            }
+            throw e
+        }
+        unloadedDependenciesException = wrappedAssumptionViolationException
+        throw wrappedAssumptionViolationException
+    }
 
     assertKotlinPluginMode()
 }
+
+private var unloadedDependenciesException: AssumptionViolatedException? = null
 
 @TestOnly
 fun <T> T.setUpWithKotlinPlugin(
@@ -55,4 +77,3 @@ fun <T> T.setUpWithKotlinPlugin(
 ) where T : UsefulTestCase,
         T : ExpectedPluginModeProvider =
     setUpWithKotlinPlugin(testRootDisposable, setUp)
-

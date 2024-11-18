@@ -1,4 +1,4 @@
-// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.idea.base.compilerPreferences.configuration;
 
@@ -21,7 +21,7 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.ui.MutableCollectionComboBoxModel;
 import com.intellij.ui.PopupMenuListenerAdapter;
 import com.intellij.ui.RawCommandLineEditor;
-import com.intellij.ui.SimpleListCellRenderer;
+import com.intellij.ui.dsl.listCellRenderer.BuilderKt;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.text.VersionComparatorUtil;
 import com.intellij.util.ui.ThreeStateCheckBox;
@@ -313,16 +313,8 @@ public class KotlinCompilerConfigurableTab implements SearchableConfigurable {
             boolean forFiles
     ) {
         label.setLabelFor(fileChooser);
-
-        fileChooser.addBrowseFolderListener(title, null, null,
-                                            new FileChooserDescriptor(forFiles, !forFiles, false, false, false, false),
-                                            TextComponentAccessor.TEXT_FIELD_WHOLE_TEXT);
-    }
-
-    private static boolean isBrowseFieldModifiedWithNullize(@NotNull TextFieldWithBrowseButton chooser, @Nullable String currentValue) {
-        return !StringUtil.equals(
-                StringUtil.nullize(chooser.getText(), true),
-                StringUtil.nullize(currentValue, true));
+        var descriptor = new FileChooserDescriptor(forFiles, !forFiles, false, false, false, false).withTitle(title);
+        fileChooser.addBrowseFolderListener(null, descriptor, TextComponentAccessor.TEXT_FIELD_WHOLE_TEXT);
     }
 
     private static boolean isBrowseFieldModified(@NotNull TextFieldWithBrowseButton chooser, @NotNull String currentValue) {
@@ -540,16 +532,13 @@ public class KotlinCompilerConfigurableTab implements SearchableConfigurable {
             return latestStable;
         }
 
-        IdeKotlinVersion version = KotlinJpsPluginSettings.getBundledVersion();
-        KotlinVersion bundledKotlinVersion = version.getKotlinVersion();
-        int bundledMajorVersion = bundledKotlinVersion.getMajor();
-        int bundledMinorVersion = bundledKotlinVersion.getMinor();
+        LanguageVersion bundledLanguageVersion = KotlinJpsPluginSettings.getBundledVersion().getLanguageVersion();
         latestStable = VersionView.LatestStable.INSTANCE;
 
         // workaround to avoid cases when Kotlin plugin bundles the latest compiler with effectively NOT STABLE version.
         // Actually, the latest stable version is bundled in jps
         for (LanguageVersion languageVersion : LanguageVersion.getEntries()) {
-            if (languageVersion.getMajor() <= bundledMajorVersion && languageVersion.getMinor() <= bundledMinorVersion) {
+            if (languageVersion.compareTo(bundledLanguageVersion) <= 0) {
                 latestStable = VersionView.Companion.deserialize(languageVersion.getVersionString(), false);
             } else {
                 break;
@@ -570,7 +559,7 @@ public class KotlinCompilerConfigurableTab implements SearchableConfigurable {
             moduleKindComboBox.addItem(moduleKind);
         }
 
-        moduleKindComboBox.setRenderer(SimpleListCellRenderer.create("", o -> getModuleKindDescription(o)));
+        moduleKindComboBox.setRenderer(BuilderKt.textListCellRenderer("", o -> getModuleKindDescription(o)));
     }
 
     private void fillSourceMapSourceEmbeddingList() {
@@ -578,7 +567,7 @@ public class KotlinCompilerConfigurableTab implements SearchableConfigurable {
             sourceMapEmbedSources.addItem(moduleKind);
         }
 
-        sourceMapEmbedSources.setRenderer(SimpleListCellRenderer.create("", o -> getSourceMapSourceEmbeddingDescription(o)));
+        sourceMapEmbedSources.setRenderer(BuilderKt.textListCellRenderer("", o -> getSourceMapSourceEmbeddingDescription(o)));
     }
 
     @NotNull
@@ -687,7 +676,7 @@ public class KotlinCompilerConfigurableTab implements SearchableConfigurable {
                     !getSelectedKotlinJpsPluginVersion().equals(KotlinJpsPluginSettingsKt.getVersionWithFallback(jpsPluginSettings)) ||
                     !additionalArgsOptionsField.getText().equals(compilerSettings.getAdditionalArguments());
 
-            if (shouldInvalidateCaches) {
+            if (!project.isDefault() && shouldInvalidateCaches) {
                 ApplicationUtilsKt.runWriteAction(
                         new Function0<>() {
                             @Override
@@ -748,7 +737,9 @@ public class KotlinCompilerConfigurableTab implements SearchableConfigurable {
             KotlinCompilerSettings.getInstance(project).setSettings(compilerSettings);
         }
 
-        BuildManager.getInstance().clearState(project);
+        if (!project.isDefault()) {
+            BuildManager.getInstance().clearState(project);
+        }
     }
 
     @Override
@@ -762,12 +753,15 @@ public class KotlinCompilerConfigurableTab implements SearchableConfigurable {
         if (jpsPluginSettings != null) {
             setSelectedItem(kotlinJpsPluginVersionComboBox, defaultJpsVersionItem);
         }
+        // This call adds the correct values to the language/apiVersion dropdown based on the compiler version.
+        // It also selects some values of the dropdown, but we want to choose the values reflecting the current settings afterward.
+        onLanguageLevelChanged(getSelectedKotlinJpsPluginVersionView()); // getSelectedLanguageVersionView() replaces null
+
         if (!commonCompilerArguments.getAutoAdvanceLanguageVersion()) {
             setSelectedItem(languageVersionComboBox, KotlinFacetSettingsKt.getLanguageVersionView(commonCompilerArguments));
         } else {
             setSelectedItem(languageVersionComboBox, getLatestStableVersion());
         }
-        onLanguageLevelChanged((VersionView) languageVersionComboBox.getSelectedItem()); // getSelectedLanguageVersionView() replaces null
         if (!commonCompilerArguments.getAutoAdvanceApiVersion()) {
             setSelectedItem(apiVersionComboBox, KotlinFacetSettingsKt.getApiVersionView(commonCompilerArguments));
         } else {

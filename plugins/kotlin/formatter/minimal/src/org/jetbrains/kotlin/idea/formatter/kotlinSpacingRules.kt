@@ -14,25 +14,9 @@ import com.intellij.psi.tree.IElementType
 import com.intellij.psi.tree.TokenSet
 import com.intellij.util.text.TextRangeUtil
 import org.jetbrains.kotlin.KtNodeTypes
-import org.jetbrains.kotlin.idea.formatter.afterInside
-import org.jetbrains.kotlin.idea.formatter.beforeInside
-import org.jetbrains.kotlin.idea.formatter.createSpaceBeforeRBrace
-import org.jetbrains.kotlin.idea.formatter.startOfDeclaration
 import org.jetbrains.kotlin.idea.util.requireNode
 import org.jetbrains.kotlin.lexer.KtTokens
-import org.jetbrains.kotlin.psi.KtBlockExpression
-import org.jetbrains.kotlin.psi.KtClass
-import org.jetbrains.kotlin.psi.KtClassBody
-import org.jetbrains.kotlin.psi.KtClassInitializer
-import org.jetbrains.kotlin.psi.KtClassOrObject
-import org.jetbrains.kotlin.psi.KtDeclarationWithBody
-import org.jetbrains.kotlin.psi.KtFunction
-import org.jetbrains.kotlin.psi.KtLambdaExpression
-import org.jetbrains.kotlin.psi.KtNamedFunction
-import org.jetbrains.kotlin.psi.KtObjectLiteralExpression
-import org.jetbrains.kotlin.psi.KtPrimaryConstructor
-import org.jetbrains.kotlin.psi.KtTreeVisitorVoid
-import org.jetbrains.kotlin.psi.KtWhenEntry
+import org.jetbrains.kotlin.psi.*
 import org.jetbrains.kotlin.psi.psiUtil.children
 import org.jetbrains.kotlin.psi.psiUtil.isObjectLiteral
 import org.jetbrains.kotlin.psi.psiUtil.textRangeWithoutComments
@@ -344,8 +328,11 @@ fun createSpacingBuilder(settings: CodeStyleSettings, builderUtil: KotlinSpacing
         around(
           TokenSet.create(KtTokens.PLUSPLUS, KtTokens.MINUSMINUS, KtTokens.EXCLEXCL, KtTokens.MINUS, KtTokens.PLUS, KtTokens.EXCL)
         ).spaceIf(kotlinCommonSettings.SPACE_AROUND_UNARY_OPERATOR)
-        before(KtTokens.ELVIS).spaces(1)
-        after(KtTokens.ELVIS).spacesNoLineBreak(1)
+
+        val spacesAroundElvis = if (kotlinCustomSettings.SPACE_AROUND_ELVIS) 1 else 0
+        before(KtTokens.ELVIS).spaceIf(kotlinCustomSettings.SPACE_AROUND_ELVIS)
+        after(KtTokens.ELVIS).spacesNoLineBreak(spacesAroundElvis)
+
         around(KtTokens.RANGE).spaceIf(kotlinCustomSettings.SPACE_AROUND_RANGE)
         around(KtTokens.RANGE_UNTIL).spaceIf(kotlinCustomSettings.SPACE_AROUND_RANGE)
 
@@ -476,6 +463,9 @@ fun createSpacingBuilder(settings: CodeStyleSettings, builderUtil: KotlinSpacing
 
         afterInside(KtTokens.GET_KEYWORD, KtNodeTypes.PROPERTY_ACCESSOR).spaces(0)
         afterInside(KtTokens.SET_KEYWORD, KtNodeTypes.PROPERTY_ACCESSOR).spaces(0)
+
+        afterInside(KtTokens.IF_KEYWORD, KtNodeTypes.WHEN_ENTRY_GUARD).spaces(1)
+        before(KtNodeTypes.WHEN_ENTRY_GUARD).spaces(1)
       }
       custom {
 
@@ -573,7 +563,6 @@ fun createSpacingBuilder(settings: CodeStyleSettings, builderUtil: KotlinSpacing
         inPosition(parent = KtNodeTypes.PROPERTY_ACCESSOR, right = KtNodeTypes.BLOCK).customRule(leftBraceRule())
 
         inPosition(right = KtNodeTypes.CLASS_BODY).customRule(leftBraceRule(blockType = KtNodeTypes.CLASS_BODY))
-
         inPosition(left = KtNodeTypes.WHEN_ENTRY, right = KtNodeTypes.WHEN_ENTRY).customRule { _, left, right ->
           val blankLines = kotlinCustomSettings.BLANK_LINES_AROUND_BLOCK_WHEN_BRANCHES
           if (blankLines != 0) {

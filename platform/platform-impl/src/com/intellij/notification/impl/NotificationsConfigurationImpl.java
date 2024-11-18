@@ -222,19 +222,17 @@ public final class NotificationsConfigurationImpl extends NotificationsConfigura
     }
     doRemove("Log Only");
 
-    if ("false".equals(state.getAttributeValue(SHOW_BALLOONS_ATTRIBUTE))) {
-      //noinspection NonPrivateFieldAccessedInSynchronizedContext
-      SHOW_BALLOONS = false;
-    }
+    //noinspection NonPrivateFieldAccessedInSynchronizedContext
+    SHOW_BALLOONS = !"false".equals(state.getAttributeValue(SHOW_BALLOONS_ATTRIBUTE));
 
-    if ("false".equals(state.getAttributeValue(SYSTEM_NOTIFICATIONS_ATTRIBUTE))) {
-      //noinspection NonPrivateFieldAccessedInSynchronizedContext
-      SYSTEM_NOTIFICATIONS = false;
-    }
+    //noinspection NonPrivateFieldAccessedInSynchronizedContext
+    SYSTEM_NOTIFICATIONS = !"false".equals(state.getAttributeValue(SYSTEM_NOTIFICATIONS_ATTRIBUTE));
 
-    NotificationAnnouncingMode announcingMode = NotificationAnnouncingMode.get(state.getAttributeValue(NOTIFICATION_ANNOUNCING_MODE_ATTRIBUTE));
-    if (announcingMode != null) {
-      NOTIFICATION_ANNOUNCING_MODE = announcingMode;
-    }
+    NOTIFICATION_ANNOUNCING_MODE = NotificationAnnouncingMode.get(state.getAttributeValue(NOTIFICATION_ANNOUNCING_MODE_ATTRIBUTE));
+  }
+
+  @Override
+  public synchronized void noStateLoaded() {
+    loadState(new Element("element"));
   }
 }

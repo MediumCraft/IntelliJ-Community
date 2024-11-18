@@ -18,8 +18,8 @@ import java.util.EventListener;
 @FunctionalInterface
 public interface UISettingsListener extends EventListener {
 
+  void uiSettingsChanged(@NotNull UISettings uiSettings);
+
   @Topic.AppLevel
   Topic<UISettingsListener> TOPIC = new Topic<>(UISettingsListener.class, Topic.BroadcastDirection.TO_DIRECT_CHILDREN);
-
-  void uiSettingsChanged(@NotNull UISettings uiSettings);
 }

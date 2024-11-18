@@ -6,6 +6,9 @@ import com.intellij.collaboration.util.ComputedResult
 import com.intellij.collaboration.util.FlowTestUtil.assertEmits
 import com.intellij.collaboration.util.MainDispatcherRule
 import git4idea.changes.GitBranchComparisonResult
+import io.mockk.coEvery
+import io.mockk.coVerify
+import io.mockk.mockk
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.TestScope
@@ -18,12 +21,7 @@ import org.jetbrains.plugins.github.pullrequest.data.GHPRIdentifier
 import org.jetbrains.plugins.github.pullrequest.data.service.GHPRChangesService
 import org.junit.Assert.assertEquals
 import org.junit.ClassRule
-import org.junit.Rule
 import org.junit.Test
-import org.mockito.Mock
-import org.mockito.junit.MockitoJUnit
-import org.mockito.junit.MockitoRule
-import org.mockito.kotlin.*
 import java.util.*
 import kotlin.time.Duration.Companion.seconds
 
@@ -37,12 +35,7 @@ class GHPRChangesDataProviderImplTest {
     internal val mainRule = MainDispatcherRule()
   }
 
-  @Rule
-  @JvmField
-  internal val mockitoRule: MockitoRule = MockitoJUnit.rule()
-
-  @Mock
-  internal lateinit var changesService: GHPRChangesService
+  private val changesService = mockk<GHPRChangesService>()
 
   private fun TestScope.createProvider(refs: GHPRBranchesRefs): GHPRChangesDataProvider =
     GHPRChangesDataProviderImpl(backgroundScope, changesService, { refs }, PR_ID)
@@ -52,18 +45,19 @@ class GHPRChangesDataProviderImplTest {
     val refs = GHPRBranchesRefs("b", "h")
     val mergeBaseRef = "mb"
 
-    val result = mock<GitBranchComparisonResult>()
-    whenever(changesService.loadCommitsFromApi(PR_ID)) doReturn createMockCommits(refs.headRef)
-    whenever(changesService.loadMergeBaseOid(any(), any())) doReturn mergeBaseRef
-    whenever(changesService.createChangesProvider(eq(PR_ID), any(), any(), any(), any())) doReturn result
-
+    val result = mockk<GitBranchComparisonResult>()
+    coEvery { changesService.loadCommitsFromApi(PR_ID) } returns createMockCommits(refs.headRef)
+    coEvery { changesService.loadMergeBaseOid(any(), any()) } returns mergeBaseRef
+    coEvery { changesService.createChangesProvider(eq(PR_ID), any(), any(), any(), any()) } returns result
 
     val inst = createProvider(refs)
     assertEquals(inst.loadChanges(), inst.loadChanges())
     assertEquals(inst.loadCommits(), inst.loadCommits())
 
-    verify(changesService, times(1)).loadCommitsFromApi(eq(PR_ID))
-    verify(changesService, times(1)).createChangesProvider(eq(PR_ID), eq(refs.baseRef), eq(mergeBaseRef), eq(refs.headRef), any())
+    coVerify(exactly = 1) {
+      changesService.loadCommitsFromApi(eq(PR_ID))
+      changesService.createChangesProvider(eq(PR_ID), eq(refs.baseRef), eq(mergeBaseRef), eq(refs.headRef), any())
+    }
   }
 
   @OptIn(ExperimentalCoroutinesApi::class)
@@ -72,12 +66,12 @@ class GHPRChangesDataProviderImplTest {
     val refs = GHPRBranchesRefs("b", "h")
     val mergeBaseRef = "mb"
 
-    whenever(changesService.loadCommitsFromApi(PR_ID)) doReturn createMockCommits(refs.headRef)
-    whenever(changesService.loadMergeBaseOid(any(), any())) doReturn mergeBaseRef
+    coEvery { changesService.loadCommitsFromApi(PR_ID) } returns createMockCommits(refs.headRef)
+    coEvery { changesService.loadMergeBaseOid(any(), any()) } returns mergeBaseRef
 
-    val result = mock<GitBranchComparisonResult>()
+    val result = mockk<GitBranchComparisonResult>()
     var counter = 0
-    whenever(changesService.createChangesProvider(eq(PR_ID), any(), any(), any(), any())) doSuspendableAnswer {
+    coEvery { changesService.createChangesProvider(eq(PR_ID), any(), any(), any(), any()) } coAnswers {
       if (counter == 0) {
         delay(1.seconds)
         throw EXCEPTION
@@ -88,7 +82,7 @@ class GHPRChangesDataProviderImplTest {
       }
     }
     val inst = createProvider(refs)
-    inst.changesComputationState.assertEmits(ComputedResult.loading(),
+    inst.changesComputationState().assertEmits(ComputedResult.loading(),
                                              ComputedResult.failure(EXCEPTION),
                                              ComputedResult.loading(),
                                              ComputedResult.success(result)) {
@@ -116,10 +110,9 @@ private fun createMockCommits(headRef: String): List<GHCommit> {
       abbreviatedOid = "abbreviated_oid_$i",
       url = "mockUrl$i",
       messageHeadline = "Mock Commit Headline $i",
-      messageHeadlineHTML = "Mock Commit Headline HTML $i",
-      messageBodyHTML = "Mock Commit Body HTML $i",
-      author = mock(),
-      committer = mock(),
+      messageBody = "Mock Commit Body $i",
+      author = mockk(),
+      committer = mockk(),
       committedDate = Date(),
       parents = mockParents
     )

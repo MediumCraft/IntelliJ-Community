@@ -21,6 +21,14 @@ fun CoroutineScope.childScope(context: CoroutineContext = EmptyCoroutineContext,
   return ChildScope(coroutineContext + context, supervisor)
 }
 
+@Internal
+@Deprecated("Renamed to `childScope`", replaceWith = ReplaceWith("childScope(name, context, supervisor)"))
+fun CoroutineScope.namedChildScope(
+  name: String,
+  context: CoroutineContext = EmptyCoroutineContext,
+  supervisor: Boolean = true,
+): CoroutineScope = childScope(name, context, supervisor)
+
 /**
  * @return a scope with a [Job] which parent is the [Job] of [this] scope.
  *
@@ -92,6 +100,8 @@ private class ChildScope(ctx: CoroutineContext, private val supervisor: Boolean)
 fun CoroutineScope.attachAsChildTo(secondaryParent: CoroutineScope) {
   val parentJob = secondaryParent.coroutineContext.job
   val childJob = this.coroutineContext.job
+  require(parentJob !== childJob) { "Cannot attach the scope to itself: $this and $secondaryParent" }
+  require(childJob.children.firstOrNull() == null) { "Cannot attach a scope that already has children: $this" }
   // prevent parent completion while child is not completed
   // propagate cancellation from parent to child
   val handle = (parentJob as JobSupport).attachChild(childJob as ChildJob)

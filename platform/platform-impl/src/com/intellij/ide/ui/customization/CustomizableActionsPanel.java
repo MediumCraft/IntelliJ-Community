@@ -4,6 +4,7 @@ package com.intellij.ide.ui.customization;
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.DefaultTreeExpander;
 import com.intellij.ide.IdeBundle;
+import com.intellij.idea.ActionsBundle;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.actionSystem.ex.ActionUtil;
 import com.intellij.openapi.actionSystem.ex.CustomComponentAction;
@@ -33,6 +34,7 @@ import com.intellij.util.ui.JBEmptyBorder;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.components.BorderLayoutPanel;
 import com.intellij.util.ui.tree.TreeUtil;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -50,6 +52,7 @@ import java.util.function.Supplier;
 import static com.intellij.ide.ui.customization.ActionUrl.*;
 import static com.intellij.ui.RowsDnDSupport.RefinedDropSupport.Position.*;
 
+@ApiStatus.Internal
 public class CustomizableActionsPanel {
   private final JPanel myPanel = new BorderLayoutPanel(5, 5);
   protected JTree myActionsTree;
@@ -337,10 +340,19 @@ public class CustomizableActionsPanel {
   }
 
   static TreeCellRenderer createDefaultRenderer() {
-    return new MyTreeCellRenderer();
+    return createDefaultRenderer(false);
+  }
+
+  static TreeCellRenderer createDefaultRenderer(boolean showSeparatorAsAction) {
+    return new MyTreeCellRenderer(showSeparatorAsAction);
   }
 
   private static final class MyTreeCellRenderer extends ColoredTreeCellRenderer {
+
+    private final boolean myShowSeparatorAsAction;
+
+    private MyTreeCellRenderer(boolean showSeparatorAsAction) { myShowSeparatorAsAction = showSeparatorAsAction; }
+
     @Override
     public void customizeCellRenderer(@NotNull JTree tree,
                                       Object value,
@@ -351,17 +363,23 @@ public class CustomizableActionsPanel {
                                       boolean hasFocus) {
       if (value instanceof DefaultMutableTreeNode) {
         Object userObject = ((DefaultMutableTreeNode)value).getUserObject();
-        CustomizationUtil.acceptObjectIconAndText(userObject, (text, description, icon) -> {
-          append(text);
-          if (description != null) {
-            append("   ", SimpleTextAttributes.REGULAR_ATTRIBUTES, false);
-            append(description, SimpleTextAttributes.GRAY_ATTRIBUTES);
-          }
-          // do not show the icon for the top groups
-          if (((DefaultMutableTreeNode)value).getLevel() > 1) {
-            setIcon(icon);
-          }
-        });
+        if (myShowSeparatorAsAction && (userObject instanceof Separator)) {
+          setIcon(AllIcons.General.SeparatorH);
+          append(ActionsBundle.message("action.separator"));
+        }
+        else {
+          CustomizationUtil.acceptObjectIconAndText(userObject, (text, description, icon) -> {
+            append(text);
+            if (description != null) {
+              append("   ", SimpleTextAttributes.REGULAR_ATTRIBUTES, false);
+              append(description, SimpleTextAttributes.GRAY_ATTRIBUTES);
+            }
+            // do not show the icon for the top groups
+            if (((DefaultMutableTreeNode)value).getLevel() > 1) {
+              setIcon(icon);
+            }
+          });
+        }
         setForeground(UIUtil.getTreeForeground(selected, hasFocus));
       }
     }
@@ -659,7 +677,7 @@ public class CustomizableActionsPanel {
                 if (path.isEmpty()) {
                   path = actionId;
                 }
-                Icon icon = CustomActionsSchemaKt.getIconForPath(ActionManager.getInstance(), path);
+                Icon icon = CustomActionsSchemaKt.getIconForPath(s -> ActionManager.getInstance().getAction(s), path);
                 newNode.setUserObject(new Pair<>(actionId, icon));
               }
             }

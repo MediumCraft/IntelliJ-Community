@@ -6,12 +6,13 @@ import com.intellij.modcommand.ModPsiUpdater
 import com.intellij.psi.SmartPsiElementPointer
 import com.intellij.psi.createSmartPointer
 import com.intellij.psi.util.descendantsOfType
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
+import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.idea.base.psi.replaced
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.codeinsight.api.applicable.intentions.KotlinApplicableModCommandAction
 import org.jetbrains.kotlin.idea.codeinsights.impl.base.buildStringTemplateForBinaryExpression
 import org.jetbrains.kotlin.idea.codeinsights.impl.base.canBeConvertedToStringLiteral
+import org.jetbrains.kotlin.idea.codeinsights.impl.base.containsPrefixedStringOperands
 import org.jetbrains.kotlin.idea.codeinsights.impl.base.intentions.convertToStringLiteral
 import org.jetbrains.kotlin.idea.codeinsights.impl.base.isFirstStringPlusExpressionWithoutNewLineInOperands
 import org.jetbrains.kotlin.psi.KtBinaryExpression
@@ -26,9 +27,10 @@ internal class ConvertToRawStringTemplateIntention :
 
     override fun getFamilyName(): String = KotlinBundle.message("convert.concatenation.to.raw.string")
 
-    context(KtAnalysisSession)
+    context(KaSession)
     override fun prepareContext(element: KtBinaryExpression): Context? {
         if (!isFirstStringPlusExpressionWithoutNewLineInOperands(element)) return null
+        if (element.containsPrefixedStringOperands()) return null
         return Context(buildStringTemplateForBinaryExpression(element).createSmartPointer())
     }
 

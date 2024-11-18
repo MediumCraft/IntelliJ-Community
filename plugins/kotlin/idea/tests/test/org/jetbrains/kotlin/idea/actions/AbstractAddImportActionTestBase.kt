@@ -6,9 +6,8 @@ import com.intellij.psi.statistics.StatisticsInfo
 import com.intellij.psi.statistics.StatisticsManager
 import com.intellij.psi.statistics.impl.StatisticsManagerImpl
 import com.intellij.psi.util.parentOfType
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
-import org.jetbrains.kotlin.analysis.api.annotations.hasAnnotation
-import org.jetbrains.kotlin.analysis.api.symbols.KtCallableSymbol
+import org.jetbrains.kotlin.analysis.api.KaSession
+import org.jetbrains.kotlin.analysis.api.symbols.KaCallableSymbol
 import org.jetbrains.kotlin.idea.quickfix.AutoImportVariant
 import org.jetbrains.kotlin.idea.base.test.InTextDirectivesUtils
 import org.jetbrains.kotlin.idea.codeinsight.api.classic.quickfixes.KotlinAutoImportCallableWeigher
@@ -48,8 +47,7 @@ abstract class AbstractAddImportActionTestBase : KotlinLightCodeInsightFixtureTe
         var actualVariants: List<AutoImportVariant>? = null
         val executeListener = object : KotlinAddImportActionInfo.ExecuteListener {
             override fun onExecute(variants: List<AutoImportVariant>) {
-                assertNull(actualVariants)
-                actualVariants = variants
+                actualVariants = actualVariants.orEmpty() + variants
             }
         }
         KotlinAddImportActionInfo.setExecuteListener(file, testRootDisposable, executeListener)
@@ -57,8 +55,10 @@ abstract class AbstractAddImportActionTestBase : KotlinLightCodeInsightFixtureTe
         (StatisticsManager.getInstance() as StatisticsManagerImpl).enableStatistics(myFixture.testRootDisposable)
         increaseUseCountOf(InTextDirectivesUtils.findListWithPrefixes(fixture.file.text, INCREASE_USE_COUNT_DIRECTIVE))
 
-        val importFix = myFixture.availableIntentions.singleOrNull { it.familyName == "Import" } ?: error("No import fix available")
-        importFix.invoke(project, editor, file)
+        myFixture.availableIntentions
+            .filter { it.familyName == "Import" }
+            .ifEmpty { error("No import fix available") }
+            .forEach { importFix -> importFix.invoke(project, editor, file) }
 
         assertNotNull(actualVariants)
 
@@ -106,13 +106,13 @@ abstract class AbstractAddImportActionTestBase : KotlinLightCodeInsightFixtureTe
  * when they are called from the functions, annotated the same way.
  */
 private class MockAutoImportCallableWeigher : KotlinAutoImportCallableWeigher {
-    override fun KtAnalysisSession.weigh(
-        symbolToBeImported: KtCallableSymbol,
+    override fun KaSession.weigh(
+        symbolToBeImported: KaCallableSymbol,
         unresolvedReferenceExpression: KtNameReferenceExpression
     ): Int {
-        val symbolAnnotated = symbolToBeImported.hasAnnotation(TEST_ANNOTATION_CLASS_ID)
+        val symbolAnnotated = TEST_ANNOTATION_CLASS_ID in symbolToBeImported.annotations
         val receiverAnnotated =
-            unresolvedReferenceExpression.parentOfType<KtFunction>()?.getSymbol()?.hasAnnotation(TEST_ANNOTATION_CLASS_ID)
+            unresolvedReferenceExpression.parentOfType<KtFunction>()?.symbol?.annotations?.contains(TEST_ANNOTATION_CLASS_ID)
         return if (symbolAnnotated && receiverAnnotated == true) 1 else 0
     }
 

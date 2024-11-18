@@ -25,7 +25,6 @@ import com.intellij.platform.workspace.jps.serialization.impl.LibraryNameGenerat
 import com.intellij.platform.workspace.storage.EntityChange
 import com.intellij.platform.workspace.storage.ImmutableEntityStorage
 import com.intellij.platform.workspace.storage.VersionedStorageChange
-import com.intellij.platform.workspace.storage.orderToRemoveReplaceAdd
 import com.intellij.util.EventDispatcher
 import com.intellij.util.concurrency.ThreadingAssertions
 import com.intellij.util.containers.MultiMap
@@ -132,16 +131,16 @@ class ModuleDependencyIndexImpl(private val project: Project): ModuleDependencyI
     val removedLibrariesCollector = mutableSetOf<LibraryId>()
     val removeLibraryLevels = MultiSet<String>()
     // Roots changed event should be fired for the global libraries linked with module
-    val moduleChanges = event.getChanges(ModuleEntity::class.java).orderToRemoveReplaceAdd()
+    val moduleChanges = event.getChanges(ModuleEntity::class.java)
     for (change in moduleChanges) {
       when (change) {
         is EntityChange.Added -> {
-          LOG.debug { "Add tracked global libraries and SDK from ${change.entity.name}" }
-          collectAddedLibrariesAndAddSdks(change.entity.dependencies, change.entity, newLibrariesCollector, newLibraryLevels)
+          LOG.debug { "Add tracked global libraries and SDK from ${change.newEntity.name}" }
+          collectAddedLibrariesAndAddSdks(change.newEntity.dependencies, change.newEntity, newLibrariesCollector, newLibraryLevels)
         }
         is EntityChange.Removed -> {
-          LOG.debug { "Removed tracked global libraries and SDK from ${change.entity.name}" }
-          collectRemovedLibrariesAndRemoveSdks(change.entity.dependencies, change.entity, removedLibrariesCollector, removeLibraryLevels)
+          LOG.debug { "Removed tracked global libraries and SDK from ${change.oldEntity.name}" }
+          collectRemovedLibrariesAndRemoveSdks(change.oldEntity.dependencies, change.oldEntity, removedLibrariesCollector, removeLibraryLevels)
         }
         is EntityChange.Replaced -> {
           val removedDependencies = change.oldEntity.dependencies - change.newEntity.dependencies.toSet()
@@ -312,7 +311,7 @@ class ModuleDependencyIndexImpl(private val project: Project): ModuleDependencyI
                   else -> it
                 }
               } as MutableList<ModuleDependencyItem>
-              builder.modifyEntity(module) {
+              builder.modifyModuleEntity(module) {
                 dependencies = updated
               }
             }
@@ -393,7 +392,7 @@ class ModuleDependencyIndexImpl(private val project: Project): ModuleDependencyI
                 else -> it
               }
             } as MutableList<ModuleDependencyItem>
-            builder.modifyEntity(module) {
+            builder.modifyModuleEntity(module) {
               dependencies = updated
             }
           }

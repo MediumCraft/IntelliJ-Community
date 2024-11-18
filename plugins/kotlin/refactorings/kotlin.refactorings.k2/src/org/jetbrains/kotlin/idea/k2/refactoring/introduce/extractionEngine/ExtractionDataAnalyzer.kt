@@ -8,74 +8,35 @@ import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.psi.util.descendantsOfType
 import com.intellij.refactoring.util.RefactoringUIUtil
 import com.intellij.util.containers.MultiMap
-import org.jetbrains.kotlin.analysis.api.KtAnalysisNonPublicApi
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
-import org.jetbrains.kotlin.analysis.api.analyze
-import org.jetbrains.kotlin.analysis.api.analyzeCopy
-import org.jetbrains.kotlin.analysis.api.annotations.*
-import org.jetbrains.kotlin.analysis.api.components.KtDataFlowExitPointSnapshot
-import org.jetbrains.kotlin.analysis.api.components.KtDiagnosticCheckerFilter
+import org.jetbrains.kotlin.analysis.api.*
+import org.jetbrains.kotlin.analysis.api.annotations.KaAnnotation
+import org.jetbrains.kotlin.analysis.api.annotations.KaAnnotationValue
+import org.jetbrains.kotlin.analysis.api.components.KaDataFlowExitPointSnapshot
+import org.jetbrains.kotlin.analysis.api.components.KaDiagnosticCheckerFilter
 import org.jetbrains.kotlin.analysis.api.fir.diagnostics.KaFirDiagnostic
-import org.jetbrains.kotlin.analysis.api.symbols.KtCallableSymbol
-import org.jetbrains.kotlin.analysis.api.symbols.markers.KtAnnotatedSymbol
-import org.jetbrains.kotlin.analysis.api.types.KtNonErrorClassType
-import org.jetbrains.kotlin.analysis.api.types.KtType
-import org.jetbrains.kotlin.analysis.project.structure.DanglingFileResolutionMode
+import org.jetbrains.kotlin.analysis.api.projectStructure.KaDanglingFileResolutionMode
+import org.jetbrains.kotlin.analysis.api.renderer.declarations.impl.KaDeclarationRendererForSource
+import org.jetbrains.kotlin.analysis.api.symbols.KaCallableSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.markers.KaAnnotatedSymbol
+import org.jetbrains.kotlin.analysis.api.types.KaClassType
+import org.jetbrains.kotlin.analysis.api.types.KaType
+import org.jetbrains.kotlin.analysis.utils.printer.PrettyPrinter
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.base.util.names.FqNames
 import org.jetbrains.kotlin.idea.base.util.names.FqNames.OptInFqNames.isRequiresOptInFqName
-import org.jetbrains.kotlin.idea.k2.refactoring.extractFunction.ExtractFunctionDescriptorModifier
-import org.jetbrains.kotlin.idea.k2.refactoring.extractFunction.ExtractableCodeDescriptor
-import org.jetbrains.kotlin.idea.k2.refactoring.extractFunction.ExtractableCodeDescriptorWithConflicts
-import org.jetbrains.kotlin.idea.k2.refactoring.extractFunction.ExtractionData
-import org.jetbrains.kotlin.idea.k2.refactoring.extractFunction.ExtractionGeneratorConfiguration
-import org.jetbrains.kotlin.idea.k2.refactoring.extractFunction.ExtractionResult
-import org.jetbrains.kotlin.idea.k2.refactoring.extractFunction.MutableParameter
-import org.jetbrains.kotlin.idea.k2.refactoring.extractFunction.inferParametersInfo
-import org.jetbrains.kotlin.idea.k2.refactoring.extractFunction.targetKey
-import org.jetbrains.kotlin.idea.refactoring.introduce.extractionEngine.AbstractExtractionDataAnalyzer
-import org.jetbrains.kotlin.idea.refactoring.introduce.extractionEngine.ControlFlow
-import org.jetbrains.kotlin.idea.refactoring.introduce.extractionEngine.ExtractionGeneratorOptions
-import org.jetbrains.kotlin.idea.refactoring.introduce.extractionEngine.ExtractionTarget
-import org.jetbrains.kotlin.idea.refactoring.introduce.extractionEngine.IExtractableCodeDescriptor
-import org.jetbrains.kotlin.idea.refactoring.introduce.extractionEngine.IExtractionData
-import org.jetbrains.kotlin.idea.refactoring.introduce.extractionEngine.IReplacement
-import org.jetbrains.kotlin.idea.refactoring.introduce.extractionEngine.OutputDescriptor
-import org.jetbrains.kotlin.idea.refactoring.introduce.extractionEngine.ParametersInfo
-import org.jetbrains.kotlin.idea.refactoring.introduce.extractionEngine.ResolveResult
-import org.jetbrains.kotlin.idea.refactoring.introduce.extractionEngine.TypeDescriptor
-import org.jetbrains.kotlin.idea.refactoring.introduce.extractionEngine.TypeParameter
-import org.jetbrains.kotlin.idea.refactoring.introduce.extractionEngine.getDefaultVisibility
-import org.jetbrains.kotlin.idea.refactoring.introduce.extractionEngine.resolveResult
+import org.jetbrains.kotlin.idea.k2.refactoring.extractFunction.*
+import org.jetbrains.kotlin.idea.refactoring.introduce.extractionEngine.*
 import org.jetbrains.kotlin.idea.references.ReadWriteAccessChecker
 import org.jetbrains.kotlin.idea.references.mainReference
 import org.jetbrains.kotlin.lexer.KtModifierKeywordToken
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.name.ClassId
 import org.jetbrains.kotlin.name.FqName
-import org.jetbrains.kotlin.psi.KtBlockExpression
-import org.jetbrains.kotlin.psi.KtBreakExpression
-import org.jetbrains.kotlin.psi.KtCallExpression
-import org.jetbrains.kotlin.psi.KtContinueExpression
-import org.jetbrains.kotlin.psi.KtDeclaration
-import org.jetbrains.kotlin.psi.KtElement
-import org.jetbrains.kotlin.psi.KtExpression
-import org.jetbrains.kotlin.psi.KtNamedDeclaration
-import org.jetbrains.kotlin.psi.KtNamedFunction
-import org.jetbrains.kotlin.psi.KtParameter
-import org.jetbrains.kotlin.psi.KtProperty
-import org.jetbrains.kotlin.psi.KtReferenceExpression
-import org.jetbrains.kotlin.psi.KtReturnExpression
-import org.jetbrains.kotlin.psi.KtSimpleNameExpression
-import org.jetbrains.kotlin.psi.KtThisExpression
-import org.jetbrains.kotlin.psi.KtTreeVisitorVoid
-import org.jetbrains.kotlin.psi.KtTypeParameter
-import org.jetbrains.kotlin.psi.KtUserType
+import org.jetbrains.kotlin.psi.*
 import org.jetbrains.kotlin.psi.psiUtil.getStrictParentOfType
 
-@OptIn(KtAnalysisNonPublicApi::class)
 internal class ExtractionDataAnalyzer(private val extractionData: ExtractionData) :
-    AbstractExtractionDataAnalyzer<KtType, MutableParameter>(extractionData) {
+    AbstractExtractionDataAnalyzer<KaType, MutableParameter>(extractionData) {
 
     override fun hasSyntaxErrors(): Boolean {
         return false
@@ -161,23 +122,24 @@ internal class ExtractionDataAnalyzer(private val extractionData: ExtractionData
         abstract fun registerModifiedVar(e: KtProperty)
     }
 
-    override fun createOutputDescriptor(): OutputDescriptor<KtType> {
+    @OptIn(KaNonPublicApi::class)
+    override fun createOutputDescriptor(): OutputDescriptor<KaType> {
         analyze(extractionData.commonParent) {
-            val exitSnapshot: KtDataFlowExitPointSnapshot = getExitPointSnapshot(extractionData.expressions)
+            val exitSnapshot: KaDataFlowExitPointSnapshot = computeExitPointSnapshot(extractionData.expressions)
             val defaultExpressionInfo = exitSnapshot.defaultExpressionInfo
             val typeOfDefaultFlow = defaultExpressionInfo?.type?.takeIf {
                 //extract as Unit function if the last expression is not used afterward
-                !extractionData.options.inferUnitTypeForUnusedValues || defaultExpressionInfo.expression.isUsedAsExpression()
+                !extractionData.options.inferUnitTypeForUnusedValues || defaultExpressionInfo.expression.isUsedAsExpression
             }
 
             val scope = extractionData.targetSibling
             return OutputDescriptor(
                 defaultResultExpression = defaultExpressionInfo?.expression,
-                typeOfDefaultFlow = approximateWithResolvableType(typeOfDefaultFlow, scope) ?: builtinTypes.UNIT,
+                typeOfDefaultFlow = approximateWithResolvableType(typeOfDefaultFlow, scope) ?: builtinTypes.unit,
                 implicitReturn = exitSnapshot.valuedReturnExpressions.filter { it !is KtReturnExpression }.singleOrNull(),
-                lastExpressionHasNothingType = extractionData.expressions.lastOrNull()?.getKtType()?.isNothing == true,
+                lastExpressionHasNothingType = extractionData.expressions.lastOrNull()?.expressionType?.isNothingType == true,
                 valuedReturnExpressions = exitSnapshot.valuedReturnExpressions.filter { it is KtReturnExpression },
-                returnValueType = approximateWithResolvableType(exitSnapshot.returnValueType, scope) ?: builtinTypes.UNIT,
+                returnValueType = approximateWithResolvableType(exitSnapshot.returnValueType, scope) ?: builtinTypes.unit,
                 jumpExpressions = exitSnapshot.jumpExpressions.filter { it is KtBreakExpression || it is KtContinueExpression || it is KtReturnExpression && it.returnedExpression == null},
                 hasSingleTarget = !exitSnapshot.hasMultipleJumpTargets,
                 sameExitForDefaultAndJump = if (exitSnapshot.hasJumps) !exitSnapshot.hasEscapingJumps && defaultExpressionInfo != null else defaultExpressionInfo == null
@@ -187,12 +149,12 @@ internal class ExtractionDataAnalyzer(private val extractionData: ExtractionData
 
     override val nameSuggester = KotlinNameSuggester
 
-    override val typeDescriptor: TypeDescriptor<KtType> = KotlinTypeDescriptor(extractionData)
+    override val typeDescriptor: TypeDescriptor<KaType> = KotlinTypeDescriptor(extractionData)
 
     override fun inferParametersInfo(
         virtualBlock: KtBlockExpression,
         modifiedVariables: Set<String>
-    ): ParametersInfo<KtType, MutableParameter> {
+    ): ParametersInfo<KaType, MutableParameter> {
         analyze(extractionData.commonParent) {
             return extractionData.inferParametersInfo(
                 virtualBlock,
@@ -202,16 +164,17 @@ internal class ExtractionDataAnalyzer(private val extractionData: ExtractionData
         }
     }
 
+    @OptIn(KaExperimentalApi::class)
     override fun createDescriptor(
         suggestedFunctionNames: List<String>,
         defaultVisibility: KtModifierKeywordToken?,
         parameters: List<MutableParameter>,
         receiverParameter: MutableParameter?,
         typeParameters: List<TypeParameter>,
-        replacementMap: MultiMap<KtSimpleNameExpression, IReplacement<KtType>>,
-        flow: ControlFlow<KtType>,
-        returnType: KtType
-    ): IExtractableCodeDescriptor<KtType> {
+        replacementMap: MultiMap<KtSimpleNameExpression, IReplacement<KaType>>,
+        flow: ControlFlow<KaType>,
+        returnType: KaType
+    ): IExtractableCodeDescriptor<KaType> {
         val experimentalMarkers = analyze(extractionData.commonParent) { extractionData.getExperimentalMarkers() }
         var descriptor = ExtractableCodeDescriptor(
             context = extractionData.commonParent,
@@ -226,7 +189,7 @@ internal class ExtractionDataAnalyzer(private val extractionData: ExtractionData
             returnType = returnType,
             modifiers = emptyList(),
             optInMarkers = experimentalMarkers.optInMarkers,
-            annotationClassIds = experimentalMarkers.propagatingMarkerClassIds
+            renderedAnnotations = getRenderedAnnotations(experimentalMarkers.propagatingMarkerClassIds)
         )
         val config = ExtractionGeneratorConfiguration(
             descriptor,
@@ -234,10 +197,10 @@ internal class ExtractionDataAnalyzer(private val extractionData: ExtractionData
         )
 
         val generatedDeclaration = Generator.generateDeclaration(config, null).declaration
-        val illegalSuspendInside = analyzeCopy(generatedDeclaration, DanglingFileResolutionMode.PREFER_SELF) {
+        val illegalSuspendInside = analyzeCopy(generatedDeclaration, KaDanglingFileResolutionMode.PREFER_SELF) {
             generatedDeclaration.descendantsOfType<KtExpression>()
                 .flatMap {
-                    it.getDiagnostics(KtDiagnosticCheckerFilter.ONLY_COMMON_CHECKERS)
+                    it.diagnostics(KaDiagnosticCheckerFilter.ONLY_COMMON_CHECKERS)
                         .map { it.diagnosticClass }
                 }
                 .any { it == KaFirDiagnostic.IllegalSuspendFunctionCall::class || it == KaFirDiagnostic.IllegalSuspendPropertyAccess::class }
@@ -252,6 +215,25 @@ internal class ExtractionDataAnalyzer(private val extractionData: ExtractionData
         }
         return descriptor
     }
+
+    @OptIn(KaExperimentalApi::class)
+    private fun getRenderedAnnotations(annotationClassIds: Set<ClassId>): List<String> {
+        if (annotationClassIds.isEmpty()) return emptyList()
+        val container = extractionData.commonParent.getStrictParentOfType<KtNamedFunction>() ?: return emptyList()
+        return analyze(container) {
+            val owner = container.symbol
+            val renderer = KaDeclarationRendererForSource.WITH_QUALIFIED_NAMES.annotationRenderer
+            owner.annotations.filter { it.classId in annotationClassIds }.map { annotation ->
+                val printer = PrettyPrinter()
+                printer.append('@')
+                renderer.annotationUseSiteTargetRenderer.renderUseSiteTarget(useSiteSession, annotation, owner, renderer, printer)
+                renderer.annotationsQualifiedNameRenderer.renderQualifier(useSiteSession, annotation, owner, renderer, printer)
+                renderer.annotationArgumentsRenderer.renderAnnotationArguments(useSiteSession, annotation, owner, renderer, printer)
+                printer.append('\n')
+                printer.toString()
+            }
+        }
+    }
 }
 
 private data class ExperimentalMarkers(
@@ -263,32 +245,32 @@ private data class ExperimentalMarkers(
     }
 }
 
-context(KtAnalysisSession)
+context(KaSession)
 private fun IExtractionData.getExperimentalMarkers(): ExperimentalMarkers {
-    fun KtAnnotationApplicationWithArgumentsInfo.isExperimentalMarker(): Boolean {
+    fun KaAnnotation.isExperimentalMarker(): Boolean {
         val id = classId
         if (id == null) return false
-        val annotations = getClassOrObjectSymbolByClassId(id)?.annotations ?: return false
+        val annotations = findClass(id)?.annotations ?: return false
         return annotations.any { isRequiresOptInFqName(it.classId?.asSingleFqName()) }
     }
 
     val container = commonParent.getStrictParentOfType<KtNamedFunction>() ?: return ExperimentalMarkers.empty
 
-    val propagatingMarkerDescriptors = mutableListOf<KtAnnotationApplicationWithArgumentsInfo>()
+    val propagatingMarkerDescriptors = mutableListOf<KaAnnotation>()
     val optInMarkerNames = mutableListOf<FqName>()
-    for (annotationEntry in container.getSymbol().annotations) {
+    for (annotationEntry in container.symbol.annotations) {
         val fqName = annotationEntry.classId?.asSingleFqName() ?: continue
 
         if (fqName in FqNames.OptInFqNames.OPT_IN_FQ_NAMES) {
-            fun processValue(value: KtAnnotationValue, isRecursive: Boolean) {
+            fun processValue(value: KaAnnotationValue, isRecursive: Boolean) {
                 when (value) {
-                    is KtKClassAnnotationValue -> {
-                        val classId = (value.type as? KtNonErrorClassType)?.classId?.takeUnless { it.isLocal }
+                    is KaAnnotationValue.ClassLiteralValue -> {
+                        val classId = (value.type as? KaClassType)?.classId?.takeUnless { it.isLocal }
                         if (classId != null) {
                             optInMarkerNames.add(classId.asSingleFqName())
                         }
                     }
-                    is KtArrayAnnotationValue -> {
+                    is KaAnnotationValue.ArrayValue -> {
                         if (isRecursive) {
                             value.values.forEach { processValue(it, isRecursive = false) }
                         }
@@ -310,7 +292,7 @@ private fun IExtractionData.getExperimentalMarkers(): ExperimentalMarkers {
                 override fun visitReferenceExpression(expression: KtReferenceExpression) {
                     super.visitReferenceExpression(expression)
 
-                    fun processSymbolAnnotations(targetSymbol: KtAnnotatedSymbol) {
+                    fun processSymbolAnnotations(targetSymbol: KaAnnotatedSymbol) {
                         for (ann in targetSymbol.annotations) {
                             val fqName = ann.classId?.asSingleFqName() ?: continue
                             if (ann.isExperimentalMarker()) {
@@ -319,10 +301,10 @@ private fun IExtractionData.getExperimentalMarkers(): ExperimentalMarkers {
                         }
                     }
 
-                    val targetSymbol = expression.mainReference.resolveToSymbol() as? KtAnnotatedSymbol ?: return
+                    val targetSymbol = expression.mainReference.resolveToSymbol() as? KaAnnotatedSymbol ?: return
                     processSymbolAnnotations(targetSymbol)
 
-                    val typeSymbol = (targetSymbol as? KtCallableSymbol)?.returnType?.expandedClassSymbol ?: return
+                    val typeSymbol = (targetSymbol as? KaCallableSymbol)?.returnType?.expandedSymbol ?: return
                     processSymbolAnnotations(typeSymbol)
                 }
             })
@@ -350,12 +332,13 @@ fun ExtractableCodeDescriptor.validate(target: ExtractionTarget = ExtractionTarg
     )
     val result = Generator.generateDeclaration(config, null)
 
-    return analyzeCopy(result.declaration, DanglingFileResolutionMode.PREFER_SELF) {
+    return analyzeCopy(result.declaration, KaDanglingFileResolutionMode.PREFER_SELF) {
         validateTempResult(result)
     }
 }
 
-context(KtAnalysisSession)
+context(KaSession)
+@OptIn(KaExperimentalApi::class)
 private fun ExtractableCodeDescriptor.validateTempResult(
     result: ExtractionResult,
 ): ExtractableCodeDescriptorWithConflicts {
@@ -375,7 +358,7 @@ private fun ExtractableCodeDescriptor.validateTempResult(
         val resolveResult = currentRefExpr.resolveResult as? ResolveResult<PsiNamedElement, KtSimpleNameExpression> ?: return
         if (currentRefExpr.parent is KtThisExpression) return
 
-        val diagnostics = currentRefExpr.getDiagnostics(KtDiagnosticCheckerFilter.ONLY_COMMON_CHECKERS)
+        val diagnostics = currentRefExpr.diagnostics(KaDiagnosticCheckerFilter.ONLY_COMMON_CHECKERS)
 
         val currentDescriptor = currentRefExpr.mainReference.resolve()
         if (currentDescriptor is KtParameter && currentDescriptor.parent == valueParameterList) return
@@ -418,7 +401,7 @@ private fun ExtractableCodeDescriptor.validateTempResult(
         object : KtTreeVisitorVoid() {
             override fun visitUserType(userType: KtUserType) {
                 val refExpr = userType.referenceExpression ?: return
-                val diagnostics = refExpr.getDiagnostics(KtDiagnosticCheckerFilter.ONLY_COMMON_CHECKERS)
+                val diagnostics = refExpr.diagnostics(KaDiagnosticCheckerFilter.ONLY_COMMON_CHECKERS)
                 diagnostics.firstOrNull { it.diagnosticClass == KaFirDiagnostic.InvisibleReference::class }?.let {
                     val declaration = refExpr.mainReference.resolve() as? PsiNamedElement ?: return
                     conflicts.putValue(declaration, getDeclarationMessage(declaration, "0.will.become.invisible.after.extraction"))

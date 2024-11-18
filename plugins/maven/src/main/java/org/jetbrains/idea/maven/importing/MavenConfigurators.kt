@@ -1,6 +1,7 @@
 // Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.idea.maven.importing
 
+import com.intellij.openapi.extensions.ExtensionPointName
 import com.intellij.openapi.module.Module
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.project.Project
@@ -12,10 +13,14 @@ import com.intellij.platform.workspace.storage.MutableEntityStorage
 import com.intellij.platform.workspace.storage.WorkspaceEntity
 import com.intellij.util.concurrency.annotations.RequiresBackgroundThread
 import com.intellij.util.concurrency.annotations.RequiresWriteLock
+import org.jdom.Element
 import org.jetbrains.annotations.ApiStatus
+import org.jetbrains.annotations.NonNls
 import org.jetbrains.idea.maven.project.MavenProject
 import org.jetbrains.idea.maven.project.MavenProjectChanges
 import org.jetbrains.idea.maven.project.MavenProjectsTree
+import org.jetbrains.idea.maven.utils.MavenJDOMUtil.findChildByPath
+import org.jetbrains.idea.maven.utils.MavenJDOMUtil.findChildValueByPath
 import org.jetbrains.jps.model.java.JavaResourceRootType
 import org.jetbrains.jps.model.java.JavaSourceRootType
 import org.jetbrains.jps.model.module.JpsModuleSourceRootType
@@ -24,6 +29,11 @@ import java.util.stream.Stream
 @ApiStatus.Experimental
 @Suppress("DEPRECATION")
 interface MavenWorkspaceConfigurator {
+
+  companion object {
+    @JvmField
+    val EXTENSION_POINT_NAME: ExtensionPointName<MavenWorkspaceConfigurator> = ExtensionPointName.create("org.jetbrains.idea.maven.importing.workspaceConfigurator")
+  }
 
   /**
    * Called for each imported project in order to add
@@ -162,6 +172,25 @@ interface MavenAfterImportConfigurator {
     val project: Project
     val mavenProjectsWithModules: Sequence<MavenWorkspaceConfigurator.MavenProjectWithModules<Module>>
     val progressIndicator: ProgressIndicator
+  }
+}
+
+@ApiStatus.Internal
+open class MavenApplicableConfigurator(private val pluginGroupId: String, private val pluginArtifactId: String) {
+  open fun isApplicable(mavenProject: MavenProject): Boolean {
+    return mavenProject.findPlugin(pluginGroupId, pluginArtifactId) != null
+  }
+
+  protected open fun findConfigValue(p: MavenProject, @NonNls path: String): String? {
+    return findChildValueByPath(getConfig(p), path)
+  }
+
+  protected open fun getConfig(p: MavenProject): Element? {
+    return p.getPluginConfiguration(pluginGroupId, pluginArtifactId)
+  }
+
+  protected open fun getConfig(p: MavenProject, @NonNls path: String): Element? {
+    return findChildByPath(getConfig(p), path)
   }
 }
 

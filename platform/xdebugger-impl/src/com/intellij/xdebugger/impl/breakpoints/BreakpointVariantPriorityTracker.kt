@@ -3,9 +3,12 @@ package com.intellij.xdebugger.impl.breakpoints
 
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.readAction
+import com.intellij.openapi.diagnostic.Attachment
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.fileEditor.FileDocumentManager
+import com.intellij.openapi.project.IntelliJProjectUtil
+import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.TextRange
 import com.intellij.openapi.util.registry.Registry
 import com.intellij.openapi.vfs.VirtualFileManager
@@ -33,7 +36,7 @@ private data class Event(val breakpoint: XLineBreakpoint<*>,
                          val fileUrl: String, val line: Int,
                          val kind: EventKind, val time: Long)
 
-internal class BreakpointVariantPriorityTracker(private val coroutineScope: CoroutineScope)
+internal class BreakpointVariantPriorityTracker(private val project: Project, private val coroutineScope: CoroutineScope)
   : XBreakpointListener<XBreakpoint<*>> {
 
   private val events = ArrayDeque<Event>()
@@ -41,7 +44,8 @@ internal class BreakpointVariantPriorityTracker(private val coroutineScope: Coro
 
   private fun isEnabled(): Boolean =
     Registry.`is`("debugger.report.non.default.inline.breakpoint") &&
-    ApplicationManager.getApplication().let { it.isInternal && !it.isUnitTestMode }
+    IntelliJProjectUtil.isIntelliJPlatformProject(project) &&
+    !ApplicationManager.getApplication().isUnitTestMode
 
   init {
     coroutineScope.launch {
@@ -144,22 +148,36 @@ internal class BreakpointVariantPriorityTracker(private val coroutineScope: Coro
       }
 
     readAction {
-      if (lookSimilar(defaultBreakpoint, expectedBreakpoint)) {
+      if (defaultBreakpoint.type == expectedBreakpoint.type &&
+          defaultBreakpoint.highlightRange == expectedBreakpoint.highlightRange &&
+          defaultBreakpoint.generalDescription == expectedBreakpoint.generalDescription) {
         // Added, removed and added again the same breakpoint, not our case.
         return@readAction
       }
 
       assert(isEnabled()) // Better to do a double check.
 
-      LOG.error("""
-            |Non-default breakpoint variant was set. Not an error, but we are glad to collect them. Thank you for reporting!
-            |
-            |Default variant: ${getDescription(fileUrl, defaultBreakpoint)}
-            |Expected variant: ${getDescription(fileUrl, expectedBreakpoint)}
-            |
-            |Context at $fileUrl:${line + 1}:
-            |${getFileContext(fileUrl, line)}
-            |""".trimMargin())
+      val safeDesc = """
+        |Default variant: ${getDescription(defaultBreakpoint)}
+        |Expected variant: ${getDescription(expectedBreakpoint)}
+        """.trimMargin()
+
+      val msg = """
+        |Non-default breakpoint variant was set. Not an error, but we are glad to collect them. Thank you for reporting!
+        |If you don't ever want to report this, set registry debugger.report.non.default.inline.breakpoint=false.
+        |
+        |$safeDesc
+        """.trimMargin()
+      val context = """
+        |$safeDesc
+        |
+        |Default variant text: ${getText(fileUrl, defaultBreakpoint)}
+        |Expected variant text: ${getText(fileUrl, expectedBreakpoint)}
+        |
+        |Context at $fileUrl:${line + 1}:
+        |${getFileContext(fileUrl, line)}
+        """.trimMargin()
+      LOG.error(msg, Attachment("context.txt", context))
     }
   }
 
@@ -174,22 +192,15 @@ internal class BreakpointVariantPriorityTracker(private val coroutineScope: Coro
   }
 
   @RequiresReadLock
-  private fun <P1 : XBreakpointProperties<*>, P2 : XBreakpointProperties<*>> lookSimilar(b1: XLineBreakpoint<P1>, b2: XLineBreakpoint<P2>): Boolean {
-    return b1.type == b2.type &&
-           b1.type.getHighlightRange(b1) == b2.type.getHighlightRange(b2) &&
-           b1.type.getGeneralDescription(b1) == b2.type.getGeneralDescription(b2)
-  }
+  private fun getDescription(b: XLineBreakpoint<*>): String =
+    "${b.type.id}, ${b.generalDescription}"
 
   @RequiresReadLock
-  private fun <P : XBreakpointProperties<*>> getDescription(fileUrl: String, b: XLineBreakpoint<P>): String {
-    val t = b.type
-    val kind = t.getGeneralDescription(b)
-    val text = when (val range = t.getHighlightRange(b)) {
+  private fun getText(fileUrl: String, b: XLineBreakpoint<*>): String =
+    when (val range = b.highlightRange) {
       null -> "<whole line>"
       else -> readDocument(fileUrl) { it.getText(range) }
     }
-    return "${t.id}, $kind: $text"
-  }
 
   @RequiresReadLock
   private fun getFileContext(fileUrl: String, line: Int): String {

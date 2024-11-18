@@ -18,22 +18,29 @@ import com.intellij.openapi.project.guessProjectDir
 import com.intellij.openapi.util.registry.Registry
 import com.intellij.platform.ide.progress.withBackgroundProgress
 import com.intellij.util.net.HttpConfigurable
+import com.jetbrains.python.PyBundle
 import com.jetbrains.python.PySdkBundle
 import com.jetbrains.python.PythonHelper
 import com.jetbrains.python.packaging.PyExecutionException
 import com.jetbrains.python.packaging.common.PythonPackageSpecification
+import com.jetbrains.python.packaging.common.normalizePackageName
+import com.jetbrains.python.packaging.common.runPackagingOperationOrShowErrorDialog
 import com.jetbrains.python.packaging.repository.PyPackageRepository
 import com.jetbrains.python.run.PythonInterpreterTargetEnvironmentFactory
 import com.jetbrains.python.run.buildTargetedCommandLine
 import com.jetbrains.python.run.ensureProjectSdkAndModuleDirsAreOnTarget
 import com.jetbrains.python.run.prepareHelperScriptExecution
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.Nls
 import kotlin.math.min
 
 fun PythonPackageManager.launchReload() {
   (ApplicationManager.getApplication() as ComponentManagerEx).getCoroutineScope().launch {
-    reloadPackages()
+    runPackagingOperationOrShowErrorDialog(sdk, PyBundle.message("python.packaging.operation.failed.title")) {
+      reloadPackages()
+    }
   }
 }
 
@@ -97,8 +104,10 @@ suspend fun PythonPackageManager.runPackagingTool(operation: String, arguments: 
   }
 
   val result = withBackgroundProgress(project, text, cancellable = true) {
-    blockingContext {
-      handler.runProcess(10 * 60 * 1000)
+    withContext(Dispatchers.IO) {
+      blockingContext {
+        handler.runProcess(10 * 60 * 1000)
+      }
     }
   }
 
@@ -139,8 +148,10 @@ fun PythonPackageManager.isInstalled(name: String): Boolean {
   return installedPackages.any { it.name.lowercase() == name.lowercase() }
 }
 
-fun PythonRepositoryManager.createSpecification(name: String,
-                                                versionSpec: String? = null): PythonPackageSpecification? {
-  val repository = packagesByRepository().firstOrNull { it.second.any { pkg -> pkg.lowercase() == name.lowercase() } }?.first
+fun PythonRepositoryManager.createSpecification(
+  name: String,
+  versionSpec: String? = null,
+): PythonPackageSpecification? {
+  val repository = packagesByRepository().firstOrNull { it.second.any { pkg -> normalizePackageName(pkg) == normalizePackageName(name) } }?.first
   return repository?.createForcedSpecPackageSpecification(name, versionSpec)
 }

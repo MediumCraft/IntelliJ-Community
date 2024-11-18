@@ -8,9 +8,9 @@ import com.intellij.codeHighlighting.TextEditorHighlightingPass;
 import com.intellij.codeHighlighting.TextEditorHighlightingPassRegistrar;
 import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer;
 import com.intellij.codeWithMe.ClientId;
+import com.intellij.concurrency.IdeaForkJoinWorkerThreadFactory;
 import com.intellij.concurrency.Job;
 import com.intellij.concurrency.JobLauncher;
-import com.intellij.concurrency.ThreadContext;
 import com.intellij.diagnostic.Activity;
 import com.intellij.diagnostic.StartUpMeasurer;
 import com.intellij.openapi.Disposable;
@@ -19,10 +19,14 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ex.ApplicationManagerEx;
 import com.intellij.openapi.application.ex.ApplicationUtil;
 import com.intellij.openapi.application.impl.ApplicationImpl;
+import com.intellij.openapi.diagnostic.ControlFlowException;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.editor.impl.DocumentMarkupModel;
+import com.intellij.openapi.editor.markup.RangeHighlighter;
 import com.intellij.openapi.fileEditor.ClientFileEditorManager;
+import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.fileEditor.FileEditor;
 import com.intellij.openapi.fileEditor.TextEditor;
 import com.intellij.openapi.fileTypes.FileType;
@@ -32,42 +36,40 @@ import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.DumbService;
+import com.intellij.openapi.project.IndexNotReadyException;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.Segment;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.platform.diagnostic.telemetry.helpers.TraceUtil;
+import com.intellij.platform.diagnostic.telemetry.helpers.TraceKt;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiFile;
 import com.intellij.util.Functions;
+import com.intellij.util.ObjectUtils;
+import com.intellij.util.concurrency.ThreadingAssertions;
 import com.intellij.util.containers.CollectionFactory;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.HashingStrategy;
 import com.intellij.util.ui.UIUtil;
 import io.opentelemetry.context.Context;
+import io.opentelemetry.context.Scope;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
-import kotlin.coroutines.CoroutineContext;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.annotations.TestOnly;
 
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.concurrent.atomic.AtomicReference;
 
 final class PassExecutorService implements Disposable {
   static final Logger LOG = Logger.getInstance(PassExecutorService.class);
   private static final boolean CHECK_CONSISTENCY = ApplicationManager.getApplication().isUnitTestMode();
 
-  private final Map<ScheduledPass, Job<Void>> mySubmittedPasses = new ConcurrentHashMap<>();
+  private final AtomicReference<@NotNull Map<ScheduledPass, Job>> mySubmittedPasses = new AtomicReference<>(new ConcurrentHashMap<>());
   private final Project myProject;
   private volatile boolean isDisposed;
 
@@ -81,11 +83,11 @@ final class PassExecutorService implements Disposable {
 
   @Override
   public void dispose() {
-    cancelAll(true, "PassExecutorService.dispose");
     // some workers could, although idle, still retain some thread references for some time causing leak hunter to frown
     // call it from BGT to avoid "calling daemon from EDT" assertion
     Future<?> future = ApplicationManager.getApplication().executeOnPooledThread(() -> {
       ForkJoinPool.commonPool().awaitQuiescence(1, TimeUnit.SECONDS);
+      cancelAll(true, "PassExecutorService.dispose");
     });
     try {
       future.get();
@@ -97,29 +99,32 @@ final class PassExecutorService implements Disposable {
   }
 
   void cancelAll(boolean waitForTermination, @NotNull String reason) {
-    for (Map.Entry<ScheduledPass, Job<Void>> entry : mySubmittedPasses.entrySet()) {
-      Job<Void> job = entry.getValue();
-      ScheduledPass pass = entry.getKey();
-      pass.myUpdateProgress.cancel(reason);
-      job.cancel();
+    if (waitForTermination) {
+      // must not wait in EDT because waitFor() might inadvertently steal some work from FJP and try to run it and fail with "must not execute in EDT"
+      ThreadingAssertions.assertBackgroundThread();
     }
+    // there's a bug in CHM which leads to very slow .clear() after many puts (see e.g. IJPL-163472 Freeze in DaemonListeners$MyApplicationListener.writeActionFinished). So we toss the old CHM and replace with the new
+    Map<? extends ScheduledPass, ? extends Job> submittedPasses = mySubmittedPasses.getAndSet(new ConcurrentHashMap<>());
     try {
+      for (Map.Entry<? extends ScheduledPass, ? extends Job> entry : submittedPasses.entrySet()) {
+        Job job = entry.getValue();
+        ScheduledPass pass = entry.getKey();
+        pass.myUpdateProgress.cancel(reason);
+        job.cancel();
+      }
       if (waitForTermination) {
-        while (!waitFor(50)) {
+        while (!waitFor(50, submittedPasses)) {
           int i = 0;
         }
       }
     }
-    catch (ProcessCanceledException ignored) {
+    catch (CancellationException ignored) {
     }
     catch (Error | RuntimeException e) {
       throw e;
     }
     catch (Throwable throwable) {
       LOG.error(throwable);
-    }
-    finally {
-      mySubmittedPasses.clear();
     }
   }
 
@@ -129,7 +134,10 @@ final class PassExecutorService implements Disposable {
                     @NotNull FileEditor fileEditor,
                     HighlightingPass @NotNull [] passes,
                     @NotNull DaemonProgressIndicator updateProgress) {
-    if (isDisposed()) return;
+    if (isDisposed()) {
+      ((DaemonCodeAnalyzerImpl)DaemonCodeAnalyzer.getInstance(myProject)).stopAndRestartMyProcess(updateProgress, null, "PES is disposed");
+      return;
+    }
     ApplicationManager.getApplication().assertIsNonDispatchThread();
 
     List<TextEditorHighlightingPass> documentBoundPasses = new ArrayList<>();
@@ -172,13 +180,14 @@ final class PassExecutorService implements Disposable {
     }
 
     if (LOG.isDebugEnabled()) {
-      log(updateProgress, null, "submitPasses: "+virtualFile.getName() + " ----- starting " + threadsToStartCountdown.get() + "passes. free:"+freePasses+"; editorBound:"+editorBoundPasses+"; documentBound:"+documentBoundPasses);
+      log(updateProgress, null, "submitPasses: "+virtualFile.getName() + " ----- starting " + threadsToStartCountdown.get() + " passes. Free:"+freePasses+"; editorBound:"+editorBoundPasses+"; documentBound:"+documentBoundPasses);
     }
 
     for (ScheduledPass dependentPass : dependentPasses) {
-      mySubmittedPasses.put(dependentPass, Job.nullJob());
+      mySubmittedPasses.get().put(dependentPass, Job.nullJob());
     }
     for (ScheduledPass freePass : freePasses) {
+      freePass.myUpdateProgress.checkCanceled();
       submit(freePass);
     }
   }
@@ -259,6 +268,7 @@ final class PassExecutorService implements Disposable {
                                                      @NotNull List<ScheduledPass> dependentPasses,
                                                      @NotNull DaemonProgressIndicator updateProgress,
                                                      @NotNull AtomicInteger threadsToStartCountdown) {
+    ProgressManager.checkCanceled();
     int passId = pass.getId();
     ScheduledPass scheduledPass = toBeSubmitted.get(passId);
     if (scheduledPass != null) return scheduledPass;
@@ -289,6 +299,7 @@ final class PassExecutorService implements Disposable {
     }
 
     if (pass.isRunIntentionPassAfter() && fileEditor instanceof TextEditor text) {
+      ProgressManager.checkCanceled();
       Editor editor = text.getEditor();
       ShowIntentionsPass ip = new ShowIntentionsPass(psiFile, editor, false);
       assignUniqueId(ip, id2Pass);
@@ -324,7 +335,7 @@ final class PassExecutorService implements Disposable {
 
   private void submit(@NotNull ScheduledPass pass) {
     if (!pass.myUpdateProgress.isCanceled()) {
-      Job<Void> job = JobLauncher.getInstance().submitToJobThread(pass, future -> {
+      Job job = JobLauncher.getInstance().submitToJobThread(pass, future -> {
         try {
           if (!future.isCancelled()) { // for canceled task .get() generates CancellationException which is expensive
             future.get();
@@ -333,10 +344,13 @@ final class PassExecutorService implements Disposable {
         catch (CancellationException | InterruptedException ignored) {
         }
         catch (ExecutionException e) {
-          LOG.error(e.getCause());
+          Throwable cause = e.getCause();
+          if (!(cause instanceof ControlFlowException || cause instanceof CancellationException)) {
+            LOG.error(cause);
+          }
         }
       });
-      mySubmittedPasses.put(pass, job);
+      mySubmittedPasses.get().put(pass, job);
     }
   }
 
@@ -349,7 +363,6 @@ final class PassExecutorService implements Disposable {
     private final List<ScheduledPass> mySuccessorsOnSubmit = new ArrayList<>();
     private final @NotNull DaemonProgressIndicator myUpdateProgress;
     private final @NotNull Context myOpenTelemetryContext;
-    private final @NotNull CoroutineContext myContext;
 
     private ScheduledPass(@NotNull FileEditor fileEditor,
                           @NotNull HighlightingPass pass,
@@ -368,28 +381,26 @@ final class PassExecutorService implements Disposable {
       myThreadsToStartCountdown = threadsToStartCountdown;
       myUpdateProgress = progressIndicator;
       myOpenTelemetryContext = openTelemetryContext;
-      myContext = ThreadContext.currentThreadContext().minusKey(kotlinx.coroutines.Job.Key);
     }
 
     @Override
     public void run() {
       ((ApplicationImpl)ApplicationManager.getApplication()).executeByImpatientReader(() -> {
         try {
-          try (AccessToken ignored = ThreadContext.installThreadContext(myContext, true)) {
-            ((FileTypeManagerImpl)FileTypeManager.getInstance()).cacheFileTypesInside(() -> doRun());
-          };
+          ((FileTypeManagerImpl)FileTypeManager.getInstance()).cacheFileTypesInside(() -> doRun());
         }
         catch (ApplicationUtil.CannotRunReadActionException e) {
-          myUpdateProgress.cancel();
+          myUpdateProgress.cancel(e, "CannotRunReadActionException");
         }
         catch (RuntimeException | Error e) {
-          saveException(e, myUpdateProgress);
+          myUpdateProgress.cancel(e, "exception thrown");
           throw e;
         }
       });
     }
 
     private void doRun() {
+      ApplicationManager.getApplication().assertIsNonDispatchThread();
       if (myUpdateProgress.isCanceled()) return;
 
       log(myUpdateProgress, myPass, "Started.");
@@ -410,33 +421,40 @@ final class PassExecutorService implements Disposable {
 
             if (!myUpdateProgress.isCanceled() && !myProject.isDisposed()) {
               String fileName = myFileEditor.getFile().getName();
-              String passClassName = StringUtil.getShortName(myPass.getClass());
-              TraceUtil.runWithSpanThrows(HighlightingPassTracer.HIGHLIGHTING_PASS_TRACER, myOpenTelemetryContext, passClassName, span -> {
-                Activity startupActivity = StartUpMeasurer.startActivity("running " + passClassName);
-                boolean cancelled = false;
-                try (AccessToken ignored = ClientId.withClientId(ClientFileEditorManager.getClientId(myFileEditor))) {
-                  try (AccessToken ignored2 = ThreadContext.installThreadContext(myContext, true)) {
+              String passClassName = myPass.getClass().getSimpleName();
+              try (Scope __ = myOpenTelemetryContext.makeCurrent()) {
+                TraceKt.use(HighlightingPassTracer.HIGHLIGHTING_PASS_TRACER.spanBuilder(passClassName), span -> {
+                  Activity startupActivity = StartUpMeasurer.startActivity(passClassName);
+                  boolean cancelled = false;
+                  try (AccessToken ignored = ClientId.withClientId(ClientFileEditorManager.getClientId(myFileEditor))) {
                     myPass.collectInformation(myUpdateProgress);
                   }
-                }
-                catch (CancellationException e) {
-                  cancelled = true;
-                  throw e;
-                }
-                finally {
-                  startupActivity.end();
-                  span.setAttribute(HighlightingPassTracer.FILE_ATTR_SPAN_KEY, fileName);
-                  span.setAttribute(HighlightingPassTracer.CANCELLED_ATTR_SPAN_KEY, Boolean.toString(cancelled));
-                }
-              });
+                  catch (IndexNotReadyException e) {
+                    cancelled = true;
+                  }
+                  catch (CancellationException e) {
+                    cancelled = true;
+                    throw e;
+                  }
+                  finally {
+                    startupActivity.end();
+                    span.setAttribute(HighlightingPassTracer.FILE_ATTR_SPAN_KEY, fileName);
+                    span.setAttribute(HighlightingPassTracer.CANCELLED_ATTR_SPAN_KEY, Boolean.toString(cancelled));
+                  }
+                  return null;
+                });
+              }
             }
           }
-          catch (ProcessCanceledException e) {
+          catch (CancellationException e) {
             log(myUpdateProgress, myPass, "Canceled ");
-
             if (!myUpdateProgress.isCanceled()) {
               //in case some smart asses throw PCE just for fun
-              ((DaemonCodeAnalyzerImpl)DaemonCodeAnalyzer.getInstance(myProject)).stopProcess(true, "PCE was thrown by visitor");
+              ((DaemonCodeAnalyzerImpl)DaemonCodeAnalyzer.getInstance(myProject)).stopAndRestartMyProcess(myUpdateProgress,
+                                                                                                          ObjectUtils.notNull(e.getCause(), e), "PCE was thrown by pass");
+              if (LOG.isDebugEnabled()) {
+                LOG.debug("PCE was thrown by " + myPass.getClass(), e);
+              }
             }
           }
           catch (RuntimeException | Error e) {
@@ -454,7 +472,7 @@ final class PassExecutorService implements Disposable {
       log(myUpdateProgress, myPass, "Finished. ");
 
       if (!myUpdateProgress.isCanceled()) {
-        applyInformationToEditorsLater(myFileEditor, myPass, myUpdateProgress, myThreadsToStartCountdown, myContext, ()-> {
+        applyInformationToEditorsLater(myFileEditor, myPass, myUpdateProgress, myThreadsToStartCountdown, ()-> {
           for (ScheduledPass successor : mySuccessorsOnCompletion) {
             int predecessorsToRun = successor.myRunningPredecessorsCount.decrementAndGet();
             if (predecessorsToRun == 0) {
@@ -485,52 +503,65 @@ final class PassExecutorService implements Disposable {
                                               @NotNull HighlightingPass pass,
                                               @NotNull DaemonProgressIndicator updateProgress,
                                               @NotNull AtomicInteger threadsToStartCountdown,
-                                              @NotNull CoroutineContext context,
                                               @NotNull Runnable callbackOnApplied) {
-    ApplicationManager.getApplication().invokeLater(() -> {
-      if (isDisposed() || !fileEditor.isValid()) {
-        updateProgress.cancel();
-      }
-      if (updateProgress.isCanceled()) {
-        log(updateProgress, pass, " is canceled during apply, sorry");
-        return;
-      }
-      try (AccessToken ignored = ClientId.withClientId(ClientFileEditorManager.getClientId(fileEditor)); AccessToken ignored2 = ThreadContext.installThreadContext(context, true)) {
-        if (UIUtil.isShowing(fileEditor.getComponent())) {
-          pass.applyInformationToEditor();
-          repaintErrorStripeAndIcon(fileEditor);
-          if (pass instanceof TextEditorHighlightingPass text) {
-            text.markUpToDateIfStillValid();
-          }
-          log(updateProgress, pass, " Applied");
+    ApplicationManager.getApplication().assertIsNonDispatchThread();
+    try {
+      ApplicationManager.getApplication().invokeLater(() -> {
+        if (isDisposed() || !fileEditor.isValid()) {
+          updateProgress.cancel();
         }
-      }
-      catch (ProcessCanceledException e) {
-        log(updateProgress, pass, "Error " + e);
-        throw e;
-      }
-      catch (RuntimeException e) {
-        VirtualFile file = fileEditor.getFile();
-        FileType fileType = file == null ? null : file.getFileType();
-        String message = "Exception while applying information to " + fileEditor + "(" + fileType + ")";
-        log(updateProgress, pass, message + e);
-        throw new RuntimeException(message, e);
-      }
-      if (threadsToStartCountdown.decrementAndGet() == 0) {
-        HighlightingSessionImpl.waitForAllSessionsHighlightInfosApplied(updateProgress);
-        log(updateProgress, pass, "Stopping ");
-        updateProgress.stopIfRunning();
-        clearStaleEntries();
-      }
-      else {
-        log(updateProgress, pass, "Finished but there are passes in the queue: " + threadsToStartCountdown.get());
-      }
-      callbackOnApplied.run();
-    }, updateProgress.getModalityState(), pass.getExpiredCondition());
+        if (updateProgress.isCanceled()) {
+          log(updateProgress, pass, " is canceled during apply, sorry");
+          return;
+        }
+        try (AccessToken ignored = ClientId.withClientId(ClientFileEditorManager.getClientId(fileEditor))) {
+          if (UIUtil.isShowing(fileEditor.getComponent())) {
+            pass.applyInformationToEditor();
+            repaintErrorStripeAndIcon(fileEditor);
+            if (pass instanceof TextEditorHighlightingPass text) {
+              text.markUpToDateIfStillValid();
+            }
+            log(updateProgress, pass, " Applied");
+          }
+        }
+        catch (ProcessCanceledException e) {
+          log(updateProgress, pass, "Error " + e);
+          throw e;
+        }
+        catch (RuntimeException e) {
+          VirtualFile virtualFile = fileEditor.getFile();
+          FileType fileType = virtualFile == null ? null : virtualFile.getFileType();
+          String message;
+
+          log(updateProgress, pass, (message = "Exception while applying information to " + fileEditor + "(" + fileType + ")") + e);
+          throw new RuntimeException(message, e);
+        }
+        if (threadsToStartCountdown.decrementAndGet() == 0) {
+          HighlightingSessionImpl.waitForAllSessionsHighlightInfosApplied(updateProgress);
+          if (LOG.isTraceEnabled()) {
+            VirtualFile virtualFile = fileEditor.getFile();
+            Document document = FileDocumentManager.getInstance().getDocument(virtualFile);
+            RangeHighlighter[] highlighters = document == null ? RangeHighlighter.EMPTY_ARRAY : DocumentMarkupModel.forDocument(document, myProject, true).getAllHighlighters();
+            List<RangeHighlighter> sorted = ContainerUtil.sorted(Arrays.asList(highlighters), Segment.BY_START_OFFSET_THEN_END_OFFSET);
+            log(updateProgress, pass, "result markup=" + StringUtil.join(sorted, h -> h.toString(), "\n   "));
+          }
+          log(updateProgress, pass, "Stopping. ");
+          updateProgress.stop();
+          clearStaleEntries();
+        }
+        else {
+          log(updateProgress, pass, "Finished but there are passes in the queue: " + threadsToStartCountdown.get());
+        }
+        callbackOnApplied.run();
+      }, updateProgress.getModalityState(), pass.getExpiredCondition());
+    }
+    catch (ProcessCanceledException ignored) {
+      // pass.getExpiredCondition() computation could throw PCE
+    }
   }
 
   private void clearStaleEntries() {
-    mySubmittedPasses.keySet().removeIf(pass -> pass.myUpdateProgress.isCanceled());
+    mySubmittedPasses.get().keySet().removeIf(pass -> pass.myUpdateProgress.isCanceled());
   }
 
   private void repaintErrorStripeAndIcon(@NotNull FileEditor fileEditor) {
@@ -547,7 +578,7 @@ final class PassExecutorService implements Disposable {
 
   @NotNull
   List<HighlightingPass> getAllSubmittedPasses() {
-    return ContainerUtil.mapNotNull(mySubmittedPasses.keySet(),
+    return ContainerUtil.mapNotNull(mySubmittedPasses.get().keySet(),
                                     scheduledPass -> scheduledPass.myUpdateProgress.isCanceled() ? null : scheduledPass.myPass);
   }
 
@@ -555,43 +586,30 @@ final class PassExecutorService implements Disposable {
     ContainerUtil.quickSort(result, Comparator.comparingInt(TextEditorHighlightingPass::getId));
   }
 
-  private static int getThreadNum() {
-    Matcher matcher = Pattern.compile("JobScheduler FJ pool (\\d*)/(\\d*)").matcher(Thread.currentThread().getName());
-    String num = matcher.matches() ? matcher.group(1) : null;
-    return StringUtil.parseInt(num, 0);
-  }
-
   static void log(ProgressIndicator progressIndicator, HighlightingPass pass, @NonNls Object @NotNull ... info) {
     if (LOG.isDebugEnabled()) {
       Document document = pass instanceof TextEditorHighlightingPass text ? text.getDocument() : null;
       CharSequence docText = document == null ? "" : ": '" + StringUtil.first(document.getCharsSequence(), 10, true)+ "'";
       synchronized (PassExecutorService.class) {
-        String infos = StringUtil.join(info, Functions.TO_STRING(), " ");
-        String message = StringUtil.repeatSymbol(' ', getThreadNum() * 4)
+        String message = StringUtil.repeatSymbol(' ', IdeaForkJoinWorkerThreadFactory.getThreadNum() * 4)
                          + " " + (pass == null ? "" : pass + " ")
-                         + infos
-                         + "; progress=" + (progressIndicator == null ? null : progressIndicator.hashCode())
-                         + " " + (progressIndicator == null ? "?" : progressIndicator.isCanceled() ? "X" : "V")
-                         + docText;
+                         + StringUtil.join(info, Functions.TO_STRING(), " ")
+                         + "; progress=" + (progressIndicator == null ? null : System.identityHashCode(progressIndicator))
+                         + (progressIndicator == null ? "?" : progressIndicator.isCanceled() ? "X" : "V")
+                         + (docText.isEmpty() ? "": " " + docText);
         LOG.debug(message);
       }
     }
   }
 
-  private static final Key<Throwable> THROWABLE_KEY = Key.create("THROWABLE_KEY");
-  static void saveException(@NotNull Throwable e, @NotNull DaemonProgressIndicator indicator) {
-    indicator.putUserDataIfAbsent(THROWABLE_KEY, e);
-  }
-  @TestOnly
-  static Throwable getSavedException(@NotNull DaemonProgressIndicator indicator) {
-    return indicator.getUserData(THROWABLE_KEY);
-  }
-
   // return true if terminated
   boolean waitFor(long millis) {
+    return waitFor(millis, mySubmittedPasses.get());
+  }
+  private boolean waitFor(long millis, @NotNull Map<? extends ScheduledPass, ? extends Job> map) {
     long deadline = System.currentTimeMillis() + millis;
     try {
-      for (Job<Void> job : mySubmittedPasses.values()) {
+      for (Job job : map.values()) {
         if (!job.waitForCompletion((int)(System.currentTimeMillis() - deadline))) {
           return false;
         }

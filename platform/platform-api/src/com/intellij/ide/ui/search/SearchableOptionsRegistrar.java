@@ -1,7 +1,6 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.ui.search;
 
-import com.intellij.DynamicBundle;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.options.Configurable;
 import com.intellij.openapi.options.ConfigurableGroup;
@@ -17,7 +16,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Set;
 
-public abstract class SearchableOptionsRegistrar{
+public abstract class SearchableOptionsRegistrar {
   public static final @NlsSafe String SETTINGS_GROUP_SEPARATOR = " | ";
   public static final String SEARCHABLE_OPTIONS_XML_NAME = "searchableOptions";
 
@@ -25,17 +24,19 @@ public abstract class SearchableOptionsRegistrar{
     return ApplicationManager.getApplication().getService(SearchableOptionsRegistrar.class);
   }
 
+  @ApiStatus.Internal
   public abstract @NotNull ConfigurableHit getConfigurables(@NotNull List<? extends ConfigurableGroup> groups,
                                                             DocumentEvent.EventType type,
                                                             @Nullable Set<? extends Configurable> configurables,
                                                             @NotNull String option,
                                                             @Nullable Project project);
 
-  public abstract @NotNull Set<String> getInnerPaths(SearchableConfigurable configurable, String option);
+  public abstract @NotNull Set<@NotNull String> getInnerPaths(SearchableConfigurable configurable, String option);
 
   /**
    * @deprecated Use {@link SearchableOptionContributor}
    */
+  @SuppressWarnings("unused")
   @Deprecated
   public void addOption(@NotNull String option, @Nullable String path, String hit, @NotNull String configurableId, String configurableDisplayName) {
   }
@@ -47,23 +48,6 @@ public abstract class SearchableOptionsRegistrar{
   public abstract @NotNull Set<String> getProcessedWordsWithoutStemming(@NotNull String text);
 
   public abstract Set<String> getProcessedWords(@NotNull String text);
-
-  @ApiStatus.Internal
-  public static String getSearchableOptionsXmlName() {
-    return getSearchableOptionsName() + ".xml";
-  }
-
-  @ApiStatus.Internal
-  public static String getSearchableOptionsName() {
-    String langTag = DynamicBundle.getLocale().toLanguageTag();
-    return SEARCHABLE_OPTIONS_XML_NAME + (langTag.equals("en") ? "" : "_" + langTag);
-  }
-
-  @ApiStatus.Internal
-  public static Set<String> getSearchableOptionsNames() {
-    String langTag = DynamicBundle.getLocale().toLanguageTag();
-    return (langTag.equals("en")) ? Set.of(SEARCHABLE_OPTIONS_XML_NAME) : Set.of(SEARCHABLE_OPTIONS_XML_NAME, SEARCHABLE_OPTIONS_XML_NAME + "_" + langTag);
-  }
 
   public interface AdditionalLocationProvider {
     /**

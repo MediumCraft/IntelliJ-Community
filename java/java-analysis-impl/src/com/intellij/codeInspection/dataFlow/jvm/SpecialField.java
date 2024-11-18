@@ -268,7 +268,7 @@ public enum SpecialField implements DerivedVariableDescriptor {
     @Override
     public boolean isMyQualifierType(DfType type) {
       TypeConstraint constraint = TypeConstraint.fromDfType(type);
-      return constraint.isEnum();
+      return constraint.isEnum() || constraint.isSubtypeOf(JAVA_LANG_ENUM);
     }
 
     @Override
@@ -323,6 +323,11 @@ public enum SpecialField implements DerivedVariableDescriptor {
   @Override
   public boolean isStable() {
     return myFinal;
+  }
+
+  @Override
+  public boolean isImplicitReadPossible() {
+    return true;
   }
 
   public abstract boolean isMyQualifierType(DfType type);

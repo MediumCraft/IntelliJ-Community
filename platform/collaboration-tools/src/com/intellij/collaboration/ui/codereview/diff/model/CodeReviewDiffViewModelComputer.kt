@@ -24,7 +24,7 @@ class CodeReviewDiffViewModelComputer<D> @ApiStatus.Experimental constructor(
   private val changesSorter: Flow<RefComparisonChangesSorter>,
   private val diffProducerFactory: (D, RefComparisonChange) -> CodeReviewDiffRequestProducer?
 ) {
-  // external usage
+  @Deprecated("Use a more simplified constructor instead")
   constructor(dataLoadingFlow: Flow<Deferred<D>>, diffProducerFactory: (D, RefComparisonChange) -> CodeReviewDiffRequestProducer?) :
     this(dataLoadingFlow.computationState(), flowOf(RefComparisonChangesSorter.None), diffProducerFactory)
 
@@ -32,6 +32,11 @@ class CodeReviewDiffViewModelComputer<D> @ApiStatus.Experimental constructor(
 
   suspend fun showChanges(selection: ChangesSelection) {
     changesRequests.emit(selection)
+  }
+
+  @ApiStatus.Internal
+  fun tryShowChanges(selection: ChangesSelection) {
+    changesRequests.tryEmit(selection)
   }
 
   val diffVm: Flow<ComputedResult<DiffProducersViewModel?>> =

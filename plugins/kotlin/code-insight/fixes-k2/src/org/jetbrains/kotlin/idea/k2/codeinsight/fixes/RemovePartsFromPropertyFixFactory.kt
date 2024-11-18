@@ -3,9 +3,11 @@ package org.jetbrains.kotlin.idea.k2.codeinsight.fixes
 
 import com.intellij.modcommand.ActionContext
 import com.intellij.modcommand.ModPsiUpdater
+import com.intellij.modcommand.Presentation
 import com.intellij.openapi.project.Project
 import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.fir.diagnostics.KaFirDiagnostic
+import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.codeinsight.api.applicable.intentions.KotlinPsiUpdateModCommandAction
 import org.jetbrains.kotlin.idea.codeinsight.api.applicators.fixes.KotlinQuickFixFactory
 import org.jetbrains.kotlin.idea.codeinsight.utils.RemovePartsFromPropertyUtils
@@ -36,8 +38,7 @@ internal object RemovePartsFromPropertyFixFactory {
         createQuickFix(diagnostic.psi)
     }
 
-    context(KaSession)
-    private fun createQuickFix(
+    private fun KaSession.createQuickFix(
         element: KtElement,
     ): List<RemovePartsFromPropertyFix> {
         val property = element.getParentOfType<KtProperty>(strict = false) ?: return emptyList()
@@ -60,8 +61,7 @@ internal object RemovePartsFromPropertyFixFactory {
         )
     }
 
-    context(KaSession)
-    private fun getTypeInfo(property: KtProperty): CallableReturnTypeUpdaterUtils.TypeInfo? {
+    private fun KaSession.getTypeInfo(property: KtProperty): CallableReturnTypeUpdaterUtils.TypeInfo? {
         if (property.hasInitializer() && property.initializer != null && property.typeReference == null) {
             return CallableReturnTypeUpdaterUtils.getTypeInfo(property)
         }
@@ -80,15 +80,20 @@ internal object RemovePartsFromPropertyFixFactory {
         elementContext: ElementContext,
     ) : KotlinPsiUpdateModCommandAction.ElementBased<KtProperty, ElementContext>(element, elementContext) {
 
-        override fun getFamilyName(): String = RemovePartsFromPropertyUtils.getFamilyName()
+        override fun getFamilyName(): String =
+            KotlinBundle.message("remove.parts.from.property")
 
-        override fun getActionName(
-            actionContext: ActionContext,
+        override fun getPresentation(
+            context: ActionContext,
             element: KtProperty,
-            elementContext: ElementContext,
-        ): String {
-            val (removeInitializer, removeGetter, removeSetter, _) = elementContext
-            return RemovePartsFromPropertyUtils.getActionName(removeInitializer, removeGetter, removeSetter)
+        ): Presentation {
+            val elementContext = getElementContext(context, element)
+            val actionName = RemovePartsFromPropertyUtils.getRemovePartsFromPropertyActionName(
+                removeInitializer = elementContext.removeInitializer,
+                removeGetter = elementContext.removeGetter,
+                removeSetter = elementContext.removeSetter,
+            )
+            return Presentation.of(actionName)
         }
 
         override fun invoke(
@@ -97,16 +102,16 @@ internal object RemovePartsFromPropertyFixFactory {
             elementContext: ElementContext,
             updater: ModPsiUpdater,
         ) {
-            if (elementContext.removeInitializer) {
-                removeInitializer(actionContext.project, element, elementContext, updater)
-            }
-
             if (elementContext.removeGetter) {
                 element.getter?.delete()
             }
 
             if (elementContext.removeSetter) {
                 element.setter?.delete()
+            }
+
+            if (elementContext.removeInitializer) {
+                removeInitializer(actionContext.project, element, elementContext, updater)
             }
         }
 
@@ -124,7 +129,6 @@ internal object RemovePartsFromPropertyFixFactory {
                 declaration = element,
                 typeInfo = elementContext.typeInfo,
                 project = project,
-                editor = null,
                 updater = updater,
             )
         }

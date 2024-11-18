@@ -94,8 +94,7 @@ public final class ImportGradleProjectCommand extends AbstractCommand {
     AsyncPromise<?> promise = new AsyncPromise<>();
     context.message("Waiting for current import resolve tasks", getLine());
     ApplicationManager.getApplication().executeOnPooledThread(() -> {
-      ExternalSystemProcessingManager processingManager =
-        ApplicationManager.getApplication().getService(ExternalSystemProcessingManager.class);
+      var processingManager = ExternalSystemProcessingManager.getInstance();
       while (processingManager.hasTaskOfTypeInProgress(ExternalSystemTaskType.RESOLVE_PROJECT, project)) {
         final Object lock = new Object();
         synchronized (lock) {
@@ -148,7 +147,10 @@ public final class ImportGradleProjectCommand extends AbstractCommand {
               if (!projectsPaths.contains(projectPath)) return;
               connection.disconnect();
               if (gradleProjectsToRefreshCount.decrementAndGet() == 0) {
-                ApplicationManager.getApplication().invokeLater(() -> promise.setResult(null));
+
+                ApplicationManager.getApplication().invokeLater(() -> {
+                  promise.setResult(null);
+                });
               }
             }
           });

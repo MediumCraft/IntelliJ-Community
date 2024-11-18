@@ -1,4 +1,5 @@
 import java.util.Map;
+import java.util.Set;
 import java.io.IOException;
 import java.util.function.IntFunction;
 import <info descr="Not resolved until the project is fully loaded">my</info>.<info descr="Not resolved until the project is fully loaded">unknown</info>.<info descr="Not resolved until the project is fully loaded">pkg</info>.<info descr="Not resolved until the project is fully loaded">Anno</info>;
@@ -11,7 +12,7 @@ import <info descr="Not resolved until the project is fully loaded">my</info>.<i
 
 public class Simple {
   int test() {
-    test().<error descr="Cannot call method because 'test()' has primitive type int">run</error>();
+    test().<error descr="Cannot call methods on 'int' type">run</error>();
     return 0;
   }
 
@@ -20,6 +21,12 @@ public class Simple {
     s.trim();
     s.<error descr="Cannot resolve method 'dream' in 'String'">dream</error>();
     System.out.println(s.<error descr="Cannot resolve symbol 'field'">field</error>);
+  }
+  
+  void callKnownCtor(<info descr="Not resolved until the project is fully loaded">Cls</info> cls) {
+    new IOException(cls);
+    // No three-arg ctor anyway
+    new IOException<error descr="Cannot resolve constructor 'IOException(Cls, Cls, Cls)'">(cls, cls, cls)</error>;
   }
   
   void testImports(<info descr="Not resolved until the project is fully loaded">Cls</info>.<info descr="Not resolved until the project is fully loaded">UnusedClass</info> inner) {
@@ -38,9 +45,9 @@ public class Simple {
   }
 
   void refsInUnresolvedClass(<info descr="Not resolved until the project is fully loaded">Cls</info> s) {
-    s.<info descr="Not resolved until the project is fully loaded">hashCode</info>();
-    s.<info descr="Not resolved until the project is fully loaded">dream</info>();
-    System.out.println(s.<info descr="Not resolved until the project is fully loaded">field</info>);
+    s.hashCode();
+    s.dream();
+    System.out.println(s.field);
     System.out.println(<info descr="Not resolved until the project is fully loaded">Cls</info>.<info descr="Not resolved until the project is fully loaded">STATIC</info>);
   }
 
@@ -82,13 +89,85 @@ public class Simple {
     if (<error descr="Inconvertible types; cannot cast 'java.lang.String' to 'Unknown'">s instanceof <info descr="Not resolved until the project is fully loaded">Unknown</info></error>) {}
   }
   
+  void testEquality(<info descr="Not resolved until the project is fully loaded">Unknown</info> u, <info descr="Not resolved until the project is fully loaded">Unknown2</info> u2,
+                    char c, boolean b) {
+    if (u == u2) {}
+    if (u != u2) {}
+    if (<error descr="Operator '==' cannot be applied to 'char', 'boolean'">c == b</error>) {}
+  }
+  
+  @<info descr="Not resolved until the project is fully loaded">Anno</info>(<info descr="Not resolved until the project is fully loaded">Cls</info>.<info descr="Not resolved until the project is fully loaded">CONST</info>)
+  void testAssign(<info descr="Not resolved until the project is fully loaded">Unknown</info> u) {
+    u.field = 2;
+  }
+  
   void callOnArray(<info descr="Not resolved until the project is fully loaded">Unknown</info> u) {
-    u.<info descr="Not resolved until the project is fully loaded">foo</info>()[0].<info descr="Not resolved until the project is fully loaded">blah</info>();
+    u.foo()[0].<info descr="Not resolved until the project is fully loaded">blah</info>();
+  }
+  
+  void initArray() {
+    <info descr="Not resolved until the project is fully loaded">Cls</info>[] array = {<info descr="Not resolved until the project is fully loaded">Cls</info>.<info descr="Not resolved until the project is fully loaded">createCls</info>()};
+  }
+  
+  void callOverloaded(Set<<info descr="Not resolved until the project is fully loaded">Cls</info>> mySet) {
+    overloaded(<info descr="Not resolved until the project is fully loaded">Cls</info>.<info descr="Not resolved until the project is fully loaded">getValue</info>());
+    mySet.toArray(<info descr="Not resolved until the project is fully loaded">Cls</info>.<info descr="Not resolved until the project is fully loaded">EMPTY_ARRAY</info>);
+  }
+  
+  void varTest() {
+    <info descr="null">var</info> x = <info descr="Not resolved until the project is fully loaded">Cls</info>.<info descr="Not resolved until the project is fully loaded">getSomething</info>();
+    x.getSomethingElse();
+    <info descr="null">var</info> y = x;
+    <info descr="null">var</info> z = y.getSomethingCompletelyDifferent();
+    z.getFromZ();
+    
+    <info descr="null">var</info> t = <error descr="Variable 't' might not have been initialized">t</error>;
+  }
+  
+  void overloaded(int x) {}
+  void overloaded(boolean x) {}
+  
+  void useInner() {
+    Clss.Inner cls = new Clss.Inner();
+    Clss.Inner[] result = (Clss.Inner[]) cls.<info descr="Not resolved until the project is fully loaded">toArray</info>(12);
+  }
+
+
+  void testThrow(<info descr="Not resolved until the project is fully loaded">Cls</info> cls) {
+    try {
+      cls.unknownM();
+    } catch (<info descr="Not resolved until the project is fully loaded">Cls</info> x) {
+
+    } catch (IOException | RuntimeException ex) {
+
+    }
+  }
+  
+  void testThrow2() {
+    try {
+      declaredUnknownException();
+    }
+    catch (<info descr="Not resolved until the project is fully loaded">Cls</info> x) {}
+  }
+  
+  void testThrow3() {
+    // We don't know whether Cls is checked or not
+    declaredUnknownException();
+  }
+  
+  void declaredUnknownException() throws <info descr="Not resolved until the project is fully loaded">Cls</info> {}
+  
+  void testConcat(<info descr="Not resolved until the project is fully loaded">Cls</info> cls) {
+    System.out.println("hello " + cls.getSomething() + "!!!");
   }
   
   static class Clss implements <info descr="Not resolved until the project is fully loaded">MyInterface</info> {
     void run() {
       <info descr="Not resolved until the project is fully loaded">foo</info>(<info descr="Not resolved until the project is fully loaded">bar</info>);
+    }
+    
+    static class Inner extends <info descr="Not resolved until the project is fully loaded">Cls</info> {
+      
     }
   }
 }

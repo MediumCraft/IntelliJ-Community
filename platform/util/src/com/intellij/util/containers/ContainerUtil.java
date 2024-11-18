@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.util.containers;
 
 import com.intellij.openapi.Disposable;
@@ -21,6 +21,7 @@ import java.util.stream.Stream;
  * @see CollectionFactory
  * @see com.intellij.concurrency.ConcurrentCollectionFactory
  */
+@SuppressWarnings("UnstableApiUsage")
 public final class ContainerUtil {
   private static final int INSERTION_SORT_THRESHOLD = 10;
 
@@ -391,7 +392,7 @@ public final class ContainerUtil {
     Map<K, V> result = new HashMap<>(map.size() + map2.size());
     result.putAll(map);
     result.putAll(map2);
-    return result;
+    return result.isEmpty() ? Collections.emptyMap() : result;
   }
 
   @Contract(pure = true)
@@ -404,7 +405,7 @@ public final class ContainerUtil {
     Set<T> result = new HashSet<>(set.size() + set2.size());
     result.addAll(set);
     result.addAll(set2);
-    return result;
+    return result.isEmpty() ? Collections.emptySet() : result;
   }
 
   /**
@@ -719,7 +720,7 @@ public final class ContainerUtil {
                                                                     boolean mergeEqualItems) {
     List<T> result = new ArrayList<>(list1.size() + list2.size());
     processSortedListsInOrder(list1, list2, comparator, mergeEqualItems, (t, __) -> result.add(t));
-    return result;
+    return result.isEmpty() ? emptyList() : result;
   }
 
   @Contract(pure = true)
@@ -1369,8 +1370,8 @@ public final class ContainerUtil {
   @SafeVarargs
   @Contract(pure = true)
   public static @Unmodifiable @NotNull <T> List<T> append(@NotNull List<? extends T> list, T @NotNull ... values) {
-    //noinspection unchecked
     if (values.length == 0) {
+      //noinspection unchecked
       return (List<T>)list;
     }
 
@@ -1394,8 +1395,8 @@ public final class ContainerUtil {
   @SafeVarargs
   @Contract(pure = true)
   public static @Unmodifiable @NotNull <T> List<T> prepend(@NotNull List<? extends T> list, T @NotNull ... values) {
-    //noinspection unchecked
     if (values.length == 0) {
+      //noinspection unchecked
       return (List<T>)list;
     }
     return new AbstractList<T>() {
@@ -1534,6 +1535,7 @@ public final class ContainerUtil {
   @Contract(pure = true)
   public static @Unmodifiable @NotNull <T> List<T> concat(@NotNull List<? extends T> @NotNull ... lists) {
     if (lists.length == 1) {
+      //noinspection unchecked
       return (List<T>)lists[0];
     }
     int size = 0;
@@ -2384,11 +2386,12 @@ public final class ContainerUtil {
    * Processes the list, remove all duplicates and return the list with unique elements.
    * @param list must be sorted (according to the comparator), all elements must be not-null
    */
-  public static @Unmodifiable @NotNull <T> List<? extends T> removeDuplicatesFromSorted(@NotNull List<? extends T> list, @NotNull Comparator<? super T> comparator) {
+  public static @NotNull <T> List<? extends @NotNull T> removeDuplicatesFromSorted(@NotNull List<? extends @NotNull T> list, @NotNull Comparator<? super T> comparator) {
     T prev = null;
-    List<T> result = null;
+    List<@NotNull T> result = null;
     for (int i = 0; i < list.size(); i++) {
       T t = list.get(i);
+      //noinspection ConstantValue
       if (t == null) {
         throw new IllegalArgumentException("get(" + i + ") = null");
       }
@@ -2407,7 +2410,7 @@ public final class ContainerUtil {
       }
       prev = t;
     }
-    return result == null ? list : Collections.unmodifiableList(result);
+    return result == null ? list : result;
   }
 
   /**
@@ -2419,12 +2422,14 @@ public final class ContainerUtil {
     for (Collection<? extends E> list : collections) {
       totalSize += list.size();
     }
+    if (totalSize == 0) return emptyList();
+
     List<E> result = new ArrayList<>(totalSize);
     for (Collection<? extends E> list : collections) {
       result.addAll(list);
     }
 
-    return result.isEmpty() ? emptyList() : result;
+    return result;
   }
 
   /**
@@ -2792,7 +2797,7 @@ public final class ContainerUtil {
   }
 
   @Contract(mutates = "param1")
-  public static <T> T @NotNull [] copyAndClear(@NotNull Collection<? extends T> collection, @NotNull ArrayFactory<? extends T> factory, boolean clear) {
+  public static <T> T @NotNull [] copyAndClear(@NotNull Collection<T> collection, @NotNull ArrayFactory<? extends T> factory, boolean clear) {
     int size = collection.size();
     T[] a = factory.create(size);
     if (size > 0) {

@@ -3,10 +3,10 @@ package org.jetbrains.kotlin.idea.k2.codeinsight.fixes
 
 import com.intellij.modcommand.ActionContext
 import com.intellij.modcommand.ModPsiUpdater
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
+import com.intellij.modcommand.Presentation
 import org.jetbrains.kotlin.analysis.api.fir.diagnostics.KaFirDiagnostic
-import org.jetbrains.kotlin.analysis.api.types.KtType
-import org.jetbrains.kotlin.analysis.api.types.KtUsualClassType
+import org.jetbrains.kotlin.analysis.api.types.KaType
+import org.jetbrains.kotlin.analysis.api.types.KaUsualClassType
 import org.jetbrains.kotlin.builtins.StandardNames.FqNames.arrayClassFqNameToPrimitiveType
 import org.jetbrains.kotlin.idea.base.analysis.api.utils.shortenReferences
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
@@ -29,13 +29,16 @@ object SurroundWithArrayOfWithSpreadOperatorInFunctionFixFactory {
         elementContext: ElementContext,
     ) : KotlinPsiUpdateModCommandAction.ElementBased<KtExpression, ElementContext>(element, elementContext) {
 
-        override fun getFamilyName(): String = KotlinBundle.message("surround.with.array.of")
+        override fun getFamilyName(): String =
+            KotlinBundle.message("surround.with.array.of")
 
-        override fun getActionName(
-            actionContext: ActionContext,
+        override fun getPresentation(
+            context: ActionContext,
             element: KtExpression,
-            elementContext: ElementContext,
-        ): String = KotlinBundle.getMessage("surround.with.0", elementContext.shortArrayOfCall)
+        ): Presentation {
+            val (_, shortArrayOfCall) = getElementContext(context, element)
+            return Presentation.of(KotlinBundle.getMessage("surround.with.0", shortArrayOfCall))
+        }
 
         override fun invoke(
             actionContext: ActionContext,
@@ -72,12 +75,11 @@ object SurroundWithArrayOfWithSpreadOperatorInFunctionFixFactory {
             createFix(diagnostic.expectedArrayType, diagnostic.psi)
         }
 
-    context(KtAnalysisSession)
     private fun createFix(
-        expectedArrayType: KtType,
+        expectedArrayType: KaType,
         element: KtExpression,
     ): List<SurroundWithArrayModCommandAction> {
-        val arrayClassId = (expectedArrayType as? KtUsualClassType)?.classId
+        val arrayClassId = (expectedArrayType as? KaUsualClassType)?.classId
         val primitiveType = arrayClassFqNameToPrimitiveType[arrayClassId?.asSingleFqName()?.toUnsafe()]
         val arrayOfCallName = ArrayFqNames.PRIMITIVE_TYPE_TO_ARRAY[primitiveType] ?: ArrayFqNames.ARRAY_OF_FUNCTION
 

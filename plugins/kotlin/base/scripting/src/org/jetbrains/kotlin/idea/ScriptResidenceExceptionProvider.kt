@@ -27,7 +27,7 @@ open class ScriptResidenceExceptionProvider(
         if (supportedUnderSourceRoot) isSupportedScriptExtension(virtualFile) else false
 }
 
-private val scriptResidenceExceptionProviders = listOf(
+private val scriptResidenceExceptionProviders: List<ScriptResidenceExceptionProvider> = listOf(
     ScriptResidenceExceptionProvider(".gradle.kts", true),
     ScriptResidenceExceptionProvider(".main.kts"),
     ScriptResidenceExceptionProvider(".space.kts"),
@@ -65,6 +65,12 @@ fun LanguageFeature.isEnabled(module: Module?, project: Project): Boolean {
 fun compilerAllowsAnyScriptsInSourceRoots(project: Project): Boolean {
     val additionalSettings = KotlinCompilerSettings.getInstance(project).settings
     return additionalSettings.additionalArguments.contains("-Xallow-any-scripts-in-source-roots")
+}
+
+@ApiStatus.Internal
+fun VirtualFile.isRunnableKotlinScript(project: Project): Boolean {
+    if (nameSequence.endsWith(".gradle.kts")) return false
+    return isStandaloneKotlinScript(project)
 }
 
 @ApiStatus.Internal

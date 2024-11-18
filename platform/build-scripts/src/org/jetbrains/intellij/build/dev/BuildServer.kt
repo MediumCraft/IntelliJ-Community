@@ -3,13 +3,17 @@
 
 package org.jetbrains.intellij.build.dev
 
-import com.intellij.platform.diagnostic.telemetry.helpers.useWithScope
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import org.jetbrains.intellij.build.*
+import org.jetbrains.intellij.build.BuildOptions
+import org.jetbrains.intellij.build.JvmArchitecture
+import org.jetbrains.intellij.build.VmProperties
+import org.jetbrains.intellij.build.closeKtorClient
+import org.jetbrains.intellij.build.telemetry.TraceManager
+import org.jetbrains.intellij.build.telemetry.use
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.*
@@ -46,7 +50,8 @@ fun getIdeSystemProperties(runDir: Path): VmProperties {
       // require bundled JNA dispatcher lib
       "jna.nosys" to "true",
       "jna.noclasspath" to "true",
-      "jb.vmOptionsFile" to "${Files.newDirectoryStream(runDir.parent, "*.vmoptions").use { it.singleOrNull() }}"
+      "jb.vmOptionsFile" to "${Files.newDirectoryStream(runDir.resolve("bin"), "*.vmoptions").use { it.single() }}",
+      "compose.swing.render.on.graphics" to "true",
     )
   )
   return VmProperties(result)
@@ -54,14 +59,17 @@ fun getIdeSystemProperties(runDir: Path): VmProperties {
 
 /** Returns IDE installation directory */
 suspend fun buildProductInProcess(request: BuildRequest): Path {
-  return TraceManager.spanBuilder("build ide").setAttribute("request", request.toString()).useWithScope {
+  if (request.tracer != null) {
+    TraceManager.setTracer(request.tracer)
+  }
+  return TraceManager.spanBuilder("build ide").setAttribute("request", request.toString()).use {
     try {
       buildProduct(
         request = request,
-        createProductProperties = {
+        createProductProperties = { compilationContext ->
           val configuration = createConfiguration(homePath = request.projectDir, productionClassOutput = request.productionClassOutput)
           val productConfiguration = getProductConfiguration(configuration, request.platformPrefix)
-          createProductProperties(productConfiguration = productConfiguration, request = request)
+          createProductProperties(productConfiguration = productConfiguration, compilationContext = compilationContext, request = request)
         },
       )
     }
@@ -86,7 +94,7 @@ private fun createConfiguration(productionClassOutput: Path, homePath: Path): Co
   return Json.decodeFromString(Configuration.serializer(), Files.readString(projectPropertiesPath))
 }
 
-private fun getProductPropertiesPath(homePath: Path): Path {
+internal fun getProductPropertiesPath(homePath: Path): Path {
   // handle a custom product properties path
   val customPath = System.getProperty(CUSTOM_PRODUCT_PROPERTIES_PATH)?.let { homePath.resolve(it) }
   if (customPath != null && Files.exists(customPath)) {

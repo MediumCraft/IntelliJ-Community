@@ -11,16 +11,18 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.InvalidDataException;
 import com.intellij.openapi.vfs.VirtualFile;
 import org.jdom.Element;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 /**
  * Imports Intellij IDEA color scheme (.icls) to application configuration
  */
+@ApiStatus.Internal
 public final class ColorSchemeImporter implements SchemeImporter<EditorColorsScheme> {
 
   private static final String[] FILE_EXTENSIONS =
-    new String[] {EditorColorsManager.COLOR_SCHEME_FILE_EXTENSION.substring(1), "jar"};
+    new String[] {EditorColorsManager.getColorSchemeFileExtension().substring(1), "jar"};
 
   @Override
   public String @NotNull [] getSourceExtensions() {

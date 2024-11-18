@@ -18,6 +18,7 @@ import com.jetbrains.jsonSchema.extension.JsonSchemaProjectSelfProviderFactory;
 import com.jetbrains.jsonSchema.ide.JsonSchemaService;
 import com.jetbrains.jsonSchema.impl.inspections.JsonSchemaComplianceInspection;
 import com.jetbrains.jsonSchema.impl.light.legacy.JsonSchemaObjectReadingUtils;
+import com.jetbrains.jsonSchema.impl.light.nodes.JsonSchemaReader2;
 import org.jetbrains.annotations.NotNull;
 import org.junit.Assert;
 
@@ -27,7 +28,11 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
+
+import static com.jetbrains.jsonSchema.impl.JsonSchemaTraversalUtilsKt.getChildAsText;
 
 public class JsonSchemaReadTest extends BasePlatformTestCase {
   @NotNull
@@ -57,9 +62,11 @@ public class JsonSchemaReadTest extends BasePlatformTestCase {
 
   public void testMainSchemaHighlighting() {
     final JsonSchemaService service = JsonSchemaService.Impl.get(getProject());
+    var versionsToTest = Stream.of(JsonSchemaVersion.SCHEMA_4, JsonSchemaVersion.SCHEMA_6, JsonSchemaVersion.SCHEMA_7).collect(Collectors.toSet());
     final List<JsonSchemaFileProvider> providers = new JsonSchemaProjectSelfProviderFactory().getProviders(getProject());
-    Assert.assertEquals(JsonSchemaProjectSelfProviderFactory.TOTAL_PROVIDERS, providers.size());
     for (JsonSchemaFileProvider provider: providers) {
+      if (!versionsToTest.contains(provider.getSchemaVersion())) continue;
+
       final VirtualFile mainSchema = provider.getSchemaFile();
       assertNotNull(mainSchema);
       assertTrue(service.isSchemaFile(mainSchema));
@@ -127,6 +134,22 @@ public class JsonSchemaReadTest extends BasePlatformTestCase {
 
   public void testReadSchemaWithWrongItems() throws Exception {
     doTestSchemaReadNotHung(new File(PlatformTestUtil.getCommunityPath(), "json/tests/testData/jsonSchema/WithWrongItems.json"));
+  }
+
+  public void testReadNestedSchemaObject() {
+    var schemaPsi = myFixture.configureByText("testSchemaReading.json", """
+      { "foo": {"bar": "hello there"}}
+    """);
+
+    var root = new JsonSchemaReader(schemaPsi.getVirtualFile()).read(schemaPsi);
+    var existingNodeText = getChildAsText(root, "foo", "bar");
+    Assert.assertEquals("hello there", existingNodeText);
+
+    var missingNodeText = getChildAsText(root, "foo", "buz");
+    Assert.assertNull(missingNodeText);
+
+    var nonTextualNode = getChildAsText(root);
+    Assert.assertNull(nonTextualNode);
   }
 
   private void doTestSchemaReadNotHung(final File file) throws Exception {

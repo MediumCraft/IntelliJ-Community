@@ -172,10 +172,6 @@ public final class Mock {
     }
 
     @Override
-    public void unsplitWindow() {
-    }
-
-    @Override
     public void unsplitAllWindow() {
     }
 
@@ -271,11 +267,6 @@ public final class Mock {
 
     @Override
     public boolean canOpenFile(@NotNull VirtualFile file) {
-      return false;
-    }
-
-    @Override
-    public @Nullable Object canOpenFileAsync(@NotNull VirtualFile file, @NotNull Continuation<? super Boolean> $completion) {
       return false;
     }
 

@@ -11,10 +11,12 @@ import com.intellij.psi.search.searches.IndexPatternSearch;
 import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.util.CommonProcessors;
 import com.intellij.util.Processor;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.*;
 
+@ApiStatus.Internal
 public class PsiTodoSearchHelperImpl implements PsiTodoSearchHelper {
 
   private final Project myProject;
@@ -44,8 +46,9 @@ public class PsiTodoSearchHelperImpl implements PsiTodoSearchHelper {
   public TodoItem @NotNull [] findTodoItems(@NotNull PsiFile file, int startOffset, int endOffset) {
     List<TodoItem> occurrences = new ArrayList<>();
     TodoItemCreator todoItemCreator = new TodoItemCreator();
+    boolean multiLine = TodoConfiguration.getInstance().isMultiLine();
     for (IndexPatternProvider provider : IndexPatternProvider.EP_NAME.getExtensionList()) {
-      IndexPatternSearch.search(file, provider, TodoConfiguration.getInstance().isMultiLine()).forEach(occurrence -> {
+      IndexPatternSearch.search(file, provider, startOffset, endOffset, multiLine).forEach(occurrence -> {
         if (occurrence.getTextRange().intersects(startOffset, endOffset)) {
           occurrences.add(todoItemCreator.createTodo(occurrence));
         }

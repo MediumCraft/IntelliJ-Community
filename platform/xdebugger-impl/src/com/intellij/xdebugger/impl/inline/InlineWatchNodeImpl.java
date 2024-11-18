@@ -1,4 +1,4 @@
-// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.xdebugger.impl.inline;
 
 import com.intellij.icons.AllIcons;
@@ -18,9 +18,9 @@ import com.intellij.xdebugger.impl.frame.XDebugView;
 import com.intellij.xdebugger.impl.ui.XDebuggerUIConstants;
 import com.intellij.xdebugger.impl.ui.XValueTextProvider;
 import com.intellij.xdebugger.impl.ui.tree.XDebuggerTree;
-import com.intellij.xdebugger.impl.ui.tree.nodes.WatchNodeImpl;
-import com.intellij.xdebugger.impl.ui.tree.nodes.XDebuggerTreeNode;
-import com.intellij.xdebugger.impl.ui.tree.nodes.XEvaluationCallbackBase;
+import com.intellij.xdebugger.impl.ui.tree.nodes.*;
+import com.intellij.xdebugger.settings.XDebuggerSettingsManager;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -28,6 +28,7 @@ import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.List;
 
+@ApiStatus.Internal
 public class InlineWatchNodeImpl extends WatchNodeImpl implements InlineWatchNode {
   private final InlineWatch myWatch;
   private final List<Inlay<InlineDebugRenderer>> myInlays = new ArrayList<>();
@@ -82,6 +83,16 @@ public class InlineWatchNodeImpl extends WatchNodeImpl implements InlineWatchNod
         event.consume();
       }
     };
+  }
+
+  @Override
+  public @NotNull XEvaluationOrigin getEvaluationOrigin() {
+    return XEvaluationOrigin.INLINE_WATCH;
+  }
+
+  @Override
+  protected boolean shouldUpdateInlineDebuggerData() {
+    return XDebuggerSettingsManager.getInstance().getDataViewSettings().isShowValuesInline();
   }
 
   private static class XInlineWatchValue extends XNamedValue implements XValueTextProvider {
@@ -150,7 +161,7 @@ public class InlineWatchNodeImpl extends WatchNodeImpl implements InlineWatchNod
              ((XValueTextProvider)myValue).shouldShowTextValue();
     }
 
-    private class MyEvaluationCallback extends XEvaluationCallbackBase implements Obsolescent {
+    private class MyEvaluationCallback extends XEvaluationCallbackBase implements XEvaluationCallbackWithOrigin, Obsolescent {
       @NotNull private final XValueNode myNode;
       @NotNull private final XValuePlace myPlace;
 
@@ -173,6 +184,14 @@ public class InlineWatchNodeImpl extends WatchNodeImpl implements InlineWatchNod
       @Override
       public void errorOccurred(@NotNull String errorMessage) {
         myNode.setPresentation(XDebuggerUIConstants.ERROR_MESSAGE_ICON, new XErrorValuePresentation(errorMessage), false);
+      }
+
+      @Override
+      public XEvaluationOrigin getOrigin() {
+        if (myNode instanceof WatchNodeImpl watchNode) {
+          return watchNode.getEvaluationOrigin();
+        }
+        return XEvaluationOrigin.UNSPECIFIED_WATCH;
       }
     }
 

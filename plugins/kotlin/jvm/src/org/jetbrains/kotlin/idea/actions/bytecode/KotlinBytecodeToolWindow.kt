@@ -17,19 +17,17 @@ import com.intellij.openapi.util.Computable
 import com.intellij.openapi.util.NlsSafe
 import com.intellij.openapi.util.text.StringUtil
 import com.intellij.openapi.wm.ToolWindow
+import com.intellij.psi.PsiFile
 import com.intellij.ui.JBColor
 import com.intellij.util.Alarm
 import com.intellij.util.ui.JBUI
 import org.jetbrains.annotations.ApiStatus
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
+import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
+import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.analyze
-import org.jetbrains.kotlin.analysis.api.components.KaCompilationResult
-import org.jetbrains.kotlin.analysis.api.components.KtCompiledFile
-import org.jetbrains.kotlin.analysis.api.components.KaCompilerTarget
-import org.jetbrains.kotlin.analysis.api.components.isClassFile
+import org.jetbrains.kotlin.analysis.api.components.*
 import org.jetbrains.kotlin.analysis.api.descriptors.components.STUB_UNBOUND_IR_SYMBOLS
-import org.jetbrains.kotlin.analysis.api.diagnostics.KtDiagnosticWithPsi
-import org.jetbrains.kotlin.codegen.ClassBuilderFactories
+import org.jetbrains.kotlin.analysis.api.diagnostics.KaDiagnosticWithPsi
 import org.jetbrains.kotlin.config.*
 import org.jetbrains.kotlin.idea.KotlinJvmBundle
 import org.jetbrains.kotlin.idea.base.codeInsight.compiler.KotlinCompilerIdeAllowedErrorFilter
@@ -128,7 +126,6 @@ class KotlinBytecodeToolWindow(
             }
 
             configuration.put(JVMConfigurationKeys.JVM_TARGET, JvmTarget.fromString(jvmTargets.selectedItem as String)!!)
-            configuration.put(JVMConfigurationKeys.IR, true)
 
             configuration.languageVersionSettings = ktFile.languageVersionSettings
 
@@ -283,6 +280,7 @@ class KotlinBytecodeToolWindow(
                 "No Kotlin source file is opened.\n" +
                 "*/"
 
+        @OptIn(KaExperimentalApi::class)
         fun getBytecodeForFile(
             ktFile: KtFile,
             configuration: CompilerConfiguration,
@@ -328,7 +326,7 @@ class KotlinBytecodeToolWindow(
                         writer.append("// ================\n")
                         for (error in diagnostics) {
                             writer.append("// Error")
-                            if (error is KtDiagnosticWithPsi<*>) {
+                            if (error is KaDiagnosticWithPsi<*>) {
                                 writer.append(" at ")
                                 writer.append(error.psi.containingFile.name)
                                 error.textRanges.joinTo(writer)
@@ -348,7 +346,7 @@ class KotlinBytecodeToolWindow(
         /**
          * Returns a list of class files from [outputFiles] that should be shown to the user.
          *
-         * An [KtCompiledFile] is linked to its source [KtFile] via [KtCompiledFile.sourceFiles].
+         * An [KaCompiledFile] is linked to its source [KtFile] via [KaCompiledFile.sourceFiles].
          * However, all source files are physical, while a [KtFile] might not necessarily be physical.
          * As a fallback for non-physical [KtFile]s, [classFileOrigins] are instead used to map the class file name to the original [KtFile].
          * [classFileOrigins] cannot be used on their own, because some class files are generated without an originating PSI file
@@ -356,11 +354,12 @@ class KotlinBytecodeToolWindow(
          *
          * If this approach for some reason filters out all output files, the full list is returned defensively.
          */
+        @KaExperimentalApi
         private fun getRelevantClassFiles(
             ktFile: KtFile,
-            outputFiles: List<KtCompiledFile>,
+            outputFiles: List<KaCompiledFile>,
             classFileOrigins: ClassFileOrigins
-        ): List<KtCompiledFile> {
+        ): List<KaCompiledFile> {
             val classFiles = outputFiles.filter { it.isClassFile }
             val sourceFile = File(ktFile.virtualFile.path)
 
@@ -369,8 +368,9 @@ class KotlinBytecodeToolWindow(
                 .ifEmpty { classFiles }
         }
 
+        @KaExperimentalApi
         @ApiStatus.Internal
-        fun KtAnalysisSession.compileSingleFile(
+        fun KaSession.compileSingleFile(
             ktFile: KtFile,
             configuration: CompilerConfiguration
         ): Pair<KaCompilationResult, ClassFileOrigins>? {
@@ -380,13 +380,17 @@ class KotlinBytecodeToolWindow(
                     put(STUB_UNBOUND_IR_SYMBOLS, true)
                 }
 
-            val builderFactory = OriginTracingClassBuilderFactory(ClassBuilderFactories.TEST)
-            val compilerTarget = KaCompilerTarget.Jvm(builderFactory)
+            val classFileOrigins = mutableMapOf<String, MutableSet<PsiFile>>()
+            val compilerTarget = KaCompilerTarget.Jvm(isTestMode = true) { file, className ->
+                if (file != null) {
+                    classFileOrigins.computeIfAbsent("$className.class") { _ -> mutableSetOf() }.add(file)
+                }
+            }
             val allowedErrorFilter = KotlinCompilerIdeAllowedErrorFilter.getInstance()
 
             try {
                 val result = compile(ktFile, effectiveConfiguration, compilerTarget, allowedErrorFilter)
-                return Pair(result, builderFactory.classFileOrigins)
+                return Pair(result, classFileOrigins)
             } catch (e: ProcessCanceledException) {
                 throw e
             } catch (e: Throwable) {
@@ -502,3 +506,11 @@ private class TextifierWithOffsets(val offsetFn: () -> Int) : Textifier(Opcodes.
         return TextifierWithOffsets(offsetFn)
     }
 }
+
+/**
+ * Maps the file name of each generated class (e.g. `com/example/MyClass.class`) to the [PsiFile] it originated from.
+ *
+ * The map will not include entries for class files which are generated with [JvmDeclarationOrigin.NO_ORIGIN] and thus have no containing
+ * [PsiFile]. For example, inlined anonymous objects generated by the IR backend have no declaration origin.
+ */
+private typealias ClassFileOrigins = Map<String, Set<PsiFile>>

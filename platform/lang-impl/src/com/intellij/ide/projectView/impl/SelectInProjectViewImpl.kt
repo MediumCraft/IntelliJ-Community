@@ -1,16 +1,15 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.projectView.impl
 
 import com.intellij.codeWithMe.ClientId
 import com.intellij.ide.*
 import com.intellij.ide.projectView.ProjectView
 import com.intellij.ide.scopeView.ScopeViewPane
-import com.intellij.openapi.application.EDT
-import com.intellij.openapi.application.ReadConstraint
-import com.intellij.openapi.application.constrainedReadAction
-import com.intellij.openapi.application.readAction
+import com.intellij.openapi.application.*
 import com.intellij.openapi.components.Service
+import com.intellij.openapi.components.serviceAsync
 import com.intellij.openapi.components.serviceOrNull
+import com.intellij.openapi.diagnostic.debug
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.fileEditor.FileEditor
@@ -125,7 +124,7 @@ internal class SelectInProjectViewImpl(
   }
 
   private suspend fun allEditors(): List<FileEditor> = withContext(Dispatchers.EDT) {
-    val fileEditorManager = FileEditorManager.getInstance(project)
+    val fileEditorManager = project.serviceAsync<FileEditorManager>()
     val result = mutableListOf<FileEditor?>()
     result.add(fileEditorManager.selectedEditor)
     result.addAll(fileEditorManager.selectedEditors)
@@ -288,19 +287,13 @@ internal class SelectInProjectViewImpl(
   }
 
   private suspend fun doSelectInAnyTarget(context: SelectInContext, targets: Collection<SelectInTarget>, requestFocus: Boolean) {
-    if (LOG.isDebugEnabled) {
-      LOG.debug("doSelectInAnyTarget: context=$context, targets=$targets, requestFocus=$requestFocus")
-    }
+    LOG.debug { "doSelectInAnyTarget: context=$context, targets=$targets, requestFocus=$requestFocus" }
     for (target in targets) {
       val canSelect = readAction { target.canSelect(context) }
-      if (LOG.isDebugEnabled) {
-        LOG.debug("${if (canSelect) "Can" else "Can NOT"} select $context in $target")
-      }
+      LOG.debug { "${if (canSelect) "Can" else "Can NOT"} select $context in $target" }
       if (canSelect) {
         withContext(Dispatchers.EDT) {
-          if (LOG.isDebugEnabled) {
-            LOG.debug("Selecting $context in $target")
-          }
+          LOG.debug { "Selecting $context in $target" }
           target.selectIn(context, requestFocus)
         }
         return
@@ -382,7 +375,7 @@ private class EditorSelectInContext(
           LOG.debug("Not selecting anything because the editor is disposed")
           break
         }
-        val offset = editor.caretModel.offset
+        val offset = writeIntentReadAction { editor.caretModel.offset }
         if (LOG.isDebugEnabled) {
           LOG.debug("Looking for the element at offset $offset")
         }
@@ -395,7 +388,8 @@ private class EditorSelectInContext(
         if (LOG.isDebugEnabled) {
           LOG.debug("The element is $element")
         }
-        if (editor.caretModel.offset == offset && PsiDocumentManager.getInstance(project).isCommitted(editor.document)) {
+        val newOffset = writeIntentReadAction { editor.caretModel.offset }
+        if (newOffset == offset && PsiDocumentManager.getInstance(project).isCommitted(editor.document)) {
           super.selectInCurrentTarget(requestFocus)
           break
         }
@@ -422,4 +416,4 @@ private fun <T : Editor> T.nullIfDisposed(): T? = if (isDisposed) null else this
 private fun <T : VirtualFile> T.nullIfInvalid(): T? = if (isValid) this else null
 private val PsiElement.virtualFile: VirtualFile? get() = PsiUtilCore.getVirtualFile(this)
 
-internal val LOG = logger<SelectInProjectViewImpl>()
+private val LOG = logger<SelectInProjectViewImpl>()

@@ -5,13 +5,16 @@ import com.intellij.codeWithMe.ClientId
 import com.intellij.concurrency.resetThreadContext
 import com.intellij.ide.IdeEventQueue
 import com.intellij.ide.consumeUnrelatedEvent
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.application.asContextElement
+import com.intellij.openapi.application.ex.ApplicationManagerEx
 import com.intellij.openapi.application.impl.JobProvider
 import com.intellij.openapi.application.impl.RawSwingDispatcher
 import com.intellij.openapi.application.impl.inModalContext
 import com.intellij.openapi.application.isModalAwareContext
 import com.intellij.openapi.diagnostic.logger
+import com.intellij.openapi.diagnostic.trace
 import com.intellij.openapi.progress.*
 import com.intellij.openapi.progress.util.*
 import com.intellij.openapi.progress.util.ProgressIndicatorWithDelayedPresentation.DEFAULT_PROGRESS_DIALOG_POSTPONE_TIME_MILLIS
@@ -20,26 +23,35 @@ import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.impl.DialogWrapperPeerImpl.isHeadlessEnv
 import com.intellij.openapi.util.EmptyRunnable
 import com.intellij.openapi.util.NlsContexts.ProgressTitle
+import com.intellij.openapi.util.registry.Registry
 import com.intellij.openapi.wm.ex.IdeFrameEx
 import com.intellij.openapi.wm.ex.ProgressIndicatorEx
-import com.intellij.openapi.wm.ex.StatusBarEx
 import com.intellij.openapi.wm.ex.WindowManagerEx
+import com.intellij.openapi.wm.impl.status.IdeStatusBarImpl
 import com.intellij.platform.diagnostic.telemetry.TelemetryManager
-import com.intellij.platform.diagnostic.telemetry.helpers.useWithoutActiveScope
 import com.intellij.platform.ide.progress.*
+import com.intellij.platform.kernel.withKernel
 import com.intellij.platform.util.coroutines.flow.throttle
+import com.intellij.platform.util.progress.ProgressPipe
 import com.intellij.platform.util.progress.ProgressState
 import com.intellij.platform.util.progress.createProgressPipe
 import com.intellij.util.awaitCancellationAndInvoke
+import fleet.kernel.rete.collect
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import org.jetbrains.annotations.ApiStatus.Internal
 import java.awt.*
+import java.io.Closeable
 import javax.swing.JFrame
 import javax.swing.SwingUtilities
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.coroutines.coroutineContext
+
+internal val isRhizomeProgressEnabled
+  get() = Registry.`is`("rhizome.progress")
+
+private val LOG = logger<PlatformTaskSupport>()
 
 @Internal
 class PlatformTaskSupport(private val cs: CoroutineScope) : TaskSupport {
@@ -74,11 +86,82 @@ class PlatformTaskSupport(private val cs: CoroutineScope) : TaskSupport {
     cancellation: TaskCancellation,
     action: suspend CoroutineScope.() -> T
   ): T = coroutineScope {
+    if (!isRhizomeProgressEnabled) {
+      return@coroutineScope withBackgroundProgressInternalOld(project, title, cancellation, action)
+    }
+
+    LOG.trace { "Task received: title=$title, project=$project" }
+
+    val context = currentCoroutineContext()
+    val taskStorage = TaskStorage.getInstance()
+
+    val pipe = cs.createProgressPipe()
+
+    val taskInfoEntity = taskStorage.addTask(project, title, cancellation)
+    val entityId = taskInfoEntity.eid
+    LOG.trace { "Task added to storage: entityId=$entityId, title=$title" }
+
+    try {
+      cs.subscribeToTask(taskInfoEntity, context, pipe).use {
+        pipe.collectProgressUpdates(action)
+      }
+    }
+    finally {
+      LOG.trace { "Task finished: entityId=$entityId, title=$title" }
+      cs.launch {
+        taskStorage.removeTask(taskInfoEntity)
+        LOG.trace { "Task removed from storage: entityId=$entityId, title=$title" }
+      }
+    }
+  }
+
+  private fun CoroutineScope.subscribeToTask(taskInfo: TaskInfoEntity, taskContext: CoroutineContext, pipe: ProgressPipe): Closeable {
+    val jobs = listOf(
+      subscribeToTaskStatus(taskInfo, taskContext),
+      subscribeToTaskUpdates(taskInfo, pipe)
+    )
+
+    return Closeable { jobs.forEach { it.cancel()} }
+  }
+
+  private fun CoroutineScope.subscribeToTaskStatus(taskInfo: TaskInfoEntity, context: CoroutineContext): Job {
+    return launch {
+      withKernel {
+        val title = taskInfo.title
+        val entityId = taskInfo.eid
+        taskInfo.statuses.collect { status ->
+          LOG.trace { "Task status changed to $status, entityId=$entityId, title=$title" }
+          when (status) {
+            TaskStatus.RUNNING -> { /* TODO RDCT-1620 */ }
+            TaskStatus.PAUSED -> { /* TODO RDCT-1620 */ }
+            TaskStatus.CANCELED -> context.cancel()
+          }
+        }
+      }
+    }
+  }
+
+  private fun CoroutineScope.subscribeToTaskUpdates(taskInfo: TaskInfoEntity, pipe: ProgressPipe): Job {
+    val taskStorage = TaskStorage.getInstance()
+    return launch {
+      pipe.progressUpdates().collect {
+        taskStorage.updateTask(taskInfo, it)
+      }
+    }
+  }
+
+  private suspend fun <T> withBackgroundProgressInternalOld(
+    project: Project,
+    title: @ProgressTitle String,
+    cancellation: TaskCancellation,
+    action: suspend CoroutineScope.() -> T
+  ): T = coroutineScope {
     val taskJob = coroutineContext.job
     val pipe = cs.createProgressPipe()
-    val showIndicatorJob = cs.showIndicator(project, taskJob, taskInfo(title, cancellation), pipe.progressUpdates())
-    progressStarted(title, cancellation, pipe.progressUpdates())
+    val indicator = coroutineCancellingIndicator(taskJob)
+    val showIndicatorJob = cs.showIndicator(project, indicator, taskInfo(title, cancellation), pipe.progressUpdates())
     try {
+      progressStarted(title, cancellation, pipe.progressUpdates())
       pipe.collectProgressUpdates(action)
     }
     finally {
@@ -177,20 +260,20 @@ private class JobProviderWithOwnerContext(val modalJob: Job, val owner: ModalTas
 }
 
 private val progressManagerTracer by lazy {
-  TelemetryManager.getInstance().getTracer(ProgressManagerScope)
+  TelemetryManager.getInstance().getSimpleTracer(ProgressManagerScope)
 }
 
-private fun CoroutineScope.showIndicator(
+internal fun CoroutineScope.showIndicator(
   project: Project,
-  taskJob: Job,
+  indicator: ProgressIndicatorEx,
   taskInfo: TaskInfo,
   stateFlow: Flow<ProgressState>,
 ): Job {
   return launch(Dispatchers.Default) {
     delay(DEFAULT_PROGRESS_DIALOG_POSTPONE_TIME_MILLIS.toLong())
-    progressManagerTracer.spanBuilder("Progress: ${taskInfo.title}").startSpan().useWithoutActiveScope {
-      val indicator = coroutineCancellingIndicator(taskJob) // cancel taskJob from UI
+    withContext(progressManagerTracer.span("Progress: ${taskInfo.title}")) {
       withContext(Dispatchers.EDT) {
+        LOG.trace { "Showing indicator for task: $taskInfo" }
         val indicatorAdded = showIndicatorInUI(project, taskInfo, indicator)
         try {
           indicator.start() // must be after showIndicatorInUI
@@ -206,6 +289,7 @@ private fun CoroutineScope.showIndicator(
           }
         }
         finally {
+          LOG.trace { "Hiding indicator for task: $taskInfo" }
           indicator.finish(taskInfo) // removes indicator from UI if added
         }
       }
@@ -247,12 +331,12 @@ suspend fun ProgressIndicatorEx.updateFromFlow(updates: Flow<ProgressState>): No
 
 private fun showIndicatorInUI(project: Project, taskInfo: TaskInfo, indicator: ProgressIndicatorEx): Boolean {
   val frameEx: IdeFrameEx = WindowManagerEx.getInstanceEx().findFrameHelper(project) ?: return false
-  val statusBar = frameEx.statusBar as? StatusBarEx ?: return false
-  statusBar.addProgress(indicator, taskInfo)
+  val statusBar = frameEx.statusBar as? IdeStatusBarImpl ?: return false
+  statusBar.addProgressImpl(indicator, taskInfo)
   return true
 }
 
-private fun taskInfo(title: @ProgressTitle String, cancellation: TaskCancellation): TaskInfo = object : TaskInfo {
+internal fun taskInfo(title: @ProgressTitle String, cancellation: TaskCancellation): TaskInfo = object : TaskInfo {
   override fun getTitle(): String = title
   override fun isCancellable(): Boolean = cancellation is CancellableTaskCancellation
   override fun getCancelText(): String? = (cancellation as? CancellableTaskCancellation)?.buttonText
@@ -325,6 +409,10 @@ private suspend fun doShowModalIndicator(
 
     awaitCancellationAndInvoke {
       dialog.close(DialogWrapper.OK_EXIT_CODE)
+    }
+
+    if (ApplicationManagerEx.isInIntegrationTest()) {
+      logger<PlatformTaskSupport>().info("Modal dialog is shown: ${descriptor.title}")
     }
 
     // 1. If the dialog is heavy (= spins an inner event loop):

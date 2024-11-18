@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.plugins;
 
 import com.intellij.execution.process.ProcessIOExecutorService;
@@ -12,6 +12,7 @@ import com.intellij.ide.plugins.certificates.PluginCertificateManager;
 import com.intellij.ide.plugins.enums.PluginsGroupType;
 import com.intellij.ide.plugins.enums.SortBy;
 import com.intellij.ide.plugins.marketplace.MarketplaceRequests;
+import com.intellij.ide.plugins.marketplace.ranking.MarketplaceLocalRanker;
 import com.intellij.ide.plugins.marketplace.statistics.PluginManagerUsageCollector;
 import com.intellij.ide.plugins.newui.*;
 import com.intellij.ide.util.PropertiesComponent;
@@ -37,7 +38,6 @@ import com.intellij.openapi.ui.popup.JBPopup;
 import com.intellij.openapi.ui.popup.JBPopupListener;
 import com.intellij.openapi.ui.popup.LightweightWindowEvent;
 import com.intellij.openapi.updateSettings.impl.UpdateChecker;
-import com.intellij.openapi.updateSettings.impl.UpdateSettings;
 import com.intellij.openapi.updateSettings.impl.pluginsAdvertisement.FUSEventSource;
 import com.intellij.openapi.updateSettings.impl.pluginsAdvertisement.PluginsAdvertiserStartupActivityKt;
 import com.intellij.openapi.util.NlsContexts;
@@ -81,6 +81,7 @@ import java.util.stream.Collectors;
 
 import static com.intellij.ide.plugins.newui.PluginsViewCustomizerKt.getPluginsViewCustomizer;
 
+@ApiStatus.Internal
 public final class PluginManagerConfigurable
   implements SearchableConfigurable, Configurable.NoScroll, Configurable.NoMargin, Configurable.TopComponentProvider {
 
@@ -224,6 +225,8 @@ public final class PluginManagerConfigurable
 
     createMarketplaceTab();
     createInstalledTab();
+
+    PluginManagerUsageCollector.sessionStarted();
 
     myCardPanel = new MultiPanel() {
       @Override
@@ -372,7 +375,7 @@ public final class PluginManagerConfigurable
       @Override
       protected void createSearchTextField(int flyDelay) {
         super.createSearchTextField(250);
-        mySearchTextField.setHistoryPropertyName("MarketplacePluginsSearchHistory");
+        searchTextField.setHistoryPropertyName("MarketplacePluginsSearchHistory");
       }
 
       @Override
@@ -389,7 +392,7 @@ public final class PluginManagerConfigurable
           @Override
           protected @NotNull ListPluginComponent createListComponent(@NotNull IdeaPluginDescriptor descriptor,
                                                                      @NotNull PluginsGroup group) {
-            return new ListPluginComponent(myPluginModel, descriptor, group, mySearchListener, true);
+            return new ListPluginComponent(myPluginModel, descriptor, group, searchListener, true);
           }
         };
 
@@ -460,7 +463,7 @@ public final class PluginManagerConfigurable
               LOG.info("Main plugin repository is not available ('" + e.getMessage() + "'). Please check your network settings.");
             }
 
-            for (String host : UpdateSettings.getInstance().getPluginHosts()) {
+            for (String host : RepositoryHelper.getCustomPluginRepositoryHosts()) {
               List<PluginNode> allDescriptors = customRepositoriesMap.get(host);
               if (allDescriptors != null) {
                 String groupName = IdeBundle.message("plugins.configurable.repository.0", host);
@@ -533,14 +536,14 @@ public final class PluginManagerConfigurable
 
       @Override
       protected @NotNull SearchResultPanel createSearchPanel(@NotNull Consumer<? super PluginsGroupComponent> selectionListener) {
-        SearchUpDownPopupController marketplaceController = new SearchUpDownPopupController(mySearchTextField) {
+        SearchUpDownPopupController marketplaceController = new SearchUpDownPopupController(searchTextField) {
           @Override
           protected @NotNull List<String> getAttributes() {
             List<String> attributes = new ArrayList<>();
             attributes.add(SearchWords.TAG.getValue());
             attributes.add(SearchWords.SORT_BY.getValue());
             attributes.add(SearchWords.VENDOR.getValue());
-            if (!UpdateSettings.getInstance().getPluginHosts().isEmpty()) {
+            if (!RepositoryHelper.getCustomPluginRepositoryHosts().isEmpty()) {
               attributes.add(SearchWords.REPOSITORY.getValue());
             }
             attributes.add(SearchWords.STAFF_PICKS.getValue());
@@ -596,19 +599,19 @@ public final class PluginManagerConfigurable
                 }
                 yield myVendorsSorted;
               }
-              case REPOSITORY -> UpdateSettings.getInstance().getPluginHosts();
+              case REPOSITORY -> RepositoryHelper.getCustomPluginRepositoryHosts();
               case INTERNAL, SUGGESTED, STAFF_PICKS -> null;
             };
           }
 
           @Override
           protected void showPopupForQuery() {
-            showSearchPanel(mySearchTextField.getText());
+            showSearchPanel(searchTextField.getText());
           }
 
           @Override
           protected void handleEnter() {
-            if (!mySearchTextField.getText().isEmpty()) {
+            if (!searchTextField.getText().isEmpty()) {
               handleTrigger("marketplace.suggest.popup.enter");
             }
           }
@@ -718,7 +721,7 @@ public final class PluginManagerConfigurable
           }
 
           List<String> queries = new ArrayList<>();
-          new SearchQueryParser.Marketplace(mySearchTextField.getText()) { // FIXME: it's unused - why hasn't it been removed?
+          new SearchQueryParser.Marketplace(searchTextField.getText()) { // FIXME: it's unused - why hasn't it been removed?
             @Override
             protected void addToSearchQuery(@NotNull String query) {
               queries.add(query);
@@ -743,7 +746,7 @@ public final class PluginManagerConfigurable
           }
 
           String query = StringUtil.join(queries, " ");
-          mySearchTextField.setTextIgnoreEvents(query);
+          searchTextField.setTextIgnoreEvents(query);
           if (query.isEmpty()) {
             myMarketplaceTab.hideSearchPanel();
           }
@@ -759,7 +762,7 @@ public final class PluginManagerConfigurable
           @Override
           protected @NotNull ListPluginComponent createListComponent(@NotNull IdeaPluginDescriptor descriptor,
                                                                      @NotNull PluginsGroup group) {
-            return new ListPluginComponent(myPluginModel, descriptor, group, mySearchListener, true);
+            return new ListPluginComponent(myPluginModel, descriptor, group, searchListener, true);
           }
         };
 
@@ -772,8 +775,11 @@ public final class PluginManagerConfigurable
           new SearchResultPanel(marketplaceController, panel, true, 0, 0) {
             @Override
             protected void handleQuery(@NotNull String query, @NotNull PluginsGroup result) {
+              int searchIndex = PluginManagerUsageCollector.updateAndGetSearchIndex();
               try {
                 SearchQueryParser.Marketplace parser = new SearchQueryParser.Marketplace(query);
+
+                Map<IdeaPluginDescriptor, Double> pluginToScore = null;
 
                 if (parser.internal) {
                   PluginsViewCustomizer.PluginsGroupDescriptor groupDescriptor =
@@ -841,6 +847,11 @@ public final class PluginManagerConfigurable
 
                   ContainerUtil.removeDuplicates(result.descriptors);
 
+                  final var localRanker = MarketplaceLocalRanker.getInstanceIfEnabled();
+                  if (localRanker != null) {
+                    pluginToScore = localRanker.rankPlugins(parser, result.descriptors);
+                  }
+
                   if (!result.descriptors.isEmpty()) {
                     String title = IdeBundle.message("plugin.manager.action.label.sort.by.1");
 
@@ -868,7 +879,8 @@ public final class PluginManagerConfigurable
                   }
                 }
 
-                PluginManagerUsageCollector.performMarketplaceSearch(ProjectUtil.getActiveProject(), parser, result.descriptors);
+                PluginManagerUsageCollector.INSTANCE.performMarketplaceSearch(
+                  ProjectUtil.getActiveProject(), parser, result.descriptors, searchIndex, pluginToScore);
               }
               catch (IOException e) {
                 LOG.info(e);
@@ -887,7 +899,7 @@ public final class PluginManagerConfigurable
 
       @Override
       protected void onSearchReset() {
-        PluginManagerUsageCollector.searchReset();
+        PluginManagerUsageCollector.INSTANCE.searchReset();
       }
     };
   }
@@ -904,14 +916,14 @@ public final class PluginManagerConfigurable
       protected void createSearchTextField(int flyDelay) {
         super.createSearchTextField(flyDelay);
 
-        JBTextField textField = mySearchTextField.getTextEditor();
+        JBTextField textField = searchTextField.getTextEditor();
         textField.putClientProperty("search.extension", ExtendableTextComponent.Extension
           .create(AllIcons.Actions.More, AllIcons.Actions.More, IdeBundle.message("plugins.configurable.search.options"), // TODO: icon
                   () -> showRightBottomPopup(textField, IdeBundle.message("plugins.configurable.show"), myInstalledSearchGroup)));
         textField.putClientProperty("JTextField.variant", null);
         textField.putClientProperty("JTextField.variant", "search");
 
-        mySearchTextField.setHistoryPropertyName("InstalledPluginsSearchHistory");
+        searchTextField.setHistoryPropertyName("InstalledPluginsSearchHistory");
       }
 
       @Override
@@ -928,7 +940,7 @@ public final class PluginManagerConfigurable
           @Override
           protected @NotNull ListPluginComponent createListComponent(@NotNull IdeaPluginDescriptor descriptor,
                                                                      @NotNull PluginsGroup group) {
-            return new ListPluginComponent(myPluginModel, descriptor, group, mySearchListener, false);
+            return new ListPluginComponent(myPluginModel, descriptor, group, searchListener, false);
           }
         };
 
@@ -1052,12 +1064,12 @@ public final class PluginManagerConfigurable
 
       @Override
       protected void onSearchReset() {
-        PluginManagerUsageCollector.searchReset();
+        PluginManagerUsageCollector.INSTANCE.searchReset();
       }
 
       @Override
       protected @NotNull SearchResultPanel createSearchPanel(@NotNull Consumer<? super PluginsGroupComponent> selectionListener) {
-        SearchUpDownPopupController installedController = new SearchUpDownPopupController(mySearchTextField) {
+        SearchUpDownPopupController installedController = new SearchUpDownPopupController(searchTextField) {
           @Override
           protected @NotNull @NonNls List<String> getAttributes() {
             return Arrays
@@ -1084,7 +1096,7 @@ public final class PluginManagerConfigurable
 
           @Override
           protected void showPopupForQuery() {
-            showSearchPanel(mySearchTextField.getText());
+            showSearchPanel(searchTextField.getText());
           }
         };
 
@@ -1095,7 +1107,7 @@ public final class PluginManagerConfigurable
           @Override
           protected @NotNull ListPluginComponent createListComponent(@NotNull IdeaPluginDescriptor descriptor,
                                                                      @NotNull PluginsGroup group) {
-            return new ListPluginComponent(myPluginModel, descriptor, group, mySearchListener, false);
+            return new ListPluginComponent(myPluginModel, descriptor, group, searchListener, false);
           }
         };
 
@@ -1104,7 +1116,7 @@ public final class PluginManagerConfigurable
 
         myInstalledSearchCallback = updateAction -> {
           List<String> queries = new ArrayList<>();
-          new SearchQueryParser.Installed(mySearchTextField.getText()) {
+          new SearchQueryParser.Installed(searchTextField.getText()) {
             @Override
             protected void addToSearchQuery(@NotNull String query) {
               queries.add(query);
@@ -1135,7 +1147,7 @@ public final class PluginManagerConfigurable
             myInstalledSearchSetState = false;
 
             String query = StringUtil.join(queries, " ");
-            mySearchTextField.setTextIgnoreEvents(query);
+            searchTextField.setTextIgnoreEvents(query);
             if (query.isEmpty()) {
               myInstalledTab.hideSearchPanel();
             }
@@ -1164,6 +1176,7 @@ public final class PluginManagerConfigurable
 
           @Override
           protected void handleQuery(@NotNull String query, @NotNull PluginsGroup result) {
+            int searchIndex = PluginManagerUsageCollector.updateAndGetSearchIndex();
             myPluginModel.setInvalidFixCallback(null);
 
             SearchQueryParser.Installed parser = new SearchQueryParser.Installed(query);
@@ -1224,7 +1237,8 @@ public final class PluginManagerConfigurable
             }
 
             result.descriptors.addAll(descriptors);
-            PluginManagerUsageCollector.performInstalledTabSearch(ProjectUtil.getActiveProject(), parser, result.descriptors);
+            PluginManagerUsageCollector.performInstalledTabSearch(
+              ProjectUtil.getActiveProject(), parser, result.descriptors, searchIndex, null);
 
             if (!result.descriptors.isEmpty()) {
               if (parser.invalid) {
@@ -1681,6 +1695,7 @@ public final class PluginManagerConfigurable
 
     private MarketplaceSortByAction(@NotNull SortBy option) {
       super(option.getPresentableNameSupplier());
+      getTemplatePresentation().setKeepPopupOnPerform(KeepPopupOnPerform.IfRequested);
       myOption = option;
     }
 
@@ -1742,6 +1757,7 @@ public final class PluginManagerConfigurable
 
     private InstalledSearchOptionAction(@NotNull InstalledSearchOption option) {
       super(option.myPresentableNameSupplier);
+      getTemplatePresentation().setKeepPopupOnPerform(KeepPopupOnPerform.IfRequested);
       myOption = option;
     }
 
@@ -1855,7 +1871,7 @@ public final class PluginManagerConfigurable
     if (showAllPredicate.test(group)) {
       group.rightAction = new LinkLabelButton<>(IdeBundle.message("plugins.configurable.show.all"),
                                                 null,
-                                                myMarketplaceTab.mySearchListener,
+                                                myMarketplaceTab.searchListener,
                                                 showAllQuery);
       group.rightAction.setBorder(JBUI.Borders.emptyRight(5));
     }
@@ -1948,14 +1964,6 @@ public final class PluginManagerConfigurable
     myPluginModel.clear(myCardPanel);
   }
 
-  /**
-   * @deprecated Please use {@link #select(Collection)}.
-   */
-  @Deprecated(since = "2020.2", forRemoval = true)
-  public void select(@NotNull IdeaPluginDescriptor @NotNull ... descriptors) {
-    select(ContainerUtil.newHashSet(descriptors));
-  }
-
   private void select(@NotNull Set<? extends IdeaPluginDescriptor> descriptors) {
     select(ContainerUtil.map(descriptors, IdeaPluginDescriptor::getPluginId));
   }
@@ -1988,6 +1996,7 @@ public final class PluginManagerConfigurable
       return () -> {
       };
     }
+
     if (StringUtil.isEmpty(option) && (myTabHeaderComponent.getSelectionTab() == MARKETPLACE_TAB || myInstalledSearchPanel.isEmpty())) {
       return null;
     }

@@ -46,7 +46,7 @@ public class SuppressAllForClassFix extends SuppressFix {
     }
     while (container != null) {
       final PsiClass parentClass = PsiTreeUtil.getParentOfType(container, PsiClass.class);
-      if (parentClass == null && container instanceof PsiClass) {
+      if (parentClass == null && container instanceof PsiClass && !(container instanceof PsiImplicitClass)) {
         return container;
       }
       container = parentClass;
@@ -95,5 +95,10 @@ public class SuppressAllForClassFix extends SuppressFix {
     }
 
     super.invoke(project, element);
+  }
+
+  @Override
+  public int getPriority() {
+    return 60;
   }
 }

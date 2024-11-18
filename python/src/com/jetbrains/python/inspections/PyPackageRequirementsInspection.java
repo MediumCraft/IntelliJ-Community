@@ -11,7 +11,6 @@ import com.intellij.codeInspection.util.InspectionMessage;
 import com.intellij.codeInspection.util.IntentionFamilyName;
 import com.intellij.core.CoreBundle;
 import com.intellij.execution.ExecutionException;
-import com.intellij.icons.AllIcons;
 import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.idea.ActionsBundle;
 import com.intellij.model.SideEffectGuard;
@@ -20,10 +19,10 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleUtilCore;
+import com.intellij.openapi.progress.Cancellation;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.ui.DoNotAskOption;
-import com.intellij.openapi.ui.MessageDialogBuilder;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.JDOMExternalizableStringList;
 import com.intellij.openapi.util.NlsSafe;
@@ -50,6 +49,7 @@ import com.jetbrains.python.psi.types.TypeEvalContext;
 import com.jetbrains.python.sdk.PySdkExtKt;
 import com.jetbrains.python.sdk.PySdkProvider;
 import com.jetbrains.python.sdk.PythonSdkUtil;
+import com.jetbrains.python.statistics.PyPackagesUsageCollector;
 import com.jetbrains.python.ui.PyUiUtil;
 import one.util.streamex.StreamEx;
 import org.jetbrains.annotations.Nls;
@@ -63,7 +63,9 @@ import static com.intellij.codeInspection.options.OptPane.pane;
 public final class PyPackageRequirementsInspection extends PyInspection {
   public JDOMExternalizableStringList ignoredPackages = new JDOMExternalizableStringList();
 
-  private static final @NotNull NotificationGroup BALLOON_NOTIFICATIONS = NotificationGroupManager.getInstance().getNotificationGroup("Package requirements");
+  private static final @NotNull NotificationGroup BALLOON_NOTIFICATIONS = Cancellation.forceNonCancellableSectionInClassInitializer(
+    () -> NotificationGroupManager.getInstance().getNotificationGroup("Package requirements")
+  );
 
   @Override
   public @NotNull OptPane getOptionsPane() {
@@ -402,7 +404,7 @@ public final class PyPackageRequirementsInspection extends PyInspection {
     public void applyFix(@NotNull Project project, @NotNull ProblemDescriptor descriptor) {
       SideEffectGuard.checkSideEffectAllowed(SideEffectGuard.EffectType.PROJECT_MODEL);
       if (!checkAdminPermissionsAndConfigureInterpreter(project, descriptor, mySdk)) {
-        PyUiUtil.clearFileLevelInspectionResults(project);
+        PyUiUtil.clearFileLevelInspectionResults(descriptor.getPsiElement().getContainingFile());
         installPackages(project);
       }
     }
@@ -420,6 +422,7 @@ public final class PyPackageRequirementsInspection extends PyInspection {
           chosen = dialog.getMarkedElements();
         }
         else {
+          PyPackagesUsageCollector.installAllCanceledEvent.log();
           chosen = Collections.emptyList();
         }
       }
@@ -515,6 +518,7 @@ public final class PyPackageRequirementsInspection extends PyInspection {
             }
           }
         ).applyFix(module.getProject(), descriptor);
+        PyPackagesUsageCollector.installSingleEvent.log();
       }
     }
 
@@ -544,6 +548,9 @@ public final class PyPackageRequirementsInspection extends PyInspection {
       }
     }
   }
+
+
+
 
   public static class InstallAndImportPackageQuickFix extends InstallPackageQuickFix {
     private final @Nullable String myAsName;

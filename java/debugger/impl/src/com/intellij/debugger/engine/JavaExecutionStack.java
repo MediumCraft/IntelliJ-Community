@@ -189,7 +189,10 @@ public class JavaExecutionStack extends XExecutionStack {
   @Override
   public void computeStackFrames(final int firstFrameIndex, final XStackFrameContainer container) {
     if (container.isObsolete()) return;
-    myDebugProcess.getManagerThread().schedule(new SuspendContextCommandImpl(myDebugProcess.getDebuggerContext().getSuspendContext()) {
+    SuspendContextImpl pausedContext = SuspendManagerUtil.getPausedSuspendingContext(myDebugProcess.getSuspendManager(), myThreadProxy);
+    SuspendContextImpl context = pausedContext != null ? pausedContext : myDebugProcess.getDebuggerContext().getSuspendContext();
+    if (context == null) return;
+    context.getManagerThread().schedule(new SuspendContextCommandImpl(context) {
       @Override
       public Priority getPriority() {
         return Priority.NORMAL;
@@ -212,7 +215,7 @@ public class JavaExecutionStack extends XExecutionStack {
                 iterator.next();
                 added++;
               }
-              myDebugProcess.getManagerThread().schedule(
+              suspendContext.getManagerThread().schedule(
                 new AppendFrameCommand(suspendContext, iterator, container, added, firstFrameIndex));
             }
             catch (EvaluateException e) {
@@ -391,7 +394,7 @@ public class JavaExecutionStack extends XExecutionStack {
                           @Nullable List<? extends StackFrameItem> asyncStackFrames,
                           @Nullable List<? extends StackFrameItem> creationStackFrames,
                           boolean separator) {
-      myDebugProcess.getManagerThread().schedule(
+      suspendContext.getManagerThread().schedule(
         new AppendFrameCommand(suspendContext, stackFramesIterator, myContainer,
                                myAdded, mySkip, myHiddenFrames, asyncStackFrames, creationStackFrames, myAddedAsync, separator));
     }

@@ -30,8 +30,8 @@ public final class KotlinMeta implements JvmMetadata<KotlinMeta, KotlinMeta.Diff
   private final int @NotNull [] myVersion;
   private final String @NotNull [] myData1;
   private final String @NotNull [] myData2;
-  @NotNull private final String myExtraString;
-  @NotNull private final String myPackageName;
+  private final @NotNull String myExtraString;
+  private final @NotNull String myPackageName;
   private final int myExtraInt;
 
   public KotlinMeta(int kind, int @Nullable [] version, String @Nullable [] data1,  String @Nullable [] data2, @Nullable String extraString, @Nullable String packageName, int extraInt) {
@@ -92,18 +92,15 @@ public final class KotlinMeta implements JvmMetadata<KotlinMeta, KotlinMeta.Diff
     return myData2;
   }
 
-  @NotNull
-  public String getExtraString() {
+  public @NotNull String getExtraString() {
     return myExtraString;
   }
 
-  @NotNull
-  public String getPackageName() {
+  public @NotNull String getPackageName() {
     return myPackageName;
   }
 
-  @NotNull
-  public Integer getExtraInt() {
+  public @NotNull Integer getExtraInt() {
     return myExtraInt;
   }
 
@@ -163,13 +160,22 @@ public final class KotlinMeta implements JvmMetadata<KotlinMeta, KotlinMeta.Diff
     return container instanceof KmClass? ((KmClass)container).getTypeParameters() : Collections.emptyList();
   }
 
+  public Iterable<String> getSealedSubclasses() {
+    KmDeclarationContainer container = getDeclarationContainer();
+    return container instanceof KmClass? ((KmClass)container).getSealedSubclasses() : Collections.emptyList();
+  }
+
   public Visibility getContainerVisibility() {
     KmDeclarationContainer container = getDeclarationContainer();
     return container instanceof KmClass? Attributes.getVisibility((KmClass)container) : Visibility.PUBLIC;
   }
 
-  @Nullable
-  public KmDeclarationContainer getDeclarationContainer() {
+  public @Nullable Modality getContainerModality() {
+    KmDeclarationContainer container = getDeclarationContainer();
+    return container instanceof KmClass? Attributes.getModality((KmClass)container) : null;
+  }
+
+  public @Nullable KmDeclarationContainer getDeclarationContainer() {
     KotlinClassMetadata clsMeta = getClassMetadata();
     if (clsMeta instanceof KotlinClassMetadata.Class) {
       return ((KotlinClassMetadata.Class)clsMeta).getKmClass();
@@ -209,6 +215,7 @@ public final class KotlinMeta implements JvmMetadata<KotlinMeta, KotlinMeta.Diff
     private final Supplier<Specifier<KmConstructor, KmConstructorsDiff>> myConstructorsDiff;
     private final Supplier<Specifier<KmProperty, KmPropertiesDiff>> myPropertiesDiff;
     private final Supplier<Specifier<KmTypeAlias, KmTypeAliasDiff>> myAliasesDiff;
+    private final Supplier<Specifier<String, ?>> mySealedSubclassesDiff;
 
     Diff(KotlinMeta past) {
       myPast = past;
@@ -240,13 +247,15 @@ public final class KotlinMeta implements JvmMetadata<KotlinMeta, KotlinMeta.Diff
         a -> Objects.hashCode(a.getName()),
         KmTypeAliasDiff::new
       ));
+
+      mySealedSubclassesDiff = Utils.lazyValue(() -> Difference.diff(myPast.getSealedSubclasses(), getSealedSubclasses()));
     }
 
     @Override
     public boolean unchanged() {
       return
-        !kindChanged() && !versionChanged() && !packageChanged() && !extraChanged() && !typeParametersVarianceChanged() && !containerVisibilityChanged() &&
-        functions().unchanged() && properties().unchanged() && constructors().unchanged() && typeAliases().unchanged()/*&& !dataChanged()*/;
+        !kindChanged() && !versionChanged() && !packageChanged() && !extraChanged() && !typeParametersVarianceChanged() && !containerVisibilityChanged() && !containerModalityChanged() && 
+        sealedSubclasses().unchanged() && functions().unchanged() && properties().unchanged() && constructors().unchanged() && typeAliases().unchanged()/*&& !dataChanged()*/;
     }
 
     public boolean kindChanged() {
@@ -265,6 +274,10 @@ public final class KotlinMeta implements JvmMetadata<KotlinMeta, KotlinMeta.Diff
       return !Objects.equals(myPast.myPackageName, myPackageName);
     }
 
+    public boolean containerModalityChanged() {
+      return myPast.getContainerModality() != getContainerModality();
+    }
+
     public boolean containerVisibilityChanged() {
       return myPast.getContainerVisibility() != getContainerVisibility();
     }
@@ -279,6 +292,10 @@ public final class KotlinMeta implements JvmMetadata<KotlinMeta, KotlinMeta.Diff
 
     public boolean typeParametersVarianceChanged() {
       return !Iterators.equals(myPast.getTypeParameters(), getTypeParameters(), (p1, p2) -> p1.getVariance() == p2.getVariance());
+    }
+
+    public Specifier<String, ?> sealedSubclasses() {
+      return mySealedSubclassesDiff.get();
     }
 
     public Specifier<KmFunction, KmFunctionsDiff> functions() {

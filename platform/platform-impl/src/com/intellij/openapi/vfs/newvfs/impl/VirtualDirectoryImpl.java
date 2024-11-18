@@ -22,7 +22,6 @@ import com.intellij.openapi.vfs.newvfs.RefreshQueue;
 import com.intellij.openapi.vfs.newvfs.events.ChildInfo;
 import com.intellij.openapi.vfs.newvfs.events.VFileCreateEvent;
 import com.intellij.openapi.vfs.newvfs.events.VFilePropertyChangeEvent;
-import com.intellij.openapi.vfs.newvfs.persistent.FSRecords;
 import com.intellij.openapi.vfs.newvfs.persistent.FSRecordsImpl;
 import com.intellij.openapi.vfs.newvfs.persistent.PersistentFS;
 import com.intellij.openapi.vfs.newvfs.persistent.PersistentFSImpl;
@@ -145,17 +144,16 @@ public class VirtualDirectoryImpl extends VirtualFileSystemEntry {
                                                              boolean ensureCanonicalName,
                                                              @NotNull NewVirtualFileSystem fs,
                                                              boolean isCaseSensitive) {
-    VirtualFileSystemEntry child;
+    VirtualFileSystemEntry newlyLoadedChild;
     synchronized (myData) {
       // maybe another doFindChild() sneaked in the middle
-      child = doFindChildInArray(name, isCaseSensitive);
-      if (child != null) return child; // including NULL_VIRTUAL_FILE
+      VirtualFileSystemEntry existingChild = doFindChildInArray(name, isCaseSensitive);
+      if (existingChild != null) return existingChild; // including NULL_VIRTUAL_FILE
       if (allChildrenLoaded()) {
         return null;//all children loaded, but child not found -> not exist
       }
 
-      // do not extract getId outside the synchronized block since it will cause a concurrency problem.
-      PersistentFS pfs = owningPersistentFS();
+      PersistentFSImpl pfs = owningPersistentFS();
       ChildInfo childInfo = pfs.findChildInfo(this, name, fs);
       if (childInfo == null) {
         myData.addAdoptedName(name, isCaseSensitive);
@@ -165,31 +163,60 @@ public class VirtualDirectoryImpl extends VirtualFileSystemEntry {
       if (ensureCanonicalName) {
         CharSequence persistedName = childInfo.getName();
         if (!Comparing.equal(name, persistedName)) {
-          name = persistedName.toString();
-          child = doFindChildInArray(name, isCaseSensitive);
-          if (child != null) return child;
+          //lookup again, with persistedName: persistedName _could_ be != name because pfs.findChildInfo() could access
+          // actual FS, and FS's rules for file name normalization may be trickier than we implemented in VFS
+          existingChild = doFindChildInArray(persistedName.toString(), isCaseSensitive);
+          if (existingChild != null) return existingChild;
         }
       }
 
-      int nameId = childInfo.getNameId(); // the name can change if file record was created
-      int id = childInfo.getId();
-      int attributes = pfs.getFileAttributes(id);
+
+      int childId = childInfo.getId();
+      int childNameId = childInfo.getNameId(); // the name can change if file record was created
+
+      //Lookup a child by id: it is mostly useful for ensureCanonicalName=false, but it seems there are some cases
+      // there even with ensureCanonicalName=true a child couldn't be found by name, but _could_ be found by id
+      // so let's be sure:
+      VirtualFileSystemEntry childById = findCachedChildById(childId);
+      if (childById != null) {
+        if (ensureCanonicalName) {
+          //It is definitely possible for childId to be in this.childrenIds list, but not found by name, if
+          // ensureCanonicalName=false -- because of file name normalisation intricacies.
+          // But same for ensureCanonicalName=true it is a suspicious case: why didn't we find a child by name then?
+          logChildLookupFailure(pfs, childId, childNameId, name);
+        }
+
+        return childById;
+      }
+
+      int childAttributes = pfs.getFileAttributes(childId);
       //TODO RC: check isDeleted(attributes) before .mayHaveChildren() call,
       //         otherwise 'already deleted' exception is thrown sometimes (EA-933381)?
-      boolean isEmptyDirectory = PersistentFS.isDirectory(attributes) && !pfs.mayHaveChildren(id);
+      boolean isEmptyDirectory = PersistentFS.isDirectory(childAttributes) && !pfs.mayHaveChildren(childId);
 
-      child = createChildImpl(id, nameId, attributes, isEmptyDirectory);
-
-      addChild(child);
+      newlyLoadedChild = createChildImpl(childId, childNameId, childAttributes, isEmptyDirectory);
+      addChild(newlyLoadedChild);
     }
 
-    if (!child.isDirectory()) {
+    if (!newlyLoadedChild.isDirectory()) {
       // access check should only be called when a child is actually added to the parent, otherwise it may break VFP validity
       //noinspection TestOnlyProblems
-      VfsRootAccess.assertAccessInTests(child, getFileSystem());
+      VfsRootAccess.assertAccessInTests(newlyLoadedChild, getFileSystem());
     }
 
-    return child;
+    return newlyLoadedChild;
+  }
+
+  private void logChildLookupFailure(@NotNull PersistentFSImpl pfs,
+                                     int childId,
+                                     int childNameId,
+                                     @NotNull String childName) {
+    FSRecordsImpl vfsPeer = pfs.peer();
+    LOG.warn(
+      "Child[#" + childId + ", nameId: " + childNameId + "][name='" + vfsPeer.getNameByNameId(childId) + "']" +
+      " present in a childrenIds list [" + Arrays.toString(myData.childrenIds) + "], " +
+      " but can't be found by name[" + childName + "] even though ensureCanonicalName=true"
+    );
   }
 
   private <T> T handleInvalidDirectory(T empty) {
@@ -257,6 +284,10 @@ public class VirtualDirectoryImpl extends VirtualFileSystemEntry {
     }
   }
 
+  /**
+   * 'create' is a bit misleading: method loads child data from persistence into {@link VfsData} in-memory cache
+   * Note that loaded entry is _not_ added to a parent's children list.
+   */
   //@GuardedBy("myData")
   private VirtualFileSystemEntry createChildImpl(int id, int nameId, @PersistentFS.Attributes int attributes, boolean isEmptyDirectory) {
     FileLoadingTracker.fileLoaded(this, nameId);
@@ -266,7 +297,7 @@ public class VirtualDirectoryImpl extends VirtualFileSystemEntry {
 
     boolean isDirectory = PersistentFS.isDirectory(attributes);
     Object fileData = isDirectory ? new VfsData.DirectoryData() : KeyFMap.EMPTY_MAP;
-    segment.initFileData(id, fileData);
+    segment.initFileData(id, fileData, this);
 
     VirtualFileSystemEntry child = vfsData.getFileById(id, this, true);
     assert child != null;
@@ -543,16 +574,8 @@ public class VirtualDirectoryImpl extends VirtualFileSystemEntry {
 
   @ApiStatus.Internal
   public VirtualFileSystemEntry doFindChildById(int id) {
-    int i = ArrayUtil.indexOf(myData.childrenIds, id);
-    if (i >= 0) {
-      VirtualFileSystemEntry fileById = getVfsData().getFileById(id, this, true);
-      if (fileById != null) {
-        if (fileById.getId() != id) {
-          LOG.error("getFileById(" + id + ") returns " + fileById + " with different id(=" + fileById.getId() + ")");
-        }
-      }
-      return fileById;
-    }
+    VirtualFileSystemEntry existingChild = findCachedChildById(id);
+    if (existingChild != null) return existingChild;
 
     //We come here only from PersistentFSImpl.findFileById(), on a descend phase, there we resolve fileIds to
     // VFiles. Hence, it must be a child with childId -- because 'this' was collected as .parent during an
@@ -563,15 +586,16 @@ public class VirtualDirectoryImpl extends VirtualFileSystemEntry {
 
     PersistentFSImpl persistence = owningPersistentFS();
     String name = persistence.getName(id);
-    VirtualFileSystemEntry fileByName = findChild(name, false, false, getFileSystem());
+    //RC: why ensureCanonicalName=false?
+    VirtualFileSystemEntry fileByName = findChild(name, /*refresh: */ false, /*ensureCanonicalName: */ false, getFileSystem());
     if (fileByName != null && fileByName.getId() != id) {
       // a child with the same name and different ID was recreated after a refresh session -
       // it doesn't make sense to check it earlier because it is executed outside the VFS' read/write lock
-      boolean deleted = FSRecords.isDeleted(id);
+      boolean deleted = persistence.peer().isDeleted(id);
       if (!deleted) {
         THROTTLED_LOG.info(() -> {
           int parentId = persistence.peer().getParent(id);
-          IntOpenHashSet childrenInPersistence = new IntOpenHashSet(FSRecords.listIds(id));
+          IntOpenHashSet childrenInPersistence = new IntOpenHashSet(persistence.peer().listIds(id));
           IntOpenHashSet childrenInMemory = new IntOpenHashSet(myData.childrenIds);
           int[] childrenNotInPersistent = childrenInMemory.intStream()
             .filter(childId -> !childrenInPersistence.contains(childId))
@@ -593,6 +617,20 @@ public class VirtualDirectoryImpl extends VirtualFileSystemEntry {
       return null;
     }
     return fileByName;
+  }
+
+  private @Nullable VirtualFileSystemEntry findCachedChildById(int childId) {
+    int i = ArrayUtil.indexOf(myData.childrenIds, childId);
+    if (i >= 0) {
+      VirtualFileSystemEntry fileById = getVfsData().getFileById(childId, this, true);
+      if (fileById != null) {
+        if (fileById.getId() != childId) {
+          LOG.error("getFileById(" + childId + ") returns " + fileById + " with different id(=" + fileById.getId() + ")");
+        }
+      }
+      return fileById;
+    }
+    return null;
   }
 
   @Override
@@ -649,8 +687,14 @@ public class VirtualDirectoryImpl extends VirtualFileSystemEntry {
           return oldIds.length;
         }
       };
-      ContainerUtil.processSortedListsInOrder(existingChildren, added, byName, true, (nextInfo, mergeResult) -> {
-        if (mergeResult != ContainerUtil.MergeResult.COPIED_FROM_LIST1) {
+      ContainerUtil.processSortedListsInOrder(existingChildren, added, byName, /*mergeEqualItems: */ true, (nextInfo, mergeResult) -> {
+        //TODO RC: this branch differs from (added.size=1) branch above in many aspects. The most noticeable are
+        //         comparison: we merge existing/added lists by-name here, but we look up existing fileId above.
+        //         This seems suspicious, and I'm not sure that consequences of the difference could be.
+        //         Another difference is that here we call callback.accept() first, and update .childrenIds list with
+        //         the new files afterwards, but in 1-item branch above we add new file to .childrenIds list first,
+        //         and call the callback afterwards.
+        if (mergeResult == ContainerUtil.MergeResult.COPIED_FROM_LIST2) {
           assert nextInfo.getId() > 0 : nextInfo;
           @SuppressWarnings("MagicConstant") @PersistentFS.Attributes int attributes = nextInfo.getFileAttributeFlags();
           boolean isEmptyDirectory = nextInfo.getChildren() != null && nextInfo.getChildren().length == 0;
@@ -669,6 +713,7 @@ public class VirtualDirectoryImpl extends VirtualFileSystemEntry {
     }
   }
 
+  /** does nothing if child.id is already in myData.childrenIds list */
   public void addChild(@NotNull VirtualFileSystemEntry child) {
     CharSequence childName = child.getNameSequence();
     boolean isCaseSensitive = isCaseSensitive();
@@ -747,7 +792,7 @@ public class VirtualDirectoryImpl extends VirtualFileSystemEntry {
     }
     int id = getId();
     synchronized (myData) {
-      existingNames.addAll(FSRecords.listNames(id));
+      existingNames.addAll(owningPersistentFS().peer().listNames(id));
 
       validateAgainst(childrenToCreate, existingNames);
 

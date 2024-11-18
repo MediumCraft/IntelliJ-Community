@@ -23,8 +23,10 @@ import com.intellij.ui.classFilter.ClassFilter;
 import com.intellij.util.containers.ContainerUtil;
 import com.sun.jdi.*;
 import com.sun.jdi.event.ClassPrepareEvent;
+import com.sun.jdi.event.EventSet;
 import com.sun.jdi.request.*;
 import one.util.streamex.StreamEx;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
@@ -79,6 +81,9 @@ public class RequestManagerImpl extends DebugProcessAdapterImpl implements Reque
     }
   }
   public void setThreadFilter(@Nullable final LightOrRealThreadInfo filter) {
+    if (LOG.isDebugEnabled()) {
+      LOG.debug("Thread filter is set to " + filter);
+    }
     myFilterThread = filter;
   }
 
@@ -95,6 +100,13 @@ public class RequestManagerImpl extends DebugProcessAdapterImpl implements Reque
   public static Requestor findRequestor(EventRequest request) {
     DebuggerManagerThreadImpl.assertIsManagerThread();
     return request != null ? (Requestor)request.getProperty(REQUESTOR) : null;
+  }
+
+  public static boolean hasSuspendAllRequestor(@NotNull EventSet eventSet) {
+    return ContainerUtil.exists(eventSet, e -> {
+      Requestor requestor = findRequestor(e.request());
+      return requestor instanceof SuspendingRequestor sr && DebuggerSettings.SUSPEND_ALL.equals(sr.getSuspendPolicy());
+    });
   }
 
   private static void addClassFilter(EventRequest request, String pattern) {
@@ -370,7 +382,6 @@ public class RequestManagerImpl extends DebugProcessAdapterImpl implements Reque
   private CompletableFuture<Void> enableRequest(EventRequest request, Function<EventRequest, CompletableFuture<Void>> enabler) {
     DebuggerManagerThreadImpl.assertIsManagerThread();
     LOG.assertTrue(findRequestor(request) != null);
-    DebuggerDiagnosticsUtil.logDebug("Enable request " + request.getClass());
     try {
       final ThreadReference filterThread = myFilterThread == null ? null : myFilterThread.getRealThread();
       if (filterThread != null && DebuggerSession.filterBreakpointsDuringSteppingUsingDebuggerEngine()) {

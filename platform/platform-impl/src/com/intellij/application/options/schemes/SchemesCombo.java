@@ -7,6 +7,7 @@ import com.intellij.openapi.options.Scheme;
 import com.intellij.openapi.ui.ComboBox;
 import com.intellij.openapi.ui.popup.ListSeparator;
 import com.intellij.openapi.util.NlsContexts;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.ui.GroupedComboBoxRenderer;
 import com.intellij.ui.SimpleColoredComponent;
 import com.intellij.ui.SimpleTextAttributes;
@@ -22,8 +23,8 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 public abstract class SchemesCombo<T extends Scheme> extends ComboBox<SchemesCombo.MySchemeListItem<T>> {
-  public static final @NotNull Supplier<@Nls String> PROJECT_LEVEL = IdeBundle.messagePointer("scheme.project");
-  public static final @NotNull Supplier<@Nls String> IDE_LEVEL = IdeBundle.messagePointer("scheme.ide");
+  private static final @NotNull Supplier<@Nls String> PROJECT_LEVEL = IdeBundle.messagePointer("scheme.project");
+  private static final @NotNull Supplier<@Nls String> IDE_LEVEL = IdeBundle.messagePointer("scheme.ide");
   private final ArrayList<SeparatorInfo> mySeparatorInfos = new ArrayList<>();
 
   public SchemesCombo() {
@@ -155,7 +156,7 @@ public abstract class SchemesCombo<T extends Scheme> extends ComboBox<SchemesCom
   private void customizeComponent(@NotNull SimpleColoredComponent item, MySchemeListItem<T> value, int index) {
     final var scheme = value.getScheme();
     if (scheme != null) {
-      item.append(value.getPresentableText(), getSchemeAttributes(scheme));
+      item.append(StringUtil.shortenTextWithEllipsis(value.getPresentableText(), 100, 20), getSchemeAttributes(scheme));
       if (isDefaultScheme(scheme)) {
         item.append(" " + IdeBundle.message("scheme.theme.default"), SimpleTextAttributes.GRAY_ATTRIBUTES);
       }

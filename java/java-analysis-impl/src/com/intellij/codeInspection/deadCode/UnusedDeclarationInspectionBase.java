@@ -246,6 +246,8 @@ public class UnusedDeclarationInspectionBase extends GlobalInspectionTool {
         return true;
       }
 
+      if(element instanceof PsiImplicitClass) return true;
+
       return owner instanceof RefClass &&
              (isAddAppletEnabled() && ((RefClass)owner).isApplet()
               || isAddServletEnabled() && ((RefClass)owner).isServlet());
@@ -255,11 +257,16 @@ public class UnusedDeclarationInspectionBase extends GlobalInspectionTool {
   }
 
   public boolean isEntryPoint(@NotNull PsiElement element) {
+    return isStrictEntryPoint(element) || RefUtil.isImplicitUsage(element);
+  }
+
+  public boolean isStrictEntryPoint(@NotNull PsiElement element) {
     if (element instanceof PsiMethod && isAddMainsEnabled() && PsiClassImplUtil.isMainOrPremainMethod((PsiMethod)element)) {
       return true;
     }
     Project project = element.getProject();
     if (element instanceof PsiClass aClass) {
+      if (element instanceof PsiImplicitClass) return true;
       JavaPsiFacade psiFacade = JavaPsiFacade.getInstance(project);
       if (isAddAppletEnabled()) {
         PsiClass applet = psiFacade.findClass("java.applet.Applet", GlobalSearchScope.allScope(project));
@@ -285,7 +292,7 @@ public class UnusedDeclarationInspectionBase extends GlobalInspectionTool {
         return true;
       }
     }
-    return RefUtil.isImplicitUsage(element);
+    return false;
   }
 
   private static boolean hasMainMethodDeep(@NotNull PsiClass aClass) {

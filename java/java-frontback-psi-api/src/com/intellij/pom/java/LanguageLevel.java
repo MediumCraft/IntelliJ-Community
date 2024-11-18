@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.pom.java;
 
 import com.intellij.core.JavaPsiBundle;
@@ -61,14 +61,15 @@ public enum LanguageLevel {
   JDK_21_PREVIEW(JavaPsiBundle.messagePointer("jdk.21.preview.language.level.description"), 21),
   JDK_22(JavaPsiBundle.messagePointer("jdk.22.language.level.description"), 22),
   JDK_22_PREVIEW(JavaPsiBundle.messagePointer("jdk.22.preview.language.level.description"), 22),
-  JDK_X(JavaPsiBundle.messagePointer("jdk.X.language.level.description"), 23),
-
+  JDK_23(JavaPsiBundle.messagePointer("jdk.23.language.level.description"), 23),
+  JDK_23_PREVIEW(JavaPsiBundle.messagePointer("jdk.23.preview.language.level.description"), 23),
+  JDK_X(JavaPsiBundle.messagePointer("jdk.X.language.level.description"), 24),
   ;
 
   /**
    * Should point to the latest released JDK.
    */
-  public static final LanguageLevel HIGHEST = JDK_22;
+  public static final LanguageLevel HIGHEST = JDK_23;
 
   private final Supplier<@Nls String> myPresentableText;
   private final JavaVersion myVersion;

@@ -5,16 +5,16 @@ import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiElement
 import com.intellij.psi.util.parentOfType
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
-import org.jetbrains.kotlin.analysis.api.calls.KtCallableMemberCall
-import org.jetbrains.kotlin.analysis.api.calls.KtErrorCallInfo
-import org.jetbrains.kotlin.analysis.api.calls.symbol
-import org.jetbrains.kotlin.analysis.api.components.buildClassType
+import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
+import org.jetbrains.kotlin.analysis.api.KaSession
+import org.jetbrains.kotlin.analysis.api.resolution.KaCallableMemberCall
+import org.jetbrains.kotlin.analysis.api.resolution.KaErrorCallInfo
+import org.jetbrains.kotlin.analysis.api.resolution.symbol
 import org.jetbrains.kotlin.analysis.api.fir.diagnostics.KaFirDiagnostic
 import org.jetbrains.kotlin.analysis.api.symbols.*
-import org.jetbrains.kotlin.analysis.api.symbols.markers.KtNamedSymbol
-import org.jetbrains.kotlin.analysis.api.types.KtFunctionalType
-import org.jetbrains.kotlin.analysis.api.types.KtType
+import org.jetbrains.kotlin.analysis.api.symbols.markers.KaNamedSymbol
+import org.jetbrains.kotlin.analysis.api.types.KaFunctionType
+import org.jetbrains.kotlin.analysis.api.types.KaType
 import org.jetbrains.kotlin.builtins.StandardNames.IMPLICIT_LAMBDA_PARAMETER_NAME
 import org.jetbrains.kotlin.builtins.functions.FunctionTypeKind
 import org.jetbrains.kotlin.idea.base.analysis.api.utils.analyzeInModalWindow
@@ -138,14 +138,15 @@ object ChangeSignatureFixFactory {
         }
     }
 
-    context(KtAnalysisSession)
+    context(KaSession)
+    @OptIn(KaExperimentalApi::class)
     private fun prepareChangeInfo(psi: PsiElement, input: Input): KotlinChangeInfo? {
         if (input.type == ChangeType.CHANGE_FUNCTIONAL) {
             return prepareFunctionalLiteralChangeInfo(psi as KtLambdaExpression, input)
         }
         val callElement = psi.parentOfType<KtCallElement>(input.type == ChangeType.REMOVE) ?: return null
         val functionCall =
-            ((callElement.resolveCall() as? KtErrorCallInfo)?.candidateCalls?.firstOrNull() as? KtCallableMemberCall<*, *>)
+            ((callElement.resolveToCall() as? KaErrorCallInfo)?.candidateCalls?.firstOrNull() as? KaCallableMemberCall<*, *>)
                 ?: return null
 
         val ktCallableDeclaration = functionCall.partiallyAppliedSymbol.symbol.psi as? KtNamedDeclaration
@@ -192,8 +193,8 @@ object ChangeSignatureFixFactory {
                     if (i < parameters.size) {
                         usedNames.add(parameters[i].name!!)
                         val argumentType = getKtType(expression)
-                        val parameterType = parameters[i].getReturnKtType()
-                        if (argumentType != null && !argumentType.isSubTypeOf(parameterType)) {
+                        val parameterType = parameters[i].returnType
+                        if (argumentType != null && !argumentType.isSubtypeOf(parameterType)) {
                             changeInfo.newParameters[i + if ((ktCallableDeclaration as? KtCallableDeclaration)?.receiverTypeReference != null) 1 else 0].setType(
                                 argumentType.render(position = Variance.IN_VARIANCE)
                             )
@@ -210,7 +211,7 @@ object ChangeSignatureFixFactory {
         return changeInfo
     }
 
-    context(KtAnalysisSession)
+    context(KaSession)
     private fun prepareFunctionalLiteralChangeInfo(psi: KtLambdaExpression, input: Input): KotlinChangeInfo? {
         val callable = psi.functionLiteral
         val descriptor = KotlinMethodDescriptor(callable)
@@ -228,14 +229,14 @@ object ChangeSignatureFixFactory {
             val paramName = paramInfo.name
             changeInfo.addParameter(
                 KotlinParameterInfo(
-                    -1,
-                    KotlinTypeInfo(paramInfo.type, callable),
-                    suggestNameByName(paramName, nameValidator),
-                    KotlinValVar.None,
-                    null,
-                    false,
-                    null,
-                    callable
+                    originalIndex = -1,
+                    originalType = KotlinTypeInfo(paramInfo.type, callable),
+                    name = suggestNameByName(paramName, nameValidator),
+                    valOrVar = KotlinValVar.None,
+                    defaultValueForCall = null,
+                    defaultValueAsDefaultParameter = false,
+                    defaultValue = null,
+                    context = callable
                 )
             )
         }
@@ -244,7 +245,7 @@ object ChangeSignatureFixFactory {
         return changeInfo
     }
 
-    context(KtAnalysisSession)
+    context(KaSession)
     private fun getNameValidator(
         callable: KtNamedDeclaration, usedNames: MutableSet<String> = mutableSetOf<String>()
     ): (String) -> Boolean {
@@ -256,16 +257,17 @@ object ChangeSignatureFixFactory {
         return { name -> usedNames.add(name) && nameValidator.validate(name) }
     }
 
-    context(KtAnalysisSession)
-    private fun getKtType(argumentExpression: KtExpression?): KtType? {
-        var ktType = argumentExpression?.getKtType()
+    context(KaSession)
+    @OptIn(KaExperimentalApi::class)
+    private fun getKtType(argumentExpression: KtExpression?): KaType? {
+        var ktType = argumentExpression?.expressionType
         val typeKind = ktType?.functionTypeKind
         when (typeKind) {
             FunctionTypeKind.KFunction -> typeKind.nonReflectKind()
             FunctionTypeKind.KSuspendFunction -> typeKind.nonReflectKind()
             else -> null
         }?.let {
-            val functionalType = ktType as KtFunctionalType
+            val functionalType = ktType as KaFunctionType
             return buildClassType(it.numberedClassId((functionalType).arity)) {
                 functionalType.parameterTypes.forEach { arg ->
                     argument(arg)
@@ -276,7 +278,7 @@ object ChangeSignatureFixFactory {
         return ktType
     }
 
-    context(KtAnalysisSession)
+    context(KaSession)
     private fun getNewArgumentName(argument: ValueArgument, validator: (String) -> Boolean): String {
         val expression = KtPsiUtil.deparenthesize(argument.getArgumentExpression())
         val argumentName = argument.getArgumentName()?.asName?.asString() ?: (expression as? KtNameReferenceExpression)?.getReferencedName()
@@ -288,7 +290,7 @@ object ChangeSignatureFixFactory {
                 val expressionText = expression.text
                 with(KotlinNameSuggester()) {
                     if (isSpecialName(expressionText)) {
-                        val ktType = expression.getKtType()
+                        val ktType = expression.expressionType
                         if (ktType != null) {
                             return suggestTypeNames(ktType).map { typeName ->
                                 suggestNameByName(typeName, validator)
@@ -308,25 +310,25 @@ object ChangeSignatureFixFactory {
         return name == IMPLICIT_LAMBDA_PARAMETER_NAME.identifier || name == "field"
     }
 
-    context(KtAnalysisSession)
+    context(KaSession)
     private fun createAddParameterFix(
-        ktCallableSymbol: KtCallableSymbol,
+        ktCallableSymbol: KaCallableSymbol,
         element: PsiElement,
     ): List<ParameterQuickFix> {
-        if (ktCallableSymbol !is KtFunctionLikeSymbol) return emptyList()
+        if (ktCallableSymbol !is KaFunctionSymbol) return emptyList()
         val name = getDeclarationName(ktCallableSymbol) ?: return emptyList()
         val valueArgument = element.parentOfType<KtValueArgument>(true) ?: return emptyList()
         val callElement = valueArgument.parentOfType<KtCallElement>() ?: return emptyList()
         val valueArguments = callElement.valueArguments
         val idx = valueArguments.indexOf(valueArgument)
         val hasTypeMismatch = idx > 0 && valueArguments.take(idx).zip(ktCallableSymbol.valueParameters).any { (arg, s) ->
-            (arg as? KtValueArgument)?.getArgumentExpression()?.getKtType()?.isSubTypeOf(s.returnType) != true
+            (arg as? KtValueArgument)?.getArgumentExpression()?.expressionType?.isSubtypeOf(s.returnType) != true
         }
 
         val input = Input(
             type = if (hasTypeMismatch) ChangeType.TOO_MANY_ARGUMENTS_WITH_TYPE_MISMATCH else ChangeType.ADD,
             name = name,
-            isConstructor = ktCallableSymbol is KtConstructorSymbol,
+            isConstructor = ktCallableSymbol is KaConstructorSymbol,
             idx = idx,
             parameterCount = ktCallableSymbol.valueParameters.size,
         )
@@ -335,25 +337,25 @@ object ChangeSignatureFixFactory {
         )
     }
 
-    context(KtAnalysisSession)
+    context(KaSession)
     private fun createRemoveParameterFix(
-        symbol: KtSymbol,
+        symbol: KaSymbol,
         element: PsiElement,
     ): List<ParameterQuickFix> {
-        if (symbol !is KtParameterSymbol) return emptyList()
-        val containingSymbol = symbol.getContainingSymbol() as? KtFunctionLikeSymbol ?: return emptyList()
-        if (containingSymbol is KtFunctionSymbol && containingSymbol.valueParameters.any { it.isVararg } ||
-            containingSymbol.origin == KtSymbolOrigin.SOURCE_MEMBER_GENERATED ||
-            containingSymbol.origin == KtSymbolOrigin.LIBRARY
+        if (symbol !is KaParameterSymbol) return emptyList()
+        val containingSymbol = symbol.containingDeclaration as? KaFunctionSymbol ?: return emptyList()
+        if (containingSymbol is KaNamedFunctionSymbol && containingSymbol.valueParameters.any { it.isVararg } ||
+            containingSymbol.origin == KaSymbolOrigin.SOURCE_MEMBER_GENERATED ||
+            containingSymbol.origin == KaSymbolOrigin.LIBRARY
         ) return emptyList()
 
-        val name = (symbol as? KtNamedSymbol)?.name?.asString() ?: return emptyList()
+        val name = (symbol as? KaNamedSymbol)?.name?.asString() ?: return emptyList()
         element.parentOfType<KtCallElement>(true) ?: return emptyList()
 
         val input = Input(
             type = ChangeType.REMOVE,
             name = name,
-            isConstructor = containingSymbol is KtConstructorSymbol,
+            isConstructor = containingSymbol is KaConstructorSymbol,
             idx = containingSymbol.valueParameters.indexOf<Any>(symbol),
             parameterCount = containingSymbol.valueParameters.size,
         )
@@ -362,17 +364,18 @@ object ChangeSignatureFixFactory {
         )
     }
 
-    context(KtAnalysisSession)
+    context(KaSession)
+    @OptIn(KaExperimentalApi::class)
     private fun createMismatchParameterTypeFix(
         element: PsiElement,
-        expectedType: KtType
+        expectedType: KaType
     ): List<ParameterQuickFix> {
         val valueArgument = element.getStrictParentOfType<KtValueArgument>()
         if (valueArgument == null) return emptyList()
 
         val callElement = valueArgument.parentOfType<KtCallElement>() ?: return emptyList()
         val functionLikeSymbol =
-            ((callElement.resolveCall() as? KtErrorCallInfo)?.candidateCalls?.firstOrNull() as? KtCallableMemberCall<*, *>)?.symbol as? KtFunctionLikeSymbol
+            ((callElement.resolveToCall() as? KaErrorCallInfo)?.candidateCalls?.firstOrNull() as? KaCallableMemberCall<*, *>)?.symbol as? KaFunctionSymbol
                 ?: return emptyList()
 
         val name = getDeclarationName(functionLikeSymbol) ?: return emptyList()
@@ -381,7 +384,7 @@ object ChangeSignatureFixFactory {
 
         if (newParametersCnt <= 0 && element !is KtLambdaExpression) return emptyList()
 
-        val expectedParameterTypes = (expectedType as? KtFunctionalType)
+        val expectedParameterTypes = (expectedType as? KaFunctionType)
             ?.let { it.parameterTypes + it.returnType }
             ?.map {
                 ParameterInfo(
@@ -393,7 +396,7 @@ object ChangeSignatureFixFactory {
         val input = Input(
             type = if (element is KtLambdaExpression) ChangeType.CHANGE_FUNCTIONAL else ChangeType.TYPE_MISMATCH,
             name = name,
-            isConstructor = functionLikeSymbol is KtConstructorSymbol,
+            isConstructor = functionLikeSymbol is KaConstructorSymbol,
             idx = callElement.valueArguments.indexOf(valueArgument),
             parameterCount = functionLikeSymbol.valueParameters.size,
             expectedParameterTypes = expectedParameterTypes,
@@ -405,17 +408,17 @@ object ChangeSignatureFixFactory {
     }
 }
 
-context(KtAnalysisSession)
-internal fun getDeclarationName(functionLikeSymbol: KtFunctionLikeSymbol): String? {
+context(KaSession)
+internal fun getDeclarationName(functionLikeSymbol: KaFunctionSymbol): String? {
     return when(functionLikeSymbol) {
-        is KtConstructorSymbol -> {
+        is KaConstructorSymbol -> {
             val constructorSymbol = functionLikeSymbol
-            if ((constructorSymbol.getContainingSymbol() as? KtNamedClassOrObjectSymbol)?.isInline == true) {
+            if ((constructorSymbol.containingDeclaration as? KaNamedClassSymbol)?.isInline == true) {
                 null
             } else constructorSymbol.containingClassId?.shortClassName
         }
 
-        is KtFunctionSymbol -> {
+        is KaNamedFunctionSymbol -> {
             functionLikeSymbol.name
         }
 

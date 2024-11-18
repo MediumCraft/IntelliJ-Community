@@ -7,12 +7,9 @@ import com.intellij.util.SystemProperties
 import com.intellij.util.net.NetUtils.isLocalhost
 import org.jetbrains.annotations.ApiStatus
 import java.io.IOException
-import java.net.Proxy
-import java.net.ProxySelector
-import java.net.SocketAddress
-import java.net.URI
-import java.net.URL
-import java.util.Collections
+import java.net.*
+import java.util.*
+import java.util.concurrent.CancellationException
 import java.util.concurrent.atomic.AtomicReference
 import java.util.function.Predicate
 
@@ -22,8 +19,13 @@ class IdeProxySelector(
   private val autoProxyResult = AtomicReference<AutoProxyHolder?>()
   private val exceptionsMatcher = AtomicReference<ExceptionsMatcherHolder?>()
 
-  override fun select(uri: URI): List<Proxy> {
+  override fun select(uri: URI?): List<Proxy> {
     logger.debug { "$uri: select" }
+    if (uri == null) {
+      logger.debug { "$uri: no proxy, uri is null" }
+      return NO_PROXY_LIST
+    }
+
     if (!("http" == uri.scheme || "https" == uri.scheme)) {
       logger.debug { "$uri: no proxy, not http/https scheme: ${uri.scheme}" }
       return NO_PROXY_LIST
@@ -34,7 +36,19 @@ class IdeProxySelector(
       return NO_PROXY_LIST
     }
 
-    when (val conf = configurationProvider.getProxyConfiguration()) {
+    val conf = try {
+      configurationProvider.getProxyConfiguration()
+    }
+    catch (_: CancellationException) {
+      logger.debug { "$uri: no proxy, cancelled" }
+      return NO_PROXY_LIST
+    }
+    catch (e: Exception) {
+      logger.error("$uri: no proxy, failed to get proxy configuration", e)
+      return NO_PROXY_LIST
+    }
+
+    when (conf) {
       is ProxyConfiguration.DirectProxy -> {
         logger.debug { "$uri: no proxy, DIRECT configuration" }
         return NO_PROXY_LIST
@@ -43,7 +57,7 @@ class IdeProxySelector(
         return selectUsingPac((conf as? ProxyConfiguration.ProxyAutoConfiguration)?.pacUrl, uri)
       }
       is ProxyConfiguration.StaticProxyConfiguration -> {
-        if (getExceptionsMatcher(conf.exceptions).test(uri.host)) {
+        if (getExceptionsMatcher(conf.exceptions).test(uri.host ?: "")) {
           logger.debug { "$uri: no proxy, uri is in exception list" }
           return NO_PROXY_LIST
         }
@@ -82,7 +96,10 @@ class IdeProxySelector(
         return NO_PROXY_LIST
       }
     }
-    catch (e: Throwable) {
+    catch (e: CancellationException) {
+      throw e
+    }
+    catch (e: Exception) {
       logger.error("$uri: no proxy, failed to select using PAC/autodetect", e)
       return NO_PROXY_LIST
     }
@@ -99,15 +116,26 @@ class IdeProxySelector(
       if (autoProxy != null && autoProxy.pacUrl?.toString() == pacUrl?.toString()) return autoProxy.selector
 
       val searchStartMs = System.currentTimeMillis()
-      val detectedSelector = NetUtils.getProxySelector(pacUrl?.toString())
-                             ?: DirectSelector.also { // just in case
-                               logger.warn("failed to configure proxy by pacUrl=$pacUrl (null if autodetect)")
-                             }
+      val detectedSelector = try {
+        NetUtils.getProxySelector(pacUrl?.toString())
+      }
+      catch (e: Exception) {
+        logger.warn("proxy auto-configuration has failed ${pacUrl?.let { "(url=$it)" }}", e)
+        null
+      }
+      val resultSelector = detectedSelector ?: DirectSelector.also {
+        if (pacUrl != null) {
+          logger.warn("failed to configure proxy by pacUrl=$pacUrl, using NO_PROXY")
+        }
+        else {
+          logger.info("unable to autodetect proxy settings, using NO_PROXY")
+        }
+      }
       if (pacUrl == null) {
         proxyAutodetectDurationMs = System.currentTimeMillis() - searchStartMs
       }
-      autoProxyResult.set(AutoProxyHolder(pacUrl, detectedSelector))
-      return detectedSelector
+      autoProxyResult.set(AutoProxyHolder(pacUrl, resultSelector))
+      return resultSelector
     }
   }
 

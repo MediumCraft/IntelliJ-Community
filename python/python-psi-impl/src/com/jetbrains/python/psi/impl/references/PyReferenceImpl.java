@@ -252,13 +252,13 @@ public class PyReferenceImpl implements PsiReferenceEx, PsiPolyVariantReference 
               if (r.getClass() != RatedResolveResult.class || !(r.getElement() instanceof PyFunction pyFunction)) {
                 return StreamEx.of(r);
               }
-              int adjustedRate = r.getRate() == RatedResolveResult.RATE_PY_FILE_OVERLOAD ?
-                                 RatedResolveResult.RATE_LIFTED_PY_FILE_OVERLOAD : r.getRate();
-              return StreamEx.of(PyiUtil.getOverloads(pyFunction, typeEvalContext))
+              List<PyFunction> overloads = PyiUtil.getOverloads(pyFunction, typeEvalContext);
+              if (overloads.isEmpty()) {
+                return StreamEx.of(r);
+              }
+              return StreamEx.of(overloads)
                 .map(overload -> new RatedResolveResult(getRate(overload, typeEvalContext), overload))
-                .prepend(StreamEx.ofNullable(
-                  PyiUtil.isInsideStub(myElement) ? null : new RatedResolveResult(adjustedRate, pyFunction)
-                ));
+                .prepend(StreamEx.ofNullable(PyiUtil.isOverload(pyFunction, typeEvalContext) ? null : r));
             })
             .toImmutableList();
         }
@@ -278,7 +278,7 @@ public class PyReferenceImpl implements PsiReferenceEx, PsiPolyVariantReference 
 
           if (outermostNestedClass != null) {
             final List<Instruction> instructions =
-              PyDefUseUtil.getLatestDefs(resolvedOwner, referencedName, outermostNestedClass, false, true);
+              PyDefUseUtil.getLatestDefs(resolvedOwner, referencedName, outermostNestedClass, false, true, typeEvalContext);
 
             return resolveToLatestDefs(instructions, outermostNestedClass, referencedName, typeEvalContext);
           }
@@ -334,7 +334,7 @@ public class PyReferenceImpl implements PsiReferenceEx, PsiPolyVariantReference 
   protected List<Instruction> getLatestDefinitions(@NotNull String referencedName,
                                                    @Nullable ScopeOwner resolvedOwner,
                                                    @Nullable PsiElement realContext) {
-    return PyDefUseUtil.getLatestDefs(resolvedOwner, referencedName, realContext, false, true);
+    return PyDefUseUtil.getLatestDefs(resolvedOwner, referencedName, realContext, false, true, myContext.getTypeEvalContext());
   }
 
   private boolean allInOwnScopeComprehensions(@NotNull Collection<PsiElement> elements) {

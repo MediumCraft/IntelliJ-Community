@@ -20,7 +20,7 @@ public final class LombokTestUtil {
   public static final DefaultLightProjectDescriptor LOMBOK_DESCRIPTOR = new DefaultLightProjectDescriptor() {
     @Override
     public void configureModule(@NotNull Module module, @NotNull ModifiableRootModel model, @NotNull ContentEntry contentEntry) {
-      DefaultLightProjectDescriptor.addJetBrainsAnnotations(model);
+      DefaultLightProjectDescriptor.addJetBrainsAnnotationsWithTypeUse(model);
       MavenDependencyUtil.addFromMaven(model, LOMBOK_MAVEN_COORDINATES, true, DependencyScope.PROVIDED);
       MavenDependencyUtil.addFromMaven(model, JACKSON_MAVEN_COORDINATES);
       MavenDependencyUtil.addFromMaven(model, "com.google.guava:guava:27.0.1-jre");
@@ -34,11 +34,28 @@ public final class LombokTestUtil {
     }
   };
 
+  public static final DefaultLightProjectDescriptor WITHOUT_LOMBOK_DESCRIPTOR = new DefaultLightProjectDescriptor() {
+    @Override
+    public void configureModule(@NotNull Module module, @NotNull ModifiableRootModel model, @NotNull ContentEntry contentEntry) {
+      DefaultLightProjectDescriptor.addJetBrainsAnnotationsWithTypeUse(model);
+      MavenDependencyUtil.addFromMaven(model, JACKSON_MAVEN_COORDINATES);
+      MavenDependencyUtil.addFromMaven(model, "com.google.guava:guava:27.0.1-jre");
+      MavenDependencyUtil.addFromMaven(model, "org.slf4j:slf4j-api:1.7.30");
+      model.getModuleExtension(LanguageLevelModuleExtension.class).setLanguageLevel(LanguageLevel.HIGHEST);
+    }
+
+    @Override
+    public Sdk getSdk() {
+      return IdeaTestUtil.getMockJdk18();
+    }
+  };
+
   public static final DefaultLightProjectDescriptor LOMBOK_NEW_DESCRIPTOR = new DefaultLightProjectDescriptor() {
     @Override
     public void configureModule(@NotNull Module module, @NotNull ModifiableRootModel model, @NotNull ContentEntry contentEntry) {
       MavenDependencyUtil.addFromMaven(model, LOMBOK_MAVEN_COORDINATES, true, DependencyScope.PROVIDED);
       MavenDependencyUtil.addFromMaven(model, JACKSON_MAVEN_COORDINATES);
+      MavenDependencyUtil.addFromMaven(model, "com.google.code.findbugs:jsr305:3.0.2");
       MavenDependencyUtil.addFromMaven(model, "org.slf4j:slf4j-api:1.7.30");
       model.getModuleExtension(LanguageLevelModuleExtension.class).setLanguageLevel(LanguageLevel.HIGHEST);
     }

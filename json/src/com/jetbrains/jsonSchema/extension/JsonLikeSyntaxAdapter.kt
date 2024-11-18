@@ -8,6 +8,10 @@ import com.intellij.psi.util.PsiTreeUtil
 import com.jetbrains.jsonSchema.impl.JsonSchemaType
 
 interface JsonLikeSyntaxAdapter {
+  /**
+   * Tries to get a property value element for a context element supplied.
+   * May modify PSI and create a new property value element if it wasn't there before.
+   */
   fun adjustValue(value: PsiElement): PsiElement = value
 
   /**
@@ -34,6 +38,7 @@ interface JsonLikeSyntaxAdapter {
    * @return the [PsiElement] representing the item that was added.
    */
   fun addArrayItem(array: PsiElement, itemValue: String): PsiElement
+  fun removeArrayItem(item: PsiElement)
   
   fun ensureComma(self: PsiElement?, newElement: PsiElement?)
   fun removeIfComma(forward: PsiElement?)

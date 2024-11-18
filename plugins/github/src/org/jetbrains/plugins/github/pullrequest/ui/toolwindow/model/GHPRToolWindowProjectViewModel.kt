@@ -13,7 +13,9 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.Disposer
 import com.intellij.platform.util.coroutines.childScope
+import com.intellij.util.concurrency.SynchronizedClearableLazy
 import git4idea.GitStandardRemoteBranch
 import git4idea.push.GitPushRepoResult
 import git4idea.remote.hosting.findHostedRemoteBranchTrackedByCurrent
@@ -24,18 +26,24 @@ import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import org.jetbrains.annotations.ApiStatus
+import org.jetbrains.plugins.github.ai.GHPRAIReviewViewModel
+import org.jetbrains.plugins.github.ai.GHPRAISummaryViewModel
 import org.jetbrains.plugins.github.api.GHRepositoryConnection
 import org.jetbrains.plugins.github.api.GHRepositoryCoordinates
 import org.jetbrains.plugins.github.api.data.pullrequest.GHPullRequestShort
 import org.jetbrains.plugins.github.pullrequest.GHPRListViewModel
+import org.jetbrains.plugins.github.pullrequest.config.GithubPullRequestsProjectUISettings
 import org.jetbrains.plugins.github.pullrequest.data.GHPRDataContext
 import org.jetbrains.plugins.github.pullrequest.data.GHPRIdentifier
 import org.jetbrains.plugins.github.pullrequest.ui.GHPRViewModelContainer
+import org.jetbrains.plugins.github.pullrequest.ui.GHPRViewModelContainerImpl
 import org.jetbrains.plugins.github.pullrequest.ui.diff.GHPRDiffViewModel
 import org.jetbrains.plugins.github.pullrequest.ui.editor.GHPRReviewInEditorViewModel
 import org.jetbrains.plugins.github.pullrequest.ui.review.GHPRBranchWidgetViewModel
 import org.jetbrains.plugins.github.pullrequest.ui.timeline.GHPRTimelineViewModel
 import org.jetbrains.plugins.github.pullrequest.ui.toolwindow.GHPRToolWindowTab
+import org.jetbrains.plugins.github.pullrequest.ui.toolwindow.create.GHPRCreateViewModel
+import org.jetbrains.plugins.github.pullrequest.ui.toolwindow.create.GHPRCreateViewModelImpl
 import org.jetbrains.plugins.github.ui.util.GHUIUtil
 import org.jetbrains.plugins.github.util.DisposalCountingHolder
 import org.jetbrains.plugins.github.util.GHGitRepositoryMapping
@@ -48,12 +56,11 @@ class GHPRToolWindowProjectViewModel internal constructor(
   private val project: Project,
   parentCs: CoroutineScope,
   private val twVm: GHPRToolWindowViewModel,
-  connection: GHRepositoryConnection
+  connection: GHRepositoryConnection,
 ) : ReviewToolwindowProjectViewModel<GHPRToolWindowTab, GHPRToolWindowTabViewModel> {
-  private val cs = parentCs.childScope()
+  private val cs = parentCs.childScope(javaClass.name)
 
   internal val dataContext: GHPRDataContext = connection.dataContext
-  val defaultBranch: String? = dataContext.repositoryDataService.defaultBranchName
 
   private val repoManager = project.service<GHHostedRepositoriesManager>()
   private val allRepos = repoManager.knownRepositories.map(GHGitRepositoryMapping::repository)
@@ -62,9 +69,14 @@ class GHPRToolWindowProjectViewModel internal constructor(
 
   override val listVm: GHPRListViewModel = GHPRListViewModel(project, cs, connection.dataContext)
 
+  private val lazyCreateVm = SynchronizedClearableLazy {
+    GHPRCreateViewModelImpl(project, cs, repoManager, GithubPullRequestsProjectUISettings.getInstance(project), connection.dataContext, this)
+  }
+  internal fun getCreateVmOrNull(): GHPRCreateViewModel? = lazyCreateVm.valueIfInitialized
+
   private val pullRequestsVms = Caffeine.newBuilder().build<GHPRIdentifier, DisposalCountingHolder<GHPRViewModelContainer>> { id ->
     DisposalCountingHolder {
-      GHPRViewModelContainer(project, cs, dataContext, this, id, it)
+      GHPRViewModelContainerImpl(project, cs, dataContext, this, id, it)
     }
   }
 
@@ -74,16 +86,29 @@ class GHPRToolWindowProjectViewModel internal constructor(
   private fun createVm(tab: GHPRToolWindowTab.PullRequest): GHPRToolWindowTabViewModel.PullRequest =
     GHPRToolWindowTabViewModel.PullRequest(cs, this, tab.prId)
 
-  private fun createVm(tab: GHPRToolWindowTab.NewPullRequest): GHPRToolWindowTabViewModel.NewPullRequest =
-    GHPRToolWindowTabViewModel.NewPullRequest(project, dataContext)
-
   override fun selectTab(tab: GHPRToolWindowTab?) = tabsHelper.select(tab)
   override fun closeTab(tab: GHPRToolWindowTab) = tabsHelper.close(tab)
 
+  fun closeTab(tab: GHPRToolWindowTab.NewPullRequest, reset: Boolean = true) {
+    synchronized(lazyCreateVm) {
+      tabsHelper.close(tab)
+      if (reset) {
+        lazyCreateVm.drop()?.let(Disposer::dispose)
+        cs.launch {
+          dataContext.filesManager.closeNewPrFile()
+        }
+      }
+    }
+  }
+
   fun createPullRequest(requestFocus: Boolean = true) {
-    tabsHelper.showTab(GHPRToolWindowTab.NewPullRequest, ::createVm) {
-      if (requestFocus) {
-        requestFocus()
+    synchronized(lazyCreateVm) {
+      tabsHelper.showTab(GHPRToolWindowTab.NewPullRequest, {
+        GHPRToolWindowTabViewModel.NewPullRequest(lazyCreateVm.value)
+      }) {
+        if (requestFocus) {
+          requestFocus()
+        }
       }
     }
   }
@@ -113,6 +138,15 @@ class GHPRToolWindowProjectViewModel internal constructor(
     }
   }
 
+  fun openPullRequestInfoAndTimeline(number: Long) {
+    cs.launch {
+      val prId = dataContext.detailsService.findPRId(number) ?: return@launch // It's an issue ID or doesn't exist
+
+      viewPullRequest(prId, true)
+      openPullRequestTimeline(prId, true)
+    }
+  }
+
   fun openPullRequestTimeline(id: GHPRIdentifier, requestFocus: Boolean) {
     cs.launch(Dispatchers.Main) {
       dataContext.filesManager.createAndOpenTimelineFile(id, requestFocus)
@@ -124,6 +158,12 @@ class GHPRToolWindowProjectViewModel internal constructor(
       dataContext.filesManager.createAndOpenDiffFile(id, requestFocus)
     }
   }
+
+  fun acquireAIReviewViewModel(id: GHPRIdentifier, disposable: Disposable): StateFlow<GHPRAIReviewViewModel?> =
+    pullRequestsVms[id].acquireValue(disposable).aiReviewVm
+
+  fun acquireAISummaryViewModel(id: GHPRIdentifier, disposable: Disposable): StateFlow<GHPRAISummaryViewModel?> =
+    pullRequestsVms[id].acquireValue(disposable).aiSummaryVm
 
   fun acquireInfoViewModel(id: GHPRIdentifier, disposable: Disposable): GHPRInfoViewModel =
     pullRequestsVms[id].acquireValue(disposable).infoVm

@@ -1,18 +1,14 @@
-// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.credentialStore
 
 import com.intellij.credentialStore.gpg.Pgp
 import com.intellij.credentialStore.gpg.PgpKey
 import com.intellij.credentialStore.kdbx.IncorrectMainPasswordException
-import com.intellij.credentialStore.keePass.DB_FILE_NAME
-import com.intellij.credentialStore.keePass.KeePassFileManager
-import com.intellij.credentialStore.keePass.MainKeyFileStorage
-import com.intellij.credentialStore.keePass.getDefaultMainPasswordFile
+import com.intellij.credentialStore.keePass.*
 import com.intellij.ide.IdeBundle
 import com.intellij.ide.passwordSafe.PasswordSafe
 import com.intellij.ide.passwordSafe.impl.PasswordSafeImpl
 import com.intellij.ide.passwordSafe.impl.createPersistentCredentialStore
-import com.intellij.ide.passwordSafe.impl.getDefaultKeePassDbFile
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.components.service
@@ -84,7 +80,7 @@ class PasswordSafeConfigurableUi(private val settings: PasswordSafeSettings) : C
 
     panel.reset()
 
-    keePassDbFile?.text = settings.keepassDb ?: getDefaultKeePassDbFile().toString()
+    keePassDbFile?.text = settings.keepassDb ?: getDefaultDbFile().toString()
   }
 
   override fun isModified(settings: PasswordSafeSettings): Boolean {
@@ -161,7 +157,7 @@ class PasswordSafeConfigurableUi(private val settings: PasswordSafeSettings) : C
     // not in createAndSaveKeePassDatabaseWithNewOptions (as logically should be) because we want to force users to set custom master passwords even if some another setting (not path) was changed
     // (e.g. PGP key)
     if (providerType == ProviderType.KEEPASS) {
-      createKeePassFileManager()?.setCustomMainPasswordIfNeeded(getDefaultKeePassDbFile())
+      createKeePassFileManager()?.setCustomMainPasswordIfNeeded(getDefaultDbFile())
     }
 
     settings.providerType = providerType
@@ -214,18 +210,13 @@ class PasswordSafeConfigurableUi(private val settings: PasswordSafeSettings) : C
 
         indent {
           row(CredentialStoreBundle.message("settings.password.database")) {
-            val fileChooserDescriptor = FileChooserDescriptorFactory.createSingleLocalFileDescriptor().withFileFilter {
-              it.isDirectory || it.name.endsWith(".kdbx")
-            }
-            keePassDbFile = textFieldWithBrowseButton(CredentialStoreBundle.message("passwordSafeConfigurable.keepass.database.file"),
-                                                      fileChooserDescriptor = fileChooserDescriptor,
-                                                      fileChosen = {
-                                                        val path = when {
-                                                          it.isDirectory -> "${it.path}${File.separator}$DB_FILE_NAME"
-                                                          else -> it.path
-                                                        }
-                                                        return@textFieldWithBrowseButton File(path).path
-                                                      })
+            val fileChooserDescriptor = FileChooserDescriptorFactory.createSingleLocalFileDescriptor()
+              .withTitle(CredentialStoreBundle.message("passwordSafeConfigurable.keepass.database.file"))
+              .withExtensionFilter("kdbx")
+            keePassDbFile = textFieldWithBrowseButton(fileChooserDescriptor, fileChosen = {
+              val path = if (it.isDirectory) "${it.path}${File.separator}${DB_FILE_NAME}" else it.path
+              return@textFieldWithBrowseButton File(path).path
+            })
               .resizableColumn()
               .align(AlignX.FILL)
               .gap(RightGap.SMALL)
@@ -316,10 +307,8 @@ class PasswordSafeConfigurableUi(private val settings: PasswordSafeSettings) : C
     override fun actionPerformed(event: AnActionEvent) {
       closeCurrentStore()
 
-      FileChooserDescriptorFactory.createSingleLocalFileDescriptor()
-        .withFileFilter {
-          !it.isDirectory && it.nameSequence.endsWith(".kdbx")
-        }
+      FileChooserDescriptorFactory.createSingleFileDescriptor()
+        .withExtensionFilter("kdbx")
         .chooseFile(event) {
           createKeePassFileManager()?.import(Paths.get(it.path), event)
         }

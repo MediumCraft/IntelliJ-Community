@@ -4,7 +4,7 @@ package com.intellij.openapi.ui.impl;
 import com.intellij.concurrency.ThreadContext;
 import com.intellij.diagnostic.LoadingState;
 import com.intellij.ide.DataManager;
-import com.intellij.ide.impl.DataValidators;
+import com.intellij.ide.impl.ProjectUtil;
 import com.intellij.ide.ui.UISettings;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.*;
@@ -48,6 +48,7 @@ import com.intellij.ui.mac.foundation.MacUtil;
 import com.intellij.ui.mac.touchbar.TouchbarSupport;
 import com.intellij.ui.scale.JBUIScale;
 import com.intellij.util.IJSwingUtilities;
+import com.intellij.util.ObjectUtils;
 import com.intellij.util.SlowOperations;
 import com.intellij.util.containers.JBIterable;
 import com.intellij.util.ui.*;
@@ -92,18 +93,19 @@ public class DialogWrapperPeerImpl extends DialogWrapperPeer {
     if (LoadingState.COMPONENTS_LOADED.isOccurred()) {
       WindowManagerEx windowManager = getWindowManager();
       if (windowManager != null) {
-        if (project == null && LoadingState.COMPONENTS_LOADED.isOccurred()) {
-          //noinspection deprecation
-          project = CommonDataKeys.PROJECT.getData(DataManager.getInstance().getDataContext());
+        Window curWindow = ObjectUtils.chooseNotNull(
+          windowManager.getMostRecentFocusedWindow(),
+          KeyboardFocusManager.getCurrentKeyboardFocusManager().getActiveWindow());
+        if (project == null && curWindow != null) {
+          project = ProjectUtil.getProjectForWindow(curWindow);
         }
 
         myProject = project;
 
         window = windowManager.suggestParentWindow(project);
         if (window == null) {
-          Window focusedWindow = windowManager.getMostRecentFocusedWindow();
-          if (focusedWindow instanceof IdeFrameImpl) {
-            window = focusedWindow;
+          if (curWindow instanceof IdeFrameImpl) {
+            window = curWindow;
           }
         }
         if (window == null) {
@@ -464,8 +466,7 @@ public class DialogWrapperPeerImpl extends DialogWrapperPeer {
     CompletableFuture<Void> result = new CompletableFuture<>();
     SplashManagerKt.hideSplash();
     try (
-      AccessToken ignore = SlowOperations.startSection(SlowOperations.RESET);
-      AccessToken ignore2 = ThreadContext.resetThreadContext()
+      AccessToken ignore = SlowOperations.startSection(SlowOperations.RESET)
     ) {
       myDialog.show();
     }
@@ -549,7 +550,7 @@ public class DialogWrapperPeerImpl extends DialogWrapperPeer {
     }
   }
 
-  private static final class MyDialog extends JDialog implements DialogWrapperDialog, DataProvider, Queryable, AbstractDialog, DisposableWindow {
+  private static final class MyDialog extends JDialog implements DialogWrapperDialog, UiDataProvider, Queryable, AbstractDialog, DisposableWindow {
     private final WeakReference<DialogWrapper> myDialogWrapper;
 
     /**
@@ -614,19 +615,13 @@ public class DialogWrapperPeerImpl extends DialogWrapperPeer {
     }
 
     @Override
-    public Object getData(@NotNull String dataId) {
-      if (CommonDataKeys.PROJECT.is(dataId)) {
-        Project project = getProject();
-        if (project != null && project.isInitialized()) {
-          return project;
-        }
-      }
+    public void uiDataSnapshot(@NotNull DataSink sink) {
       DialogWrapper wrapper = myDialogWrapper.get();
-      Object wrapperData = wrapper instanceof DataProvider ? ((DataProvider)wrapper).getData(dataId) : null;
-      if (wrapperData != null) {
-        return DataValidators.validOrNull(wrapperData, dataId, wrapper);
+      DataSink.uiDataSnapshot(sink, wrapper);
+      Project project = getProject();
+      if (project != null && project.isInitialized()) {
+        sink.set(CommonDataKeys.PROJECT, project);
       }
-      return null;
     }
 
     private void fitToScreen(Rectangle rect) {
@@ -891,7 +886,9 @@ public class DialogWrapperPeerImpl extends DialogWrapperPeer {
         LOG.warn("The dialog wrapper for " + dialogWrapper.getTitle() + " is already disposed");
         return;
       }
-      super.show();
+      try (AccessToken ignore = ThreadContext.resetThreadContext()) {
+        super.show();
+      }
     }
 
     private void logMonitorConfiguration() {
@@ -955,7 +952,9 @@ public class DialogWrapperPeerImpl extends DialogWrapperPeer {
     @Override
     @SuppressWarnings("deprecation")
     public void hide() {
-      super.hide();
+      try (@NotNull AccessToken ignored = ThreadContext.resetThreadContext()) {
+        super.hide();
+      }
     }
 
     @Override
@@ -1125,7 +1124,7 @@ public class DialogWrapperPeerImpl extends DialogWrapperPeer {
       }
     }
 
-    private final class DialogRootPane extends JRootPane implements DataProvider {
+    private final class DialogRootPane extends JRootPane implements UiDataProvider {
 
       private final boolean myGlassPaneIsSet;
 
@@ -1203,11 +1202,11 @@ public class DialogWrapperPeerImpl extends DialogWrapperPeer {
         }
       }
 
-
       @Override
-      public Object getData(@NotNull String dataId) {
+      public void uiDataSnapshot(@NotNull DataSink sink) {
         DialogWrapper wrapper = myDialogWrapper.get();
-        return wrapper != null && PlatformDataKeys.UI_DISPOSABLE.is(dataId) ? wrapper.getDisposable() : null;
+        if (wrapper == null) return;
+        sink.set(PlatformDataKeys.UI_DISPOSABLE, wrapper.getDisposable());
       }
     }
 

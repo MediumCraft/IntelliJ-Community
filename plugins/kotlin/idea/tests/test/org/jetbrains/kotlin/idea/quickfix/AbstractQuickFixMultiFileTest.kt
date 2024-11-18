@@ -18,14 +18,15 @@ import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.util.text.StringUtil
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.platform.testFramework.core.FileComparisonFailedError
 import com.intellij.psi.PsiFile
-import com.intellij.rt.execution.junit.FileComparisonData
 import com.intellij.testFramework.fixtures.impl.CodeInsightTestFixtureImpl
 import com.intellij.util.ArrayUtil
 import com.intellij.util.PathUtil
 import com.intellij.util.ThrowableRunnable
 import junit.framework.TestCase
 import org.jetbrains.kotlin.idea.KotlinFileType
+import org.jetbrains.kotlin.idea.base.plugin.KotlinPluginMode
 import org.jetbrains.kotlin.idea.base.test.IgnoreTests
 import org.jetbrains.kotlin.idea.quickfix.utils.findInspectionFile
 import org.jetbrains.kotlin.idea.test.*
@@ -50,7 +51,7 @@ abstract class AbstractQuickFixMultiFileTest : KotlinLightCodeInsightFixtureTest
     }
 
     private fun enableInspections(beforeFileName: String) {
-        val inspectionFile = findInspectionFile(File(beforeFileName).parentFile)
+        val inspectionFile = findInspectionFile(File(beforeFileName).parentFile, this.pluginMode)
         if (inspectionFile != null) {
             val className = FileUtil.loadFile(inspectionFile).trim { it <= ' ' }
             val inspectionClass = Class.forName(className)
@@ -246,8 +247,7 @@ abstract class AbstractQuickFixMultiFileTest : KotlinLightCodeInsightFixtureTest
                         val afterMain = findAfterFile(mainFile.path)
                         try {
                             myFixture.checkResultByFile(afterMain.name)
-                        } catch (e: AssertionError) {
-                            if (e !is FileComparisonData) throw e
+                        } catch (e: FileComparisonFailedError) {
                             KotlinTestUtils.assertEqualsToFile(afterMain, editor)
                         }
 
@@ -272,7 +272,7 @@ abstract class AbstractQuickFixMultiFileTest : KotlinLightCodeInsightFixtureTest
 
     private fun findAfterFile(fullPath: String): File {
         val path = fullPath.replace(".before.Main.", ".before.")
-        val afterTokens = (if (isFirPlugin) arrayOf(".after.fir.") else arrayOf()) + ".after."
+        val afterTokens = (if (pluginMode == KotlinPluginMode.K2) arrayOf(".after.k2.") else arrayOf()) + ".after."
         for (afterToken in afterTokens) {
             val file = File(path.replace(".before.", afterToken))
             if (file.exists()) return file
@@ -331,7 +331,9 @@ abstract class AbstractQuickFixMultiFileTest : KotlinLightCodeInsightFixtureTest
 
             if (action == null) {
                 if (actionShouldBeAvailable) {
-                    val texts = getActionsTexts(availableActions.filter { it.isAvailable(file.project, editor, file) })
+                    val texts = getActionsTexts(availableActions.filter {
+                        ShowIntentionActionsHandler.availableFor(file, editor, editor.caretModel.offset, it)
+                    })
                     val infos = doHighlighting()
                     TestCase.fail(
                         "Action with text '" + text + "' is not available in test " + testFilePath + "\n" +

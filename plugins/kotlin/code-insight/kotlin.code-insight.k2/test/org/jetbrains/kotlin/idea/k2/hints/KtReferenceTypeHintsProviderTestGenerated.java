@@ -80,6 +80,11 @@ public class KtReferenceTypeHintsProviderTestGenerated extends AbstractKtReferen
         runTest("../../idea/tests/testData/codeInsight/hints/types/Destructuring.kt");
     }
 
+    @TestMetadata("EmptyFunctionalType.kt")
+    public void testEmptyFunctionalType() throws Exception {
+        runTest("../../idea/tests/testData/codeInsight/hints/types/EmptyFunctionalType.kt");
+    }
+
     @TestMetadata("EnumEntry.kt")
     public void testEnumEntry() throws Exception {
         runTest("../../idea/tests/testData/codeInsight/hints/types/EnumEntry.kt");
@@ -145,9 +150,19 @@ public class KtReferenceTypeHintsProviderTestGenerated extends AbstractKtReferen
         runTest("../../idea/tests/testData/codeInsight/hints/types/LambdaReturnType.kt");
     }
 
+    @TestMetadata("LocalClass.kt")
+    public void testLocalClass() throws Exception {
+        runTest("../../idea/tests/testData/codeInsight/hints/types/LocalClass.kt");
+    }
+
     @TestMetadata("LocalVariable.kt")
     public void testLocalVariable() throws Exception {
         runTest("../../idea/tests/testData/codeInsight/hints/types/LocalVariable.kt");
+    }
+
+    @TestMetadata("LongLongClassNames.kt")
+    public void testLongLongClassNames() throws Exception {
+        runTest("../../idea/tests/testData/codeInsight/hints/types/LongLongClassNames.kt");
     }
 
     @TestMetadata("LoopParameter.kt")
@@ -173,6 +188,11 @@ public class KtReferenceTypeHintsProviderTestGenerated extends AbstractKtReferen
     @TestMetadata("ParameterType.kt")
     public void testParameterType() throws Exception {
         runTest("../../idea/tests/testData/codeInsight/hints/types/ParameterType.kt");
+    }
+
+    @TestMetadata("PrivateAnonymousObject.kt")
+    public void testPrivateAnonymousObject() throws Exception {
+        runTest("../../idea/tests/testData/codeInsight/hints/types/PrivateAnonymousObject.kt");
     }
 
     @TestMetadata("PropertyType.kt")

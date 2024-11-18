@@ -4,26 +4,34 @@
 package org.jetbrains.intellij.build
 
 import io.opentelemetry.api.common.AttributeKey
-import io.opentelemetry.api.trace.Span
-import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.Contextual
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.decodeFromStream
+import org.jetbrains.annotations.ApiStatus.Internal
 import org.jetbrains.intellij.build.impl.BundledMavenDownloader
 import org.jetbrains.intellij.build.io.DEFAULT_TIMEOUT
 import org.jetbrains.intellij.build.productRunner.IntellijProductRunner
+import org.jetbrains.intellij.build.telemetry.TraceManager.spanBuilder
 import java.nio.file.Files
 import java.nio.file.Path
-import java.util.*
-import kotlin.io.path.listDirectoryEntries
 
-internal data class FileSource(
+@Internal
+@Serializable
+data class FileSource(
   @JvmField val relativePath: String,
   override var size: Int,
   override var hash: Long,
-  @JvmField val file: Path,
-) : Source
+  @JvmField  @Contextual val file: Path,
+) : Source {
+  init {
+    assert(Files.isRegularFile(file)) { "'$file' is not a file" }
+  }
+}
 
 @Serializable
 data class SearchableOptionSetIndexItem(@JvmField val file: String, @JvmField val size: Int, @JvmField val hash: Long)
@@ -65,65 +73,38 @@ internal suspend fun buildSearchableOptions(
   context: BuildContext,
   systemProperties: VmProperties = VmProperties(emptyMap()),
 ): SearchableOptionSetDescriptor? {
-  val span = Span.current()
-  if (context.isStepSkipped(BuildOptions.SEARCHABLE_OPTIONS_INDEX_STEP)) {
-    span.addEvent("skip building searchable options index")
-    return null
-  }
+  return context.executeStep(spanBuilder("building searchable options index"), BuildOptions.SEARCHABLE_OPTIONS_INDEX_STEP) { span ->
+    val targetDirectory = context.paths.searchableOptionDir
+    // bundled maven is also downloaded during traverseUI execution in an external process,
+    // making it fragile to call more than one traverseUI at the same time (in the reproducibility test, for example),
+    // so it's pre-downloaded with proper synchronization
+    withContext(Dispatchers.IO) {
+      launch(CoroutineName("download maven4 libs")) {
+        BundledMavenDownloader.downloadMaven4Libs(context.paths.communityHomeDirRoot)
+      }
+      launch(CoroutineName("download maven3 libs")) {
+        BundledMavenDownloader.downloadMaven3Libs(context.paths.communityHomeDirRoot)
+      }
+      launch(CoroutineName("download maven distribution")) {
+        BundledMavenDownloader.downloadMavenDistribution(context.paths.communityHomeDirRoot)
+      }
+      launch(CoroutineName("download maven telemetry dependencies")) {
+        BundledMavenDownloader.downloadMavenTelemetryDependencies(context.paths.communityHomeDirRoot)
+      }
+    }
 
-  val targetDirectory = context.paths.searchableOptionDir
-  val locales = mutableListOf(Locale.ENGLISH.toLanguageTag())
-  if (!context.isStepSkipped(BuildOptions.LOCALIZE_STEP)) {
-    val localizationDir = getLocalizationDir(context)
-    locales.addAll(
-      localizationDir?.resolve("properties")?.listDirectoryEntries()?.map { it.fileName.toString() }
-      ?: emptyList()
-    )
-  }
-
-  // bundled maven is also downloaded during traverseUI execution in an external process,
-  // making it fragile to call more than one traverseUI at the same time (in the reproducibility test, for example),
-  // so it's pre-downloaded with proper synchronization
-  coroutineScope {
-    launch {
-      BundledMavenDownloader.downloadMaven4Libs(context.paths.communityHomeDirRoot)
-    }
-    launch {
-      BundledMavenDownloader.downloadMaven3Libs(context.paths.communityHomeDirRoot)
-    }
-    launch {
-      BundledMavenDownloader.downloadMavenDistribution(context.paths.communityHomeDirRoot)
-    }
-    launch {
-      BundledMavenDownloader.downloadMavenTelemetryDependencies(context.paths.communityHomeDirRoot)
-    }
-  }
-
-  for (langTag in locales) {
     // Start the product in headless mode using com.intellij.ide.ui.search.TraverseUIStarter.
     // It'll process all UI elements in the `Settings` dialog and build an index for them.
     productRunner.runProduct(
       args = listOf("traverseUI", targetDirectory.toString(), "true"),
-      additionalVmProperties = systemProperties + getSystemPropertiesForSearchableOptions(langTag),
+      additionalVmProperties = systemProperties + VmProperties(mapOf("idea.l10n.keys" to "only")),
       timeout = DEFAULT_TIMEOUT,
     )
-  }
 
-  val index = readSearchableOptionIndex(targetDirectory)
-  span.setAttribute(AttributeKey.longKey("moduleCountWithSearchableOptions"), index.index.size)
-  span.setAttribute(AttributeKey.stringArrayKey("modulesWithSearchableOptions"), index.index.keys.toList())
+    val index = readSearchableOptionIndex(targetDirectory)
+    span.setAttribute(AttributeKey.longKey("moduleCountWithSearchableOptions"), index.index.size)
+    span.setAttribute(AttributeKey.stringArrayKey("modulesWithSearchableOptions"), index.index.keys.toList())
 
-  return index
-}
-
-private fun getSystemPropertiesForSearchableOptions(langTag: String): VmProperties {
-  if (Locale.ENGLISH.toLanguageTag().equals(langTag)) {
-    return VmProperties(emptyMap())
-  }
-  else {
-    return VmProperties(mapOf(
-      "intellij.searchableOptions.i18n.enabled" to "true",
-      "i18n.locale" to langTag
-    ))
+    index
   }
 }

@@ -8,6 +8,7 @@ import com.intellij.lang.LangBundle;
 import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
+import com.intellij.openapi.actionSystem.impl.SimpleDataContext;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.colors.EditorColorsScheme;
 import com.intellij.openapi.editor.colors.TextAttributesKey;
@@ -37,6 +38,7 @@ import com.intellij.ui.SimpleTextAttributes;
 import com.intellij.util.ObjectUtils;
 import com.intellij.util.Processor;
 import com.intellij.util.containers.JBIterable;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.VisibleForTesting;
 
@@ -53,6 +55,7 @@ import static com.intellij.ui.SimpleTextAttributes.*;
 /**
  * @author gregsh
  */
+@ApiStatus.Internal
 public final class JumpToColorsAndFontsAction extends DumbAwareAction {
 
   public JumpToColorsAndFontsAction() {
@@ -212,7 +215,7 @@ public final class JumpToColorsAndFontsAction extends DumbAwareAction {
   private static boolean openSettingsAndSelectKey(@NotNull Project project,
                                                   @NotNull ColorAndFontDescriptorsProvider page,
                                                   @NotNull AttributesDescriptor descriptor) {
-    return selectOrEditColor(id -> CommonDataKeys.PROJECT.is(id) ? project : null,
+    return selectOrEditColor(SimpleDataContext.getProjectContext(project),
                              descriptor.getDisplayName(), page.getDisplayName());
   }
 }

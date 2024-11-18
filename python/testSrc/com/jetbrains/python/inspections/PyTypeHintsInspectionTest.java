@@ -91,8 +91,8 @@ public class PyTypeHintsInspectionTest extends PyInspectionTestCase {
                    T11 = TypeVar('T11', my_int, my_str)
 
                    my_list_t1 = List[T1]
-                   T22 = TypeVar('T22', int, <warning descr="Constraints cannot be parametrized by type variables">my_list_t1</warning>)
-                   T33 = TypeVar('T33', bound=<warning descr="Constraints cannot be parametrized by type variables">my_list_t1</warning>)
+                   T22 = TypeVar('T22', int, my_list_t1)
+                   T33 = TypeVar('T33', bound=my_list_t1)
 
                    my_list_int = List[int]
                    T44 = TypeVar('T44', int, my_list_int)
@@ -1314,6 +1314,16 @@ public class PyTypeHintsInspectionTest extends PyInspectionTestCase {
                    """);
   }
 
+  // PY-62301
+  public void testTypingSelfInNewMethod() {
+    doTestByText("""
+                   from typing import Self
+                   
+                   class ReturnsSelf:
+                       def __new__(cls, value: int) -> Self: ...
+                   """);
+  }
+
   // PY-36317
   public void testDictSubscriptionNotReportedAsParametrizedGeneric() {
     doTestByText("""
@@ -1404,6 +1414,76 @@ public class PyTypeHintsInspectionTest extends PyInspectionTestCase {
                     class Array(Generic[*Ts1, <error descr="Parameters to generic cannot contain more than one unpacking">*Ts2</error>]):
                         ...
                     """);
+  }
+
+
+  public void testTypeIsDoesntMatch() {
+    doTestByText("""
+                    from typing_extensions import TypeIs
+                    
+                    def <warning descr="Return type of TypeIs 'float' is not consistent with the type of the first parameter 'int'">foo</warning>(x: int) -> TypeIs[float]:
+                      ...
+                    """);
+  }
+
+  public void testTypeIsDoesntMatch2() {
+    doTestByText("""
+                   from typing_extensions import TypeIs
+                   
+                   class Base:
+                       pass
+                   
+                   class Derived(Base):
+                       pass
+                   
+                   def <warning descr="Return type of TypeIs 'Base' is not consistent with the type of the first parameter 'Derived'">isInt123</warning>(x: Derived) -> TypeIs[Base]:
+                       ...
+                   """);
+  }
+
+  public void testTypeIsMatch() {
+    doTestByText("""
+                   from typing_extensions import TypeIs
+                   
+                   class Base:
+                       pass
+                   
+                   class Derived(Base):
+                       pass
+                   
+                   def isInt123(x: Base) -> TypeIs[Derived]:
+                       ...
+                   """);
+  }
+
+  public void testTypeIsMissedParameter() {
+    doTestByText("""
+                    from typing_extensions import TypeIs
+                    
+                    def <warning descr="User-defined TypeGuard or TypeIs functions must have at least one parameter">foo</warning>() -> TypeIs[float]:
+                      ...
+                    """);
+  }
+
+  // PY-71002
+  public void testNonDefaultTypeVarsFollowingOnesWithDefaults() {
+    doTestByText("""
+                   from typing import TypeVar, Generic
+                   
+                   DefaultT = TypeVar("DefaultT", default = str)
+                   DefaultT1 = TypeVar("DefaultT1", default = int)
+                   NoDefaultT2 = TypeVar("NoDefaultT2")
+                   NoDefaultT3 = TypeVar("NoDefaultT3")
+                   
+                   class Clazz(Generic[DefaultT, DefaultT1, <error descr="Non-default TypeVars cannot follow ones with defaults">NoDefaultT2</error>]):
+                       ...
+                   class ClazzA(Generic[DefaultT1, <error descr="Non-default TypeVars cannot follow ones with defaults">NoDefaultT2</error>]):
+                       ...
+                   class ClazzB(Generic[DefaultT, <error descr="Non-default TypeVars cannot follow ones with defaults">NoDefaultT2</error>, DefaultT1]):
+                       ...
+                   class ClazzC(Generic[NoDefaultT2, NoDefaultT3]):
+                       ...
+                   """);
   }
 
   @NotNull

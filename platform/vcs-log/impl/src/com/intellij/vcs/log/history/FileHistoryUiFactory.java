@@ -17,12 +17,12 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.Objects;
 
-public class FileHistoryUiFactory implements VcsLogManager.VcsLogUiFactory<FileHistoryUi> {
+class FileHistoryUiFactory implements VcsLogManager.VcsLogUiFactory<FileHistoryUi> {
   private final @NotNull FilePath myFilePath;
   private final @NotNull VirtualFile myRoot;
   private final @Nullable Hash myHash;
 
-  public FileHistoryUiFactory(@NotNull FilePath path, @NotNull VirtualFile root, @Nullable Hash hash) {
+  FileHistoryUiFactory(@NotNull FilePath path, @NotNull VirtualFile root, @Nullable Hash hash) {
     myFilePath = path;
     myRoot = root;
     myHash = hash;

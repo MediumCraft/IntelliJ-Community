@@ -5,32 +5,30 @@ import com.intellij.ide.IdeBundle
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.ui.Messages.showYesNoCancelDialog
 import com.intellij.psi.ElementDescriptionUtil
-import com.intellij.psi.PsiDirectory
+import com.intellij.psi.PsiClass
 import com.intellij.psi.PsiElement
-import com.intellij.psi.PsiFileFactory
 import com.intellij.psi.util.parentOfType
 import com.intellij.refactoring.util.RefactoringDescriptionLocation
 import org.jetbrains.annotations.Nls
+import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
+import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.analyze
-import org.jetbrains.kotlin.analysis.api.calls.KtErrorCallInfo
-import org.jetbrains.kotlin.analysis.api.calls.KtSimpleFunctionCall
-import org.jetbrains.kotlin.analysis.api.calls.successfulFunctionCallOrNull
-import org.jetbrains.kotlin.analysis.api.calls.successfulVariableAccessCall
-import org.jetbrains.kotlin.analysis.api.calls.symbol
-import org.jetbrains.kotlin.analysis.api.symbols.KtCallableSymbol
-import org.jetbrains.kotlin.analysis.api.types.KtType
-import org.jetbrains.kotlin.analysis.api.types.KtTypeParameterType
-import org.jetbrains.kotlin.idea.KotlinFileType
+import org.jetbrains.kotlin.analysis.api.resolution.*
+import org.jetbrains.kotlin.analysis.api.scopes.KaScope
+import org.jetbrains.kotlin.analysis.api.signatures.KaCallableSignature
+import org.jetbrains.kotlin.analysis.api.signatures.KaFunctionSignature
+import org.jetbrains.kotlin.analysis.api.symbols.*
+import org.jetbrains.kotlin.analysis.api.symbols.markers.KaDeclarationContainerSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.markers.KaNamedSymbol
+import org.jetbrains.kotlin.analysis.api.types.KaType
+import org.jetbrains.kotlin.analysis.api.types.KaTypeParameterType
 import org.jetbrains.kotlin.idea.base.analysis.api.utils.analyzeInModalWindow
 import org.jetbrains.kotlin.idea.base.codeInsight.KotlinOptimizeImportsFacility
-import org.jetbrains.kotlin.idea.base.util.quoteIfNeeded
-import org.jetbrains.kotlin.idea.core.getFqNameWithImplicitPrefix
 import org.jetbrains.kotlin.idea.refactoring.getLastLambdaExpression
 import org.jetbrains.kotlin.idea.refactoring.isComplexCallWithLambdaArgument
 import org.jetbrains.kotlin.idea.refactoring.moveFunctionLiteralOutsideParentheses
 import org.jetbrains.kotlin.idea.util.application.isUnitTestMode
 import org.jetbrains.kotlin.lexer.KtTokens
-import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.name.SpecialNames
 import org.jetbrains.kotlin.psi.*
 import org.jetbrains.kotlin.psi.psiUtil.getStrictParentOfType
@@ -77,9 +75,9 @@ fun checkSuperMethods(declaration: KtDeclaration, ignore: Collection<PsiElement>
     )
 
     val analyzeResult = analyzeInModalWindow(declaration, KotlinK2RefactoringsBundle.message("resolving.super.methods.progress.title")) {
-        (declaration.getSymbol() as? KtCallableSymbol)?.let { callableSymbol ->
-            callableSymbol.originalContainingClassForOverride?.let { containingClass ->
-                val overriddenSymbols = callableSymbol.getAllOverriddenSymbols()
+        (declaration.symbol as? KaCallableSymbol)?.let { callableSymbol ->
+            (callableSymbol.fakeOverrideOriginal.containingSymbol as? KaClassSymbol)?.let { containingClass ->
+                val overriddenSymbols = callableSymbol.allOverriddenSymbols
 
                 val renderToPsi = overriddenSymbols.mapNotNull {
                     it.psi?.let { psi ->
@@ -139,17 +137,17 @@ fun KtCallExpression.canMoveLambdaOutsideParentheses(skipComplexCalls: Boolean =
     if (callee !is KtNameReferenceExpression) return true
 
     analyze(callee) {
-        val resolveCall = callee.resolveCall() ?: return false
+        val resolveCall = callee.resolveToCall() ?: return false
         val call = resolveCall.successfulFunctionCallOrNull()
 
-        fun KtType.isFunctionalType(): Boolean = this is KtTypeParameterType || isSuspendFunctionType || isFunctionType ||  isFunctionalInterfaceType
+        fun KaType.isFunctionalType(): Boolean = this is KaTypeParameterType || isSuspendFunctionType || isFunctionType || isFunctionalInterface
 
         if (call == null) {
             val paramType = resolveCall.successfulVariableAccessCall()?.partiallyAppliedSymbol?.symbol?.returnType
             if (paramType != null && paramType.isFunctionalType()) {
                 return true
             }
-            val calls = (resolveCall as KtErrorCallInfo).candidateCalls.filterIsInstance<KtSimpleFunctionCall>()
+            val calls = (resolveCall as KaErrorCallInfo).candidateCalls.filterIsInstance<KaSimpleFunctionCall>()
 
             return calls.isEmpty() || calls.all { functionalCall ->
                 val lastParameter = functionalCall.partiallyAppliedSymbol.signature.valueParameters.lastOrNull()
@@ -182,5 +180,71 @@ fun KtLambdaExpression.moveFunctionLiteralOutsideParenthesesIfPossible() {
     val call = valueArgumentList.parent as? KtCallExpression ?: return
     if (call.canMoveLambdaOutsideParentheses()) {
         call.moveFunctionLiteralOutsideParentheses()
+    }
+}
+
+context(KaSession)
+@OptIn(KaExperimentalApi::class)
+fun getThisQualifier(receiverValue: KaImplicitReceiverValue): String {
+    val symbol = receiverValue.symbol
+    return if ((symbol as? KaClassSymbol)?.classKind == KaClassKind.COMPANION_OBJECT) {
+        //specify companion name to avoid clashes with enum entries
+        (symbol.containingSymbol as KaClassifierSymbol).name!!.asString() + "." + symbol.name!!.asString()
+    } else if (symbol is KaClassifierSymbol && symbol !is KaAnonymousObjectSymbol) {
+        (symbol.psi as? PsiClass)?.name ?: ("this@" + symbol.name!!.asString())
+    } else if (symbol is KaReceiverParameterSymbol && symbol.owningCallableSymbol is KaNamedSymbol) {
+        // refer to this@contextReceiverType but use this@funName for everything else, because another syntax is prohibited
+        (receiverValue.type.expandedSymbol?.takeIf { symbol.owningCallableSymbol.contextReceivers.isNotEmpty() }?.name ?: symbol.owningCallableSymbol.name)?.let { "this@$it" } ?: "this"
+    } else {
+        "this"
+    }
+}
+
+/**
+ * Finds a callable member of the class by its signature.
+ * Only members declared in the class are checked.
+ *
+ * @param callableSignature The signature of the callable to be found, which includes
+ * the symbol name, return type, receiver type, and value parameters.
+ *
+ * @return The matching callable symbol if found, null otherwise.
+ */
+context(KaSession)
+fun KaDeclarationContainerSymbol.findCallableMemberBySignature(
+    callableSignature: KaCallableSignature<KaCallableSymbol>
+): KaCallableSymbol? = declaredMemberScope.findCallableMemberBySignature(callableSignature)
+
+/**
+ * Finds a callable member of the class by its signature in the scope.
+ *
+ * @param callableSignature The signature of the callable to be found, which includes
+ * the symbol name, return type, receiver type, and value parameters.
+ *
+ * @return The matching callable symbol if found, null otherwise.
+ */
+context(KaSession)
+fun KaScope.findCallableMemberBySignature(
+    callableSignature: KaCallableSignature<KaCallableSymbol>
+): KaCallableSymbol? {
+    fun KaType?.eq(anotherType: KaType?): Boolean {
+        if (this == null || anotherType == null) return this == anotherType
+        return this.semanticallyEquals(anotherType)
+    }
+
+    return callables.firstOrNull { callable ->
+        fun parametersMatch(): Boolean {
+            if (callableSignature is KaFunctionSignature && callable is KaFunctionSymbol) {
+                if (callable.valueParameters.size != callableSignature.valueParameters.size) return false
+                val allMatch = callable.valueParameters.zip(callableSignature.valueParameters)
+                    .all { (it.first.returnType.eq(it.second.returnType)) }
+                return allMatch
+            } else {
+                return callableSignature !is KaFunctionSignature && callable !is KaFunctionSymbol
+            }
+        }
+        callable.name == callableSignature.symbol.name &&
+                callable.returnType.semanticallyEquals(callableSignature.returnType) &&
+                callable.receiverType.eq(callableSignature.receiverType) &&
+                parametersMatch()
     }
 }

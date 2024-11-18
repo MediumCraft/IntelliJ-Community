@@ -5,7 +5,6 @@ import com.intellij.collaboration.async.*
 import com.intellij.collaboration.ui.codereview.diff.CodeReviewDiffRequestProducer
 import com.intellij.collaboration.ui.codereview.diff.DiscussionsViewOption
 import com.intellij.collaboration.ui.codereview.diff.model.*
-import com.intellij.collaboration.ui.codereview.diff.viewer.buildChangeContext
 import com.intellij.collaboration.util.ChangesSelection
 import com.intellij.collaboration.util.ComputedResult
 import com.intellij.collaboration.util.RefComparisonChange
@@ -18,10 +17,10 @@ import com.intellij.platform.util.coroutines.childScope
 import git4idea.changes.GitTextFilePatchWithHistory
 import git4idea.changes.createVcsChange
 import git4idea.changes.getDiffComputer
-import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import org.jetbrains.plugins.github.api.data.GHUser
 import org.jetbrains.plugins.github.api.data.pullrequest.GHPullRequestReviewThread
 import org.jetbrains.plugins.github.pullrequest.config.GithubPullRequestsProjectUISettings
 import org.jetbrains.plugins.github.pullrequest.data.GHPRDataContext
@@ -31,10 +30,14 @@ import org.jetbrains.plugins.github.pullrequest.ui.comment.GHPRThreadsViewModels
 import org.jetbrains.plugins.github.pullrequest.ui.review.DelegatingGHPRReviewViewModel
 import org.jetbrains.plugins.github.pullrequest.ui.review.GHPRReviewViewModel
 import org.jetbrains.plugins.github.pullrequest.ui.review.GHPRReviewViewModelHelper
+import org.jetbrains.plugins.github.ui.avatars.GHAvatarIconsProvider
 
 interface GHPRDiffViewModel : ComputedDiffViewModel, CodeReviewDiscussionsViewModel {
   val reviewVm: GHPRReviewViewModel
   val isLoadingReviewData: StateFlow<Boolean>
+
+  val iconProvider: GHAvatarIconsProvider
+  val currentUser: GHUser
 
   fun getViewModelFor(change: RefComparisonChange): Flow<GHPRDiffChangeViewModel?>
 
@@ -59,6 +62,9 @@ internal class GHPRDiffViewModelImpl(
   private val cs = parentCs.childScope("GitHub Pull Request Diff View Model")
   private val reviewDataProvider = dataProvider.reviewData
 
+  override val iconProvider: GHAvatarIconsProvider = dataContext.avatarIconsProvider
+  override val currentUser: GHUser = dataContext.securityService.currentUser
+
   override val reviewVm = DelegatingGHPRReviewViewModel(reviewVmHelper)
 
   private val changesFetchFlow = with(dataProvider.changesData) {
@@ -73,8 +79,7 @@ internal class GHPRDiffViewModelImpl(
     .map { RefComparisonChangesSorter.Grouping(project, it) }
   private val helper =
     CodeReviewDiffViewModelComputer(changesFetchFlow, changesSorter) { changesBundle, change ->
-      val changeContext: Map<Key<*>, Any> = change.buildChangeContext()
-      val changeDiffProducer = ChangeDiffRequestProducer.create(project, change.createVcsChange(project), changeContext)
+      val changeDiffProducer = ChangeDiffRequestProducer.create(project, change.createVcsChange(project))
                                ?: error("Could not create diff producer from $change")
       CodeReviewDiffRequestProducer(project, change, changeDiffProducer, changesBundle.patchesByChange[change]?.getDiffComputer())
     }
@@ -119,5 +124,5 @@ internal class GHPRDiffViewModelImpl(
   }
 
   private fun CoroutineScope.createChangeVm(change: RefComparisonChange, diffData: GitTextFilePatchWithHistory) =
-    GHPRDiffChangeViewModelImpl(this, dataContext, dataProvider, change, diffData, threadsVms, discussionsViewOption)
+    GHPRDiffChangeViewModelImpl(project, this, dataContext, dataProvider, change, diffData, threadsVms, discussionsViewOption)
 }

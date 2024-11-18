@@ -1,6 +1,7 @@
 <idea-plugin package="org.jetbrains.kotlin.idea.k2.codeinsight">
   <dependencies>
     <module name="kotlin.refactorings.k2"/>
+    <module name="kotlin.searching.k2"/>
   </dependencies>
   <extensions defaultExtensionNs="org.jetbrains.kotlin">
     <smartEnterProcessorFixer
@@ -96,6 +97,10 @@
             language="kotlin"
             implementationClass="org.jetbrains.kotlin.idea.k2.codeinsight.structureView.KotlinFirStructureViewFactory"/>
 
+    <lang.logicalStructureTreeElementProvider
+            implementation="org.jetbrains.kotlin.idea.k2.codeinsight.structureView.K2ClassLogicalStructureTreeElementProvider"
+            order="before javaPsiClassLogicalStructureTreeElementProvider"/>
+
     <codeInsight.gotoSuper
             language="kotlin"
             implementationClass="org.jetbrains.kotlin.idea.k2.codeinsight.KotlinGoToSuperDeclarationsHandler"/>
@@ -126,11 +131,14 @@
     <applicationService serviceInterface="org.jetbrains.kotlin.idea.base.codeInsight.KotlinNameValidatorProvider"
                         serviceImplementation="org.jetbrains.kotlin.idea.k2.codeinsight.K2NameValidatorProviderImpl"/>
 
+    <copyPastePostProcessor implementation="org.jetbrains.kotlin.idea.k2.codeinsight.copyPaste.KotlinCopyPasteReferenceProcessor"/>
+    <copyPastePostProcessor implementation="org.jetbrains.kotlin.idea.k2.codeinsight.copyPaste.KotlinCopyPasteStringTemplatePostProcessor"/>
+
     <registryKey key="kotlin.k2.allow.constant.computation.on.EDT" defaultValue="true" description="When enabled, error about analysis on EDT is disabled"/>
 
-    <registryKey key="kotlin.k2.kmp.enabled"
-                 description="Enable KMP support in the Kotlin K2 plugin for all platforms"
-                 defaultValue="false"
+    <registryKey key="kotlin.k2.kmp.wasm.enabled"
+                 description="Enable KMP support in the K2 mode for WASM platform"
+                 defaultValue="true"
                  restartRequired="true"/>
 
     <!-- inlay hints -->
@@ -209,10 +217,10 @@
             nameKey="hints.settings.parameters"
             descriptionKey="inlay.kotlin.parameters.hints">
       <!--        <option bundle="messages.KotlinBundle"-->
-      <!--              optionId="hints.parameters.blacklisted"-->
+      <!--              optionId="hints.parameters.excluded"-->
       <!--              enabledByDefault="false"-->
-      <!--              nameKey="hints.settings.parameters.blacklisted"-->
-      <!--              descriptionKey="inlay.kotlin.parameters.hints.blacklisted"/>-->
+      <!--              nameKey="hints.settings.excluded.parameters"-->
+      <!--              descriptionKey="inlay.kotlin.parameters.hints.excluded"/>-->
     </codeInsight.declarativeInlayProvider>
 
     <codeInsight.declarativeInlayProvider
@@ -227,10 +235,54 @@
 
     <vcs.codeVisionLanguageContext language="kotlin"
                                    implementationClass="org.jetbrains.kotlin.idea.codeInsight.hints.KotlinVcsCodeVisionContext"/>
+    <codeInsight.codeVisionProvider implementation="org.jetbrains.kotlin.idea.k2.codeinsight.hints.KotlinReferencesCodeVisionProvider"/>
+    <codeInsight.codeVisionSettingsPreviewLanguage modelId="references" language="kotlin"/>
+    <codeInsight.daemonBoundCodeVisionProvider implementation="org.jetbrains.kotlin.idea.k2.codeinsight.hints.KotlinInheritorsCodeVisionProvider"/>
+    <codeInsight.codeVisionSettingsPreviewLanguage modelId="inheritors" language="kotlin"/>
+
+    <callHierarchyProvider
+            language="kotlin"
+            implementationClass="org.jetbrains.kotlin.idea.k2.codeinsight.hierarchy.calls.KotlinCallHierarchyProvider"/>
+    <hierarchy.referenceProcessor implementation="org.jetbrains.kotlin.idea.k2.codeinsight.hierarchy.calls.KotlinCallReferenceProcessor"/>
+
+    <typeHierarchyProvider language="kotlin" implementationClass="org.jetbrains.kotlin.idea.k2.codeinsight.hierarchy.types.KotlinTypeHierarchyProvider"/>
+    <methodHierarchyProvider
+            language="kotlin"
+            implementationClass="org.jetbrains.kotlin.idea.k2.codeinsight.hierarchy.overrides.KotlinOverrideHierarchyProvider"/>
+
+    <lang.sliceProvider language="kotlin" implementationClass="org.jetbrains.kotlin.idea.k2.codeinsight.slicer.KotlinSliceProvider"/>
+    <usageContextPanelProvider implementation="org.jetbrains.kotlin.idea.k2.codeinsight.slicer.KotlinUsageContextDataInflowPanel$Provider"/>
+    <usageContextPanelProvider implementation="org.jetbrains.kotlin.idea.k2.codeinsight.slicer.KotlinUsageContextDataOutflowPanel$Provider"/>
+
+    <applicationService serviceImplementation="org.jetbrains.kotlin.idea.k2.codeinsight.generate.KotlinEqualsHashCodeTemplatesManager"/>
+    <applicationService serviceImplementation="org.jetbrains.kotlin.idea.k2.codeinsight.generate.KotlinToStringTemplatesManager"/>
+
+    <testGenerator language="kotlin" implementationClass="org.jetbrains.kotlin.idea.k2.codeinsight.generate.KotlinTestGenerator"/>
   </extensions>
+  <actions>
+    <group id="KotlinGenerateGroup">
+      <action id="KotlinGenerateTestMethod"
+              class="org.jetbrains.kotlin.idea.k2.codeinsight.generate.KotlinGenerateTestSupportActionBase$Test"/>
+      <action id="KotlinGenerateSetUpMethod"
+              class="org.jetbrains.kotlin.idea.k2.codeinsight.generate.KotlinGenerateTestSupportActionBase$SetUp"/>
+      <action id="KotlinGenerateTearDownMethod"
+              class="org.jetbrains.kotlin.idea.k2.codeinsight.generate.KotlinGenerateTestSupportActionBase$TearDown"/>
+      <action id="KotlinGenerateDataMethod"
+              class="org.jetbrains.kotlin.idea.k2.codeinsight.generate.KotlinGenerateTestSupportActionBase$Data"/>
+      <separator />
+      <action id="KotlinGenerateSecondaryConstructor"
+              class="org.jetbrains.kotlin.idea.k2.codeinsight.generate.KotlinGenerateSecondaryConstructorAction"/>
+      <action id="KotlinGenerateEqualsAndHashCode"
+              class="org.jetbrains.kotlin.idea.k2.codeinsight.generate.KotlinGenerateEqualsAndHashcodeAction"/>
+      <action id="KotlinGenerateToString"
+              class="org.jetbrains.kotlin.idea.k2.codeinsight.generate.KotlinGenerateToStringAction"/>
+      <add-to-group group-id="GenerateGroup" anchor="first"/>
+    </group>
+  </actions>
   <extensions defaultExtensionNs="org.jetbrains.kotlin">
     <codeinsight.quickfix.registrar implementation="org.jetbrains.kotlin.idea.k2.codeinsight.quickFixes.createFromUsage.K2CreateFromUsageQuickFixesRegistrar"/>
 
-    <supportAvailability implementation="org.jetbrains.kotlin.idea.k2.codeinsight.MultiplatformSupportAvailability"/>
+    <supportAvailability implementation="org.jetbrains.kotlin.idea.k2.codeinsight.WasmMultiplatformSupportAvailability"/>
   </extensions>
+  <resource-bundle>messages.KotlinBundle</resource-bundle>
 </idea-plugin>

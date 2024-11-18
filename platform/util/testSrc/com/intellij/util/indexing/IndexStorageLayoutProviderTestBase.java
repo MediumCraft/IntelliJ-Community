@@ -16,7 +16,6 @@ import com.intellij.util.indexing.storage.FileBasedIndexLayoutProvider;
 import com.intellij.util.io.DataExternalizer;
 import com.intellij.util.io.EnumeratorIntegerDescriptor;
 import com.intellij.util.io.KeyDescriptor;
-import it.unimi.dsi.fastutil.bytes.K;
 import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -286,14 +285,8 @@ public abstract class IndexStorageLayoutProviderTestBase {
         ByteArraySequence serializedData = forwardIndex.get(inputId);
         forwardIndexAccessor.getDiffBuilder(inputId, serializedData).differentiate(
           expectedInputData,
-          (k, v, _inputId) -> {
-            inconsistencies.add("add(" + k + ", " + v + ")[" + _inputId + "]");
-          },
-          (k, v, _inputId) -> {
-            inconsistencies.add("update(" + k + ", " + v + ")[" + _inputId + "]");
-          },
-          (k, _inputId) -> {
-            inconsistencies.add("remove(" + k + ")[" + _inputId + "]");
+          (kind, k, v, _inputId) -> {
+            inconsistencies.add(kind + "(" + k + ", " + v + ")[" + _inputId + "]");
           }
         );
       }
@@ -352,16 +345,11 @@ public abstract class IndexStorageLayoutProviderTestBase {
           inputId,
           serializedData
         );
-        diffBuilder.differentiate(expectedInputData,
-                                  (k, v, _inputId) -> {
-                                    fail();
-                                  },
-                                  (k, v, _inputId) -> {
-                                    fail();
-                                  },
-                                  (k, _inputId) -> {
-                                    fail();
-                                  });
+        diffBuilder.differentiate(
+          expectedInputData,
+          (kind, key, value, _inputId) -> {
+            fail("Shouldn't be any difference, but: " + kind + "(" + key + ", " + value + ")[" + _inputId + "]");
+          });
       }
 
       assertTrue(

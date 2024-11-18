@@ -9,6 +9,7 @@ import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.ColumnInfo;
 import com.intellij.util.ui.SortableColumnModel;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Unmodifiable;
 
 import javax.swing.*;
 import javax.swing.table.TableCellEditor;
@@ -83,7 +84,7 @@ public class TreeTableView extends TreeTable implements SelectionProvider {
 
   @Override
   public TreeTableCellRenderer createTableRenderer(TreeTableModel treeTableModel) {
-    return new TreeTableCellRenderer(TreeTableView.this, getTree()) {
+    return new TreeTableCellRenderer(this, getTree()) {
       @Override
       public Component getTableCellRendererComponent(JTable table,
                                                      Object value,
@@ -103,6 +104,7 @@ public class TreeTableView extends TreeTable implements SelectionProvider {
     return (ListTreeTableModelOnColumns)getTableModel();
   }
 
+  @Unmodifiable
   public List<DualTreeElement> getFlattenItems() {
     List<DualTreeElement> items = getTreeViewModel().getItems();
     return ContainerUtil.findAll(items, object -> object.shouldBeInTheFlatView());

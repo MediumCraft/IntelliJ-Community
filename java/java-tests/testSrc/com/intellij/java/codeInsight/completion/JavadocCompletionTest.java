@@ -203,6 +203,9 @@ public class JavadocCompletionTest extends LightFixtureCompletionTestCase {
   public void testMethodBeforeSharp() {
     doTest();
   }
+  public void testMethodInMarkdownReferenceLink() {
+    doTest();
+  }
 
   public void testFieldReferenceInInnerClassJavadoc() {
     doTest();
@@ -698,7 +701,6 @@ public class JavadocCompletionTest extends LightFixtureCompletionTestCase {
   public void test_insert_link_to_field() {
     myFixture.configureByText("a.java", "/** a. #fo<caret> */ interface Foo { int foo; }}");
     myFixture.completeBasic();
-    myFixture.type("\n");
     myFixture.checkResult("/** a. {@link #foo}<caret> */ interface Foo { int foo; }}");
   }
 
@@ -933,4 +935,6 @@ public class JavadocCompletionTest extends LightFixtureCompletionTestCase {
     List<String> strings = myFixture.getLookupElementStrings();
     assertTrue(strings.containsAll(Arrays.asList("java", "JShellLanguage", "JVM")));
   }
+
+
 }

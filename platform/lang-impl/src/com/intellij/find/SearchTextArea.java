@@ -1,9 +1,8 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.find;
 
 import com.intellij.find.editorHeaderActions.Utils;
 import com.intellij.icons.AllIcons;
-import com.intellij.icons.ExpUiIcons;
 import com.intellij.ide.DataManager;
 import com.intellij.ide.lightEdit.LightEditCompatible;
 import com.intellij.openapi.actionSystem.*;
@@ -317,8 +316,7 @@ public class SearchTextArea extends JBPanel<SearchTextArea> implements PropertyC
     updateIconsLayout();
   }
 
-  @NotNull
-  public JTextArea getTextArea() {
+  public @NotNull JTextArea getTextArea() {
     return myTextArea;
   }
 
@@ -374,9 +372,8 @@ public class SearchTextArea extends JBPanel<SearchTextArea> implements PropertyC
 
   private final class ClearAction extends DumbAwareAction implements LightEditCompatible {
     ClearAction() {
-      super(ExperimentalUI.isNewUI() ? ExpUiIcons.General.CloseSmall : AllIcons.Actions.Close);
-      getTemplatePresentation().setHoveredIcon(
-        ExperimentalUI.isNewUI() ? ExpUiIcons.General.CloseSmallHovered : AllIcons.Actions.CloseHovered);
+      super(AllIcons.Actions.Close);
+      getTemplatePresentation().setHoveredIcon(AllIcons.Actions.CloseHovered);
     }
 
     @Override

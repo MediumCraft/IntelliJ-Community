@@ -28,13 +28,13 @@ import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.application.ReadAction;
+import com.intellij.openapi.application.WriteIntentReadAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
-import com.intellij.openapi.progress.util.ColorProgressBar;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Comparing;
@@ -53,9 +53,13 @@ import com.intellij.util.PathUtil;
 import com.intellij.util.concurrency.AppExecutorUtil;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.text.DateFormatUtil;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.update.Update;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import javax.swing.border.CompoundBorder;
@@ -72,8 +76,8 @@ import java.io.File;
 import java.io.FileWriter;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
-import java.util.List;
 import java.util.*;
+import java.util.List;
 
 /**
  * @author Roman Chernyatchik
@@ -165,7 +169,7 @@ public class SMTestRunnerResultsForm extends TestResultsPanel
     myTreeView.setTestResultsViewer(this);
     final SMTRunnerTreeStructure structure = new SMTRunnerTreeStructure(myProject, myTestsRootNode);
     myTreeBuilder = new SMTRunnerTreeBuilder(myTreeView, structure);
-    StructureTreeModel structureTreeModel = new StructureTreeModel<>(structure, IndexComparator.INSTANCE, myProject);
+    StructureTreeModel structureTreeModel = new StructureTreeModel<>(structure, IndexComparator.getInstance(), myProject);
     AsyncTreeModel asyncTreeModel = new AsyncTreeModel(structureTreeModel, true, myProject);
     myTreeView.setModel(asyncTreeModel);
     myTreeBuilder.setModel(structureTreeModel);
@@ -224,7 +228,7 @@ public class SMTestRunnerResultsForm extends TestResultsPanel
     myTreeBuilder.updateFromRoot();
 
     // Status line
-    myStatusLine.setStatusColor(ColorProgressBar.GREEN);
+    myStatusLine.setStatus(JBUI.CurrentTheme.ProgressBar.passedStatusValue());
 
     // Tests tree
     selectAndNotify(myTestsRootNode);
@@ -250,7 +254,7 @@ public class SMTestRunnerResultsForm extends TestResultsPanel
     myConsoleView.clear();
     ProcessHandler handler = myTestsRootNode.getHandler();
     if (handler instanceof BaseOSProcessHandler) {
-      handler.notifyTextAvailable(((BaseOSProcessHandler)handler).getCommandLine() + "\n", ProcessOutputTypes.SYSTEM);
+      handler.notifyTextAvailable(((BaseOSProcessHandler)handler).getCommandLineForLog() + "\n", ProcessOutputTypes.SYSTEM);
     }
   }
 
@@ -266,6 +270,7 @@ public class SMTestRunnerResultsForm extends TestResultsPanel
 
     updateStatusLabel(true);
     updateIconProgress(true);
+    myStatusLine.setIndeterminate(false);
 
     myRequests.clear();
     myUpdateTreeRequests.cancelAllRequests();
@@ -284,10 +289,6 @@ public class SMTestRunnerResultsForm extends TestResultsPanel
 
     fireOnTestingFinished();
 
-    if (testsRoot.wasTerminated() && myStatusLine.getStatusColor() == ColorProgressBar.GREEN) {
-      myStatusLine.setStatusColor(JBColor.LIGHT_GRAY);
-    }
-
     if (testsRoot.isEmptySuite() &&
         testsRoot.isTestsReporterAttached() &&
         myProperties instanceof SMTRunnerConsoleProperties &&
@@ -300,8 +301,10 @@ public class SMTestRunnerResultsForm extends TestResultsPanel
                        myTotalTestCount - myStartedTestCount,
                        myIgnoredTestCount);
     UIUtil.invokeLaterIfNeeded(() -> {
-      TestsUIUtil.notifyByBalloon(myProperties.getProject(), testsRoot, myProperties, presentation);
-      addToHistory(testsRoot, myProperties, this);
+      WriteIntentReadAction.run((Runnable)() -> {
+        TestsUIUtil.notifyByBalloon(myProperties.getProject(), testsRoot, myProperties, presentation);
+        addToHistory(testsRoot, myProperties, this);
+      });
     });
 
   }
@@ -563,8 +566,8 @@ public class SMTestRunnerResultsForm extends TestResultsPanel
   }
 
   @ApiStatus.Internal
-  public Color getTestsStatusColor() {
-    return myStatusLine.getStatusColor();
+  public String getTestsStatus() {
+    return myStatusLine.getStatus();
   }
 
   @ApiStatus.Internal
@@ -653,7 +656,7 @@ public class SMTestRunnerResultsForm extends TestResultsPanel
 
   private void updateStatusLabel(final boolean testingFinished) {
     if (myFailedTestCount > 0) {
-      myStatusLine.setStatusColor(ColorProgressBar.RED);
+      myStatusLine.setStatus(JBUI.CurrentTheme.ProgressBar.failedStatusValue());
     }
 
     // launchedAndFinished - is launched and not in progress. If we remove "launched' that onTestingStarted() before

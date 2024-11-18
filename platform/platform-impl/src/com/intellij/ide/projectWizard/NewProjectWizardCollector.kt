@@ -33,7 +33,7 @@ object NewProjectWizardCollector : CounterUsagesCollector() {
 
   override fun getGroup(): EventLogGroup = GROUP
 
-  val GROUP: EventLogGroup = EventLogGroup("new.project.wizard.interactions", 32)
+  val GROUP: EventLogGroup = EventLogGroup("new.project.wizard.interactions", 38)
 
   private val LANGUAGES = listOf(
     NewProjectWizardConstants.Language.JAVA, NewProjectWizardConstants.Language.KOTLIN,
@@ -70,6 +70,7 @@ object NewProjectWizardCollector : CounterUsagesCollector() {
   private val groovyVersionField = EventFields.Version
   private val groovySourceTypeField = EventFields.String("groovy_sdk_type", GROOVY_SDKS)
   private val useCompactProjectStructureField = EventFields.Boolean("use_compact_project_structure")
+  private val generateMultipleModulesField = EventFields.Boolean("generate_multiple_modules")
   private val pluginField = EventFields.String("plugin_selected", LANGUAGES)
 
   private val baseFields = arrayOf(sessionIdField, screenNumField, generatorTypeField)
@@ -119,6 +120,8 @@ object NewProjectWizardCollector : CounterUsagesCollector() {
 
   private val useCompactProjectStructureChanged = GROUP.registerVarargEvent("build.system.use.compact.project.structure.changed", *buildSystemFields, useCompactProjectStructureField)
   private val useCompactProjectStructureFinished = GROUP.registerVarargEvent("build.system.use.compact.project.structure.finished", *buildSystemFields, useCompactProjectStructureField)
+  private val generateMultipleModulesChanged = GROUP.registerVarargEvent("kotlin.generate.multiple.modules.changed", *buildSystemFields, generateMultipleModulesField)
+  private val generateMultipleModulesFinished = GROUP.registerVarargEvent("kotlin.generate.multiple.modules.finished", *buildSystemFields, generateMultipleModulesField)
   private val kotlinClickKmpWizardLinkEvent = GROUP.registerVarargEvent("kotlin.kmp.wizard.link.clicked", *buildSystemFields)
   // @formatter:on
 
@@ -316,6 +319,12 @@ object NewProjectWizardCollector : CounterUsagesCollector() {
 
     fun NewProjectWizardStep.logUseCompactProjectStructureFinished(isSelected: Boolean): Unit =
       useCompactProjectStructureFinished.logBuildSystemEvent(this, useCompactProjectStructureField with isSelected)
+
+    fun NewProjectWizardStep.logGenerateMultipleModulesChanged(isSelected: Boolean): Unit =
+      generateMultipleModulesChanged.logBuildSystemEvent(this, generateMultipleModulesField with isSelected)
+
+    fun NewProjectWizardStep.logGenerateMultipleModulesFinished(isSelected: Boolean): Unit =
+      generateMultipleModulesFinished.logBuildSystemEvent(this, generateMultipleModulesField with isSelected)
 
     fun NewProjectWizardStep.logKmpWizardLinkClicked(): Unit =
       kotlinClickKmpWizardLinkEvent.logBuildSystemEvent(this)

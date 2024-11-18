@@ -1,4 +1,4 @@
-// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.idea.core.overrideImplement
 
@@ -8,13 +8,13 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.NlsSafe
 import com.intellij.psi.PsiFile
 import org.jetbrains.annotations.ApiStatus
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
+import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
+import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.analyze
 import org.jetbrains.kotlin.analysis.api.fir.diagnostics.KaFirDiagnostic
-import org.jetbrains.kotlin.analysis.api.symbols.KtCallableSymbol
-import org.jetbrains.kotlin.analysis.api.symbols.KtClassOrObjectSymbol
-import org.jetbrains.kotlin.analysis.api.symbols.markers.KtSymbolWithModality
-import org.jetbrains.kotlin.descriptors.Modality
+import org.jetbrains.kotlin.analysis.api.symbols.KaCallableSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaClassSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaSymbolModality
 import org.jetbrains.kotlin.idea.KtIconProvider.getIcon
 import org.jetbrains.kotlin.idea.codeinsight.api.applicators.fixes.KotlinQuickFixFactory
 import org.jetbrains.kotlin.idea.core.overrideImplement.KtImplementMembersHandler.Companion.getUnimplementedMembers
@@ -37,15 +37,16 @@ open class KtImplementMembersHandler : KtGenerateMembersHandler(true) {
     }
 
     companion object {
-        context(KtAnalysisSession)
+        context(KaSession)
         fun getUnimplementedMembers(classWithUnimplementedMembers: KtClassOrObject): List<KtClassMemberInfo> =
-            classWithUnimplementedMembers.getClassOrObjectSymbol()?.let { getUnimplementedMemberSymbols(it) }.orEmpty()
+            classWithUnimplementedMembers.classSymbol?.let { getUnimplementedMemberSymbols(it) }.orEmpty()
                 .mapToKtClassMemberInfo()
 
-        context(KtAnalysisSession)
-        private fun getUnimplementedMemberSymbols(classWithUnimplementedMembers: KtClassOrObjectSymbol): List<KtCallableSymbol> {
+        context(KaSession)
+        @OptIn(KaExperimentalApi::class)
+        private fun getUnimplementedMemberSymbols(classWithUnimplementedMembers: KaClassSymbol): List<KaCallableSymbol> {
             return buildList {
-                classWithUnimplementedMembers.getMemberScope().getCallableSymbols().forEach { symbol ->
+                classWithUnimplementedMembers.memberScope.callables.forEach { symbol ->
                     if (!symbol.isVisibleInClass(classWithUnimplementedMembers)) return@forEach
                     when (symbol.getImplementationStatus(classWithUnimplementedMembers)) {
                         ImplementationStatus.NOT_IMPLEMENTED -> add(symbol)
@@ -60,9 +61,16 @@ open class KtImplementMembersHandler : KtGenerateMembersHandler(true) {
                             //
                             // `Foo` does not need to implement `foo` since it inherits the implementation from `B`. But in the dialog, we should
                             // allow user to choose `foo` to implement.
-                            symbol.getIntersectionOverriddenSymbols()
-                                .filter { (it as? KtSymbolWithModality)?.modality == Modality.ABSTRACT }
-                                .forEach { add(it) }
+                            val intersectionOverriddenSymbols = symbol.intersectionOverriddenSymbols
+                            val abstractSymbols = intersectionOverriddenSymbols.filter {
+                                it.modality == KaSymbolModality.ABSTRACT
+                            }
+                            if (abstractSymbols.isNotEmpty()) {
+                                addAll(abstractSymbols)
+                            } else if (intersectionOverriddenSymbols.size > 1) {
+                                // This for the [MANY_INTERFACES_MEMBER_NOT_IMPLEMENTED] and [MANY_IMPL_MEMBER_NOT_IMPLEMENTED] compiler errors.
+                                addAll(intersectionOverriddenSymbols)
+                            }
                         }
 
                         else -> {
@@ -128,7 +136,7 @@ object MemberNotImplementedQuickfixFactories {
             listOf(KtImplementMembersQuickfix(missingDeclarations.mapToKtClassMemberInfo()))
         }
 
-    context(KtAnalysisSession)
+    context(KaSession)
     private fun getUnimplementedMemberFixes(
         classWithUnimplementedMembers: KtClassOrObject,
         includeImplementAsConstructorParameterQuickfix: Boolean = true
@@ -149,10 +157,11 @@ object MemberNotImplementedQuickfixFactories {
     }
 }
 
-context(KtAnalysisSession)
-private fun List<KtCallableSymbol>.mapToKtClassMemberInfo(): List<KtClassMemberInfo> {
+context(KaSession)
+@OptIn(KaExperimentalApi::class)
+private fun List<KaCallableSymbol>.mapToKtClassMemberInfo(): List<KtClassMemberInfo> {
     return map { unimplementedMemberSymbol ->
-        val containingSymbol = unimplementedMemberSymbol.originalContainingClassForOverride
+        val containingSymbol = unimplementedMemberSymbol.fakeOverrideOriginal.containingSymbol as? KaClassSymbol
 
         @NlsSafe
         val fqName = (containingSymbol?.classId?.asSingleFqName()?.toString() ?: containingSymbol?.name?.asString())

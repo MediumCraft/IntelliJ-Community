@@ -16,14 +16,27 @@ public class ComparisonFailureData {
 
   public static final String JUNIT_3_COMPARISON_FAILURE = "junit.framework.ComparisonFailure";
   public static final String JUNIT_4_COMPARISON_FAILURE = "org.junit.ComparisonFailure";
+  private static final String JUNIT_COMPARISON_FAILURE_EXPECTED = "fExpected";
+  private static final String JUNIT_COMPARISON_FAILURE_ACTUAL = "fActual";
 
   private static final String ASSERTION_CLASS_NAME = "java.lang.AssertionError";
   private static final String ASSERTION_FAILED_CLASS_NAME = "junit.framework.AssertionFailedError";
 
-  public static final String OPENTEST4J_ASSERTION = "org.opentest4j.AssertionFailedError";
-  public static final String OPENTEST4J_VALUE_WRAPPER = "org.opentest4j.ValueWrapper";
-  public static final String OPENTEST4J_FILE_INFO = "org.opentest4j.FileInfo";
-  public static final Charset OPENTEST4J_FILE_CONTENT_CHARSET = StandardCharsets.UTF_8;
+  private static final String OPENTEST4J_ASSERTION = "org.opentest4j.AssertionFailedError";
+  private static final String OPENTEST4J_ASSERTION_EXPECTED_DEFINED = "isExpectedDefined";
+  private static final String OPENTEST4J_ASSERTION_ACTUAL_DEFINED = "isActualDefined";
+  private static final String OPENTEST4J_ASSERTION_EXPECTED = "getExpected";
+  private static final String OPENTEST4J_ASSERTION_ACTUAL = "getActual";
+
+  private static final String OPENTEST4J_VALUE_WRAPPER = "org.opentest4j.ValueWrapper";
+  private static final String OPENTEST4J_VALUE_WRAPPER_VALUE = "getValue";
+  private static final String OPENTEST4J_VALUE_WRAPPER_STRING_REPRESENTATION = "getStringRepresentation";
+
+  private static final String OPENTEST4J_FILE_INFO = "org.opentest4j.FileInfo";
+  private static final String OPENTEST4J_FILE_INFO_PATH = "getPath";
+  private static final String OPENTEST4J_FILE_INFO_CONTENT_AS_STRING = "getContentsAsString";
+
+  private static final Charset OPENTEST4J_FILE_CONTENT_CHARSET = StandardCharsets.UTF_8;
 
   private final String myExpected;
   private final String myActual;
@@ -43,11 +56,11 @@ public class ComparisonFailureData {
 
   private static void init(String exceptionClassName) throws NoSuchFieldException, ClassNotFoundException {
     Class<?> exceptionClass = Class.forName(exceptionClassName, false, ComparisonFailureData.class.getClassLoader());
-    final Field expectedField = exceptionClass.getDeclaredField("fExpected");
+    final Field expectedField = exceptionClass.getDeclaredField(JUNIT_COMPARISON_FAILURE_EXPECTED);
     expectedField.setAccessible(true);
     EXPECTED.put(exceptionClass, expectedField);
 
-    final Field actualField = exceptionClass.getDeclaredField("fActual");
+    final Field actualField = exceptionClass.getDeclaredField(JUNIT_COMPARISON_FAILURE_ACTUAL);
     actualField.setAccessible(true);
     ACTUAL.put(exceptionClass, actualField);
   }
@@ -172,30 +185,22 @@ public class ComparisonFailureData {
     attrs.put(expectedOrActualPrefix, text);
   }
 
+  public static boolean isInstance(Class<?> aClass, String className) {
+    if (aClass == null) return false;
+    if (className.equals(aClass.getName())) return true;
+    return isInstance(aClass.getSuperclass(), className);
+  }
+
   public static boolean isAssertionError(Class<?> throwableClass) {
-    if (throwableClass == null) return false;
-    final String throwableClassName = throwableClass.getName();
-    if (throwableClassName.equals(ASSERTION_CLASS_NAME) || 
-        throwableClassName.equals(ASSERTION_FAILED_CLASS_NAME) || 
-        throwableClassName.equals(OPENTEST4J_ASSERTION)) {
-      return true;
-    }
-    return isAssertionError(throwableClass.getSuperclass());
+    return isInstance(throwableClass, ASSERTION_CLASS_NAME) ||
+           isInstance(throwableClass, ASSERTION_FAILED_CLASS_NAME) ||
+           isInstance(throwableClass, OPENTEST4J_ASSERTION);
   }
 
   public static boolean isComparisonFailure(Class<?> aClass) {
-    if (aClass == null) return false;
-    final String throwableClassName = aClass.getName();
-    if (JUNIT_3_COMPARISON_FAILURE.equals(throwableClassName)) {
-      return true;
-    }
-    if (JUNIT_4_COMPARISON_FAILURE.equals(throwableClassName)) {
-      return true;
-    }
-    if (OPENTEST4J_ASSERTION.equals(throwableClassName)) {
-      return true;
-    }
-    return isComparisonFailure(aClass.getSuperclass());
+    return isInstance(aClass, JUNIT_3_COMPARISON_FAILURE) ||
+           isInstance(aClass, JUNIT_4_COMPARISON_FAILURE) ||
+           isInstance(aClass, OPENTEST4J_ASSERTION);
   }
 
   public String getExpectedFilePath() {
@@ -220,9 +225,6 @@ public class ComparisonFailureData {
     failureData = createFileComparisonData(assertion);
     if (failureData != null) return failureData;
 
-    failureData = createFileComparisonFailure(assertion);
-    if (failureData != null) return failureData;
-
     failureData = createJunitComparisonFailure(assertion);
     if (failureData != null) return failureData;
 
@@ -242,29 +244,16 @@ public class ComparisonFailureData {
     return null;
   }
 
-  @SuppressWarnings("deprecation")
-  private static ComparisonFailureData createFileComparisonFailure(Throwable assertion) {
-    if (assertion instanceof FileComparisonFailure) {
-      final FileComparisonFailure comparisonFailure = (FileComparisonFailure)assertion;
-      String actual = comparisonFailure.getActualStringPresentation();
-      String expected = comparisonFailure.getExpectedStringPresentation();
-      if (actual != null && expected != null) {
-        return new ComparisonFailureData(expected, actual, comparisonFailure.getFilePath(), comparisonFailure.getActualFilePath());
-      }
-    }
-    return null;
-  }
-
   private static ComparisonFailureData createOpentest4jAssertion(Throwable assertion) {
     try {
-      if (OPENTEST4J_ASSERTION.equals(assertion.getClass().getName())) {
-        Method isExpectedDefinedMethod = assertion.getClass().getDeclaredMethod("isExpectedDefined");
-        Method isActualDefinedMethod = assertion.getClass().getDeclaredMethod("isActualDefined");
+      if (isInstance(assertion.getClass(), OPENTEST4J_ASSERTION)) {
+        Method isExpectedDefinedMethod = assertion.getClass().getMethod(OPENTEST4J_ASSERTION_EXPECTED_DEFINED);
+        Method isActualDefinedMethod = assertion.getClass().getMethod(OPENTEST4J_ASSERTION_ACTUAL_DEFINED);
         boolean isExpectedDefined = ((Boolean)isExpectedDefinedMethod.invoke(assertion)).booleanValue();
         boolean isActualDefined = ((Boolean)isActualDefinedMethod.invoke(assertion)).booleanValue();
         if (isExpectedDefined && isActualDefined) {
-          Method expectedMethod = assertion.getClass().getDeclaredMethod("getExpected");
-          Method actualMethod = assertion.getClass().getDeclaredMethod("getActual");
+          Method expectedMethod = assertion.getClass().getMethod(OPENTEST4J_ASSERTION_EXPECTED);
+          Method actualMethod = assertion.getClass().getMethod(OPENTEST4J_ASSERTION_ACTUAL);
           Object expectedValueWrapper = expectedMethod.invoke(assertion);
           Object actualValueWrapper = actualMethod.invoke(assertion);
           AssertionValue expected = getOpentest4jAssertionValue(expectedValueWrapper);
@@ -281,18 +270,18 @@ public class ComparisonFailureData {
   private static AssertionValue getOpentest4jAssertionValue(Object valueWrapper)
     throws NoSuchMethodException, InvocationTargetException, IllegalAccessException {
 
-    if (OPENTEST4J_VALUE_WRAPPER.equals(valueWrapper.getClass().getName())) {
-      Method valueMethod = valueWrapper.getClass().getDeclaredMethod("getValue");
+    if (isInstance(valueWrapper.getClass(), OPENTEST4J_VALUE_WRAPPER)) {
+      Method valueMethod = valueWrapper.getClass().getMethod(OPENTEST4J_VALUE_WRAPPER_VALUE);
       Object value = valueMethod.invoke(valueWrapper);
-      if (value != null && OPENTEST4J_FILE_INFO.equals(value.getClass().getName())) {
-        Method contentAsStringMethod = value.getClass().getDeclaredMethod("getContentsAsString", Charset.class);
+      if (value != null && isInstance(value.getClass(), OPENTEST4J_FILE_INFO)) {
+        Method contentAsStringMethod = value.getClass().getMethod(OPENTEST4J_FILE_INFO_CONTENT_AS_STRING, Charset.class);
         String valueString = (String)contentAsStringMethod.invoke(value, OPENTEST4J_FILE_CONTENT_CHARSET);
-        Method pathMethod = value.getClass().getDeclaredMethod("getPath");
+        Method pathMethod = value.getClass().getMethod(OPENTEST4J_FILE_INFO_PATH);
         String valuePath = (String)pathMethod.invoke(value);
         return new AssertionValue(valueString, valuePath);
       }
       else {
-        Method stringRepresentationMethod = valueWrapper.getClass().getDeclaredMethod("getStringRepresentation");
+        Method stringRepresentationMethod = valueWrapper.getClass().getMethod(OPENTEST4J_VALUE_WRAPPER_STRING_REPRESENTATION);
         String valueString = (String)stringRepresentationMethod.invoke(valueWrapper);
         return new AssertionValue(valueString, null);
       }
@@ -312,11 +301,11 @@ public class ComparisonFailureData {
   }
 
   public static String getActual(Throwable assertion) throws IllegalAccessException, NoSuchFieldException {
-    return get(assertion, ACTUAL, "fActual");
+    return get(assertion, ACTUAL, JUNIT_COMPARISON_FAILURE_ACTUAL);
   }
 
   public static String getExpected(Throwable assertion) throws IllegalAccessException, NoSuchFieldException {
-    return get(assertion, EXPECTED, "fExpected");
+    return get(assertion, EXPECTED, JUNIT_COMPARISON_FAILURE_EXPECTED);
   }
 
   private static String get(final Throwable assertion, final Map<Class<?>, Field> staticMap, final String fieldName) throws IllegalAccessException, NoSuchFieldException {

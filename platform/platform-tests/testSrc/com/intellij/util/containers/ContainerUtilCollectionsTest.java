@@ -707,6 +707,7 @@ public class ContainerUtilCollectionsTest extends Assert {
 
   @Test(timeout = TIMEOUT)
   public void testWeakKeyMapsKeySetIsIterable() {
+    //noinspection ResultOfMethodCallIgnored
     UsefulTestCase.assertThrows(IllegalArgumentException.class, () -> CollectionFactory.createWeakMap(11, 1, HashingStrategy.canonical()));
     checkKeySetIterable(CollectionFactory.createWeakMap(11, 0.5f, HashingStrategy.canonical()));
     checkKeySetIterable(ContainerUtil.createWeakKeySoftValueMap());
@@ -863,10 +864,26 @@ public class ContainerUtilCollectionsTest extends Assert {
   }
 
   @Test
-  public void testKeyEvictionListenerWorks() {
+  public void testKeyEvictionListenerWorksInConcurrentSoftMap() {
     AtomicReference<Object> evicted = new AtomicReference<>();
     AtomicReference<Map<Object, Object>> map = new AtomicReference<>();
     map.set(CollectionFactory.createConcurrentSoftMap((thisMap,value) -> {
+      assertTrue(evicted.compareAndSet(null, value));
+      assertSame(map.get(), thisMap);
+    }));
+    Object value = new Object();
+    map.get().put(new Object(), value);
+
+    GCUtil.tryGcSoftlyReachableObjects(() -> map.get().remove("") != null/*to call processQueue()*/ || map.get().isEmpty());
+    map.get().remove(""); // to call processQueue()
+    assertSame(value, evicted.get());
+  }
+
+  @Test
+  public void testKeyEvictionListenerWorksInSoftMap() {
+    AtomicReference<Object> evicted = new AtomicReference<>();
+    AtomicReference<Map<Object, Object>> map = new AtomicReference<>();
+    map.set(CollectionFactory.createSoftMap((thisMap, value) -> {
       assertTrue(evicted.compareAndSet(null, value));
       assertSame(map.get(), thisMap);
     }));

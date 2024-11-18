@@ -1,10 +1,11 @@
 // Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.kotlin.idea.k2.codeinsight.intentions
 
-import com.intellij.codeInsight.intention.LowPriorityAction
+import com.intellij.codeInsight.intention.PriorityAction
 import com.intellij.modcommand.ActionContext
 import com.intellij.modcommand.ModPsiUpdater
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
+import com.intellij.modcommand.Presentation
+import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.idea.base.codeInsight.KotlinNameSuggester
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.codeinsight.api.applicable.intentions.KotlinApplicableModCommandAction
@@ -31,18 +32,17 @@ import org.jetbrains.kotlin.utils.addToStdlib.ifNotEmpty
  *   else "More"
  */
 internal class WhenToIfIntention :
-    KotlinApplicableModCommandAction<KtWhenExpression, WhenToIfIntention.Context>(KtWhenExpression::class),
-    LowPriorityAction {
+    KotlinApplicableModCommandAction<KtWhenExpression, WhenToIfIntention.Context>(KtWhenExpression::class) {
 
     data class Context(
         val hasNullableSubject: Boolean,
         val nameCandidatesForWhenSubject: List<String> = emptyList(),
     )
 
-    context(KtAnalysisSession)
+    context(KaSession)
     private fun KtWhenExpression.hasNoElseButUsedAsExpression(): Boolean {
         val lastEntry = entries.last()
-        return !lastEntry.isElse && isUsedAsExpression()
+        return !lastEntry.isElse && isUsedAsExpression
     }
 
     /**
@@ -61,12 +61,12 @@ internal class WhenToIfIntention :
         return entries.size <= 1
     }
 
-    context(KtAnalysisSession)
+    context(KaSession)
     override fun prepareContext(element: KtWhenExpression): Context? {
         if (element.hasNoElseButUsedAsExpression()) return null
 
         val subject = element.subjectExpression
-        val isNullableSubject = subject?.getKtType()?.isMarkedNullable == true
+        val isNullableSubject = subject?.expressionType?.isMarkedNullable == true
 
         /**
          * When we generate conditions of the if/else-if expressions, we have to use the subject of [element].
@@ -112,7 +112,7 @@ internal class WhenToIfIntention :
          */
         if (element.isTrueOrFalseCondition()) return Context(isNullableSubject)
         if (element.isSubjectUsedByOneOrZeroBranch()) return Context(isNullableSubject)
-        if (subject != null && subject !is KtNameReferenceExpression && !element.isUsedAsExpression()) {
+        if (subject != null && subject !is KtNameReferenceExpression && !element.isUsedAsExpression) {
             return Context(isNullableSubject, getNewNameForExpression(subject))
         }
         return Context(isNullableSubject)
@@ -160,19 +160,22 @@ internal class WhenToIfIntention :
     }
 
     override fun getFamilyName(): String = KotlinBundle.message("replace.when.with.if")
+    override fun getPresentation(context: ActionContext, element: KtWhenExpression): Presentation =
+        Presentation.of(familyName).withPriority(PriorityAction.Priority.LOW)
 
     override fun isApplicableByPsi(element: KtWhenExpression): Boolean {
         val entries = element.entries
         val lastEntry = entries.lastOrNull() ?: return false
         return !(entries.any { it != lastEntry && it.isElse }) &&
                 !(entries.size == 1 && lastEntry.isElse) && // 'when' with only 'else' branch is not supported
-                element.subjectExpression !is KtProperty
+                element.subjectExpression !is KtProperty &&
+                entries.none { it.guard != null } // Not implemented: KTIJ-31750
     }
 
     /**
-     * Note that [KotlinNameSuggester.suggestExpressionNames] has [KtAnalysisSession] as a receiver.
+     * Note that [KotlinNameSuggester.suggestExpressionNames] has [KaSession] as a receiver.
      */
-    context(KtAnalysisSession)
+    context(KaSession)
     private fun getNewNameForExpression(expression: KtExpression): List<String> {
         return with(KotlinNameSuggester()) {
             suggestExpressionNames(expression).toList()

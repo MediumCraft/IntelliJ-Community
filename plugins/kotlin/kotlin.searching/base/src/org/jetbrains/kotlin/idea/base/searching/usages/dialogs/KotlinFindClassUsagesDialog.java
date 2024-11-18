@@ -144,9 +144,7 @@ public class KotlinFindClassUsagesDialog extends FindClassUsagesDialog {
     }
 
     @Override
-    protected void addUsagesOptions(JPanel optionsPanel) {
-        super.addUsagesOptions(optionsPanel);
-
+    protected void addUsagesOptions(@NotNull JPanel optionsPanel) {
         KtClassOrObject klass = getOriginalClass();
         boolean isActual = klass != null && PsiUtilsKt.hasActualModifier(klass);
         KotlinClassFindUsagesOptions options = getFindUsagesOptions();
@@ -158,6 +156,7 @@ public class KotlinFindClassUsagesDialog extends FindClassUsagesDialog {
                     false
             );
         }
+        addDefaultOptions(optionsPanel);
     }
 
     @Override

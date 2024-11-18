@@ -29,13 +29,14 @@ import java.lang.management.ThreadInfo
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.*
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.coroutineContext
-import kotlin.math.max
-import kotlin.math.min
+
+private val FREEZE_NOTIFIER_EP: ExtensionPointName<FreezeNotifier> = ExtensionPointName("com.intellij.diagnostic.freezeNotifier")
 
 internal class IdeaFreezeReporter : PerformanceListener {
   private var dumpTask: SamplingTask? = null
-  private val currentDumps = ArrayList<ThreadDump>()
+  private val currentDumps = Collections.synchronizedList(ArrayList<ThreadDump>())
   private var stacktraceCommonPart: List<StackTraceElement>? = null
 
   @Volatile
@@ -107,14 +108,19 @@ internal class IdeaFreezeReporter : PerformanceListener {
       }
 
       dumpTask = object : SamplingTask(100, maxDumpDuration, coroutineScope) {
+        private val stopped = AtomicBoolean()
         override fun stop() {
           super.stop()
-          EP_NAME.forEachExtensionSafe(FreezeProfiler::stop)
+          if (stopped.compareAndSet(false, true)) {
+            EP_NAME.forEachExtensionSafe { it.stop(reportDir) }
+          }
         }
 
         override suspend fun stopDumpingThreads() {
           super.stopDumpingThreads()
-          EP_NAME.forEachExtensionSafe(FreezeProfiler::stop)
+          if (stopped.compareAndSet(false, true)) {
+            EP_NAME.forEachExtensionSafe { it.stop(reportDir) }
+          }
         }
       }
       EP_NAME.forEachExtensionSafe { it.start(reportDir) }
@@ -160,24 +166,38 @@ internal class IdeaFreezeReporter : PerformanceListener {
     }
 
     if (Registry.`is`("freeze.reporter.enabled", false)) {
-      val performanceWatcher = PerformanceWatcher.getInstance()
-      // check that we have at least half of the dumps required
       if ((durationMs / 1000).toInt() > FREEZE_THRESHOLD && !stacktraceCommonPart.isNullOrEmpty()) {
-        val dumpingDurationMs = durationMs - performanceWatcher.unresponsiveInterval
-        val dumpsCount = min(performanceWatcher.maxDumpDuration.toLong(), dumpingDurationMs / 2) / performanceWatcher.dumpInterval
-        if (dumpTask.isValid(dumpingDurationMs) || currentDumps.size >= max(3, dumpsCount)) {
+        val dumps = ArrayList(currentDumps) // defensive copy
+        if (dumpTask.isValid() && dumps.size >= 2) {
           val attachments = ArrayList<Attachment>()
-          addDumpsAttachments(from = currentDumps, textMapper = { it.rawDump }, container = attachments)
+          addDumpsAttachments(from = dumps, textMapper = { it.rawDump }, container = attachments)
           if (reportDir != null) {
             EP_NAME.forEachExtensionSafe { attachments.addAll(it.getAttachments(reportDir)) }
           }
-          report(createEvent(dumpTask, durationMs, attachments, reportDir, performanceWatcher, finished = true))
+
+          val loggingEvent = createEvent(dumpTask, durationMs, attachments, reportDir, PerformanceWatcher.getInstance(), finished = true)
+          report(loggingEvent)
+
+          if (reportDir != null && loggingEvent != null && dumps.isNotEmpty()) {
+            for (notifier in FREEZE_NOTIFIER_EP.extensionList) {
+              notifier.notifyFreeze(loggingEvent, dumps, reportDir, durationMs)
+            }
+          }
         }
       }
     }
 
     this.dumpTask = null
     reset()
+  }
+
+  /**
+   * In Diogen, we check that there is at least one method in report.txt which also exists in threadDumps in the thread responsible for
+   * a freeze that lasts 1+ second.
+   * And we add [SamplingTask.dumpInterval] to each method in [buildTree].
+   */
+  private fun SamplingTask.isValid(): Boolean {
+    return threadInfos.size > (1000 / dumpInterval)
   }
 
   private fun reset() {
@@ -191,18 +211,15 @@ internal class IdeaFreezeReporter : PerformanceListener {
                           reportDir: Path?,
                           performanceWatcher: PerformanceWatcher,
                           finished: Boolean): IdeaLoggingEvent? {
+    if (!dumpTask.isValid()) return null
     var infos = dumpTask.threadInfos.toList()
-    val dumpInterval = (if (infos.isEmpty()) performanceWatcher.dumpInterval else dumpTask.dumpInterval).toLong()
-    if (infos.isEmpty()) {
-      infos = currentDumps.map { it.threadInfos }
-    }
 
     val causeThreads = infos.mapNotNull { getCauseThread(it) }
     val jitProblem = performanceWatcher.jitProblem
     val allInEdt = causeThreads.all { ThreadDumper.isEDT(it) }
-    val root = buildTree(threadInfos = causeThreads, time = dumpInterval)
+    val root = buildTree(threadInfos = causeThreads, time = dumpTask.dumpInterval)
     val classLoadingRatio = countClassLoading(causeThreads) * 100 / causeThreads.size
-    val commonStackNode = root.findDominantCommonStack((causeThreads.size * dumpInterval * COMMON_SUB_STACK_WEIGHT).toLong())
+    val commonStackNode = root.findDominantCommonStack((causeThreads.size * dumpTask.dumpInterval * COMMON_SUB_STACK_WEIGHT).toLong())
     var commonStack = commonStackNode?.getStack()
     var nonEdtCause = false
 
@@ -230,7 +247,7 @@ internal class IdeaFreezeReporter : PerformanceListener {
     val durationInSeconds = duration / 1000
     val edtNote = if (allInEdt) "in EDT " else ""
     var message = """Freeze ${edtNote}for $durationInSeconds seconds
-${if (finished) "" else if (appClosing) "IDE is closing. " else "IDE KILLED! "}Sampled time: ${infos.size * dumpInterval}ms, sampling rate: ${dumpInterval}ms"""
+${if (finished) "" else if (appClosing) "IDE is closing. " else "IDE KILLED! "}Sampled time: ${infos.size * dumpTask.dumpInterval}ms, sampling rate: ${dumpTask.dumpInterval}ms"""
     if (jitProblem != null) {
       message += ", $jitProblem"
     }
@@ -256,12 +273,12 @@ ${if (finished) "" else if (appClosing) "IDE is closing. " else "IDE KILLED! "}S
 
 private class CallTreeNode(private val stackTraceElement: StackTraceElement?,
                            private val parent: CallTreeNode?,
-                           @JvmField var time: Long,
+                           @JvmField var time: Int,
                            @JvmField val threadInfo: ThreadInfo?) {
   private val children = SmartList<CallTreeNode>()
   private val depth: Int = if (parent == null) 0 else parent.depth + 1
 
-  fun addCallee(e: StackTraceElement?, time: Long, threadInfo: ThreadInfo?): CallTreeNode {
+  fun addCallee(e: StackTraceElement?, time: Int, threadInfo: ThreadInfo?): CallTreeNode {
     for (child in children) {
       if (compareStackTraceElements(child.stackTraceElement!!, e!!)) {
         child.time += time
@@ -323,9 +340,9 @@ private class CallTreeNode(private val stackTraceElement: StackTraceElement?,
   }
 }
 
-private val TIME_COMPARATOR: Comparator<CallTreeNode> = Comparator.comparingLong<CallTreeNode> { it.time }.reversed()
+private val TIME_COMPARATOR: Comparator<CallTreeNode> = Comparator.comparingInt<CallTreeNode> { it.time }.reversed()
 
-private fun buildTree(threadInfos: List<ThreadInfo>, time: Long): CallTreeNode {
+private fun buildTree(threadInfos: List<ThreadInfo>, time: Int): CallTreeNode {
   val root = CallTreeNode(null, null, 0, null)
   for (thread in threadInfos) {
     var node = root

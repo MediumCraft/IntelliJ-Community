@@ -8,11 +8,32 @@ import com.jetbrains.python.packaging.repository.PyPackageRepository
 import com.jetbrains.python.packaging.requirement.PyRequirementRelation
 import org.jetbrains.annotations.Nls
 
-open class PythonPackage(val name: String, val version: String) {
+open class PythonPackage(val name: String, val version: String, val isEditableMode: Boolean) {
+  companion object {
+    private const val HASH_MULTIPLIER = 31
+  }
+
   override fun toString(): String {
     return "PythonPackage(name='$name', version='$version')"
   }
+
+  override fun equals(other: Any?): Boolean {
+    if (this === other) return true
+    if (other !is PythonPackage) return false
+    return name == other.name && version == other.version && isEditableMode == other.isEditableMode
+  }
+
+  override fun hashCode(): Int {
+    var result = name.hashCode()
+    result = HASH_MULTIPLIER * result + version.hashCode()
+    result = HASH_MULTIPLIER * result + isEditableMode.hashCode()
+    return result
+  }
 }
+
+open class PythonOutdatedPackage(name: String, version: String, isEditableMode: Boolean, val latestVersion: String)
+  : PythonPackage(name, version, isEditableMode)
+{}
 
 interface PythonPackageDetails {
 
@@ -110,5 +131,5 @@ data class PythonVcsPackageSpecification(override val name: String,
                                          override val editable: Boolean) : PythonLocationBasedPackageSpecification
 
 fun normalizePackageName(name: String): String {
-  return name.replace('_', '-').lowercase()
+  return name.replace(Regex("[-_.]+"), "-").lowercase()
 }

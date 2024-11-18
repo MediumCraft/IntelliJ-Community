@@ -5,6 +5,7 @@ package com.intellij.debugger.actions;
 import com.intellij.debugger.DebuggerManagerEx;
 import com.intellij.debugger.JavaDebuggerBundle;
 import com.intellij.debugger.engine.DebugProcessImpl;
+import com.intellij.debugger.engine.DebuggerUtils;
 import com.intellij.debugger.engine.events.DebuggerCommandImpl;
 import com.intellij.debugger.impl.DebuggerContextImpl;
 import com.intellij.debugger.impl.DebuggerSession;
@@ -17,8 +18,8 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
-import com.intellij.unscramble.ThreadDumpParser;
-import com.intellij.unscramble.ThreadState;
+import com.intellij.threadDumpParser.ThreadDumpParser;
+import com.intellij.threadDumpParser.ThreadState;
 import com.intellij.util.SmartList;
 import com.intellij.xdebugger.XDebugSession;
 import com.sun.jdi.*;
@@ -27,10 +28,7 @@ import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 public final class ThreadDumpAction extends DumbAwareAction {
   @Override
@@ -44,7 +42,7 @@ public final class ThreadDumpAction extends DumbAwareAction {
     final DebuggerSession session = context.getDebuggerSession();
     if (session != null && session.isAttached()) {
       final DebugProcessImpl process = context.getDebugProcess();
-      process.getManagerThread().invoke(new DebuggerCommandImpl() {
+      Objects.requireNonNull(context.getManagerThread()).invoke(new DebuggerCommandImpl() {
         @Override
         protected void action() {
           final VirtualMachineProxyImpl vm = process.getVirtualMachineProxy();
@@ -87,7 +85,7 @@ public final class ThreadDumpAction extends DumbAwareAction {
       buffer.append("\"").append(threadName).append("\"");
       ReferenceType referenceType = threadReference.referenceType();
       if (referenceType != null) {
-        Field daemon = referenceType.fieldByName("daemon");
+        Field daemon = DebuggerUtils.findField(referenceType, "daemon");
         if (daemon != null) {
           Value value = threadReference.getValue(daemon);
           if (value instanceof BooleanValue && ((BooleanValue)value).booleanValue()) {
@@ -96,7 +94,7 @@ public final class ThreadDumpAction extends DumbAwareAction {
           }
         }
 
-        Field priority = referenceType.fieldByName("priority");
+        Field priority = DebuggerUtils.findField(referenceType, "priority");
         if (priority != null) {
           Value value = threadReference.getValue(priority);
           if (value instanceof IntegerValue) {
@@ -104,7 +102,7 @@ public final class ThreadDumpAction extends DumbAwareAction {
           }
         }
 
-        Field tid = referenceType.fieldByName("tid");
+        Field tid = DebuggerUtils.findField(referenceType, "tid");
         if (tid != null) {
           Value value = threadReference.getValue(tid);
           if (value instanceof LongValue) {

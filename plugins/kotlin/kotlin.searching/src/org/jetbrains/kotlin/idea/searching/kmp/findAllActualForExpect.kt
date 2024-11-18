@@ -8,8 +8,9 @@ import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.search.SearchScope
 import com.intellij.psi.util.parentOfType
 import com.intellij.util.concurrency.annotations.RequiresBackgroundThread
+import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
 import org.jetbrains.kotlin.analysis.api.analyze
-import org.jetbrains.kotlin.analysis.api.symbols.KtDeclarationSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaDeclarationSymbol
 import org.jetbrains.kotlin.idea.base.psi.isEffectivelyActual
 import org.jetbrains.kotlin.idea.stubindex.KotlinFullClassNameIndex
 import org.jetbrains.kotlin.idea.stubindex.KotlinTopLevelFunctionFqnNameIndex
@@ -26,13 +27,13 @@ fun KtDeclaration.findAllActualForExpect(searchScope: SearchScope = runReadActio
     // covers cases like classes, class functions and class properties
     containingClassOrObjectOrSelf?.fqName?.let { fqName ->
         val fqNameAsString = fqName.asString()
-        val targetDeclarations: List<KtDeclaration> = KotlinFullClassNameIndex.getAllElements(fqNameAsString, project, scope, filter = {
+        val targetDeclarations = KotlinFullClassNameIndex.getAllElements(fqNameAsString, project, scope) {
             it.matchesWithExpect(containingClassOrObjectOrSelf)
-        }) + KotlinTopLevelTypeAliasFqNameIndex.getAllElements(fqNameAsString, project, scope, filter = {
+        } + KotlinTopLevelTypeAliasFqNameIndex.getAllElements(fqNameAsString, project, scope) {
             it.matchesWithExpect(containingClassOrObjectOrSelf)
-        })
+        }
 
-        return targetDeclarations.asSequence().mapNotNull { targetDeclaration ->
+        return targetDeclarations.mapNotNull { targetDeclaration ->
             when (declaration) {
                 is KtClassOrObject -> targetDeclaration
                 is KtConstructor<*> -> {
@@ -55,34 +56,31 @@ fun KtDeclaration.findAllActualForExpect(searchScope: SearchScope = runReadActio
                     }
 
                 else -> null
-            }?.createSmartPointer()
-        }
+            }
+        }.map { it.createSmartPointer() }
     }
     // top level functions
     val packageFqName = declaration.containingKtFile.packageFqName
     val name = declaration.name ?: return emptySequence()
     val topLevelFqName = packageFqName.child(Name.identifier(name)).asString()
     return when (declaration) {
-        is KtNamedFunction -> {
-            KotlinTopLevelFunctionFqnNameIndex.getAllElements(topLevelFqName, project, scope) {
-                it.matchesWithExpect(declaration)
-            }.asSequence().map(KtNamedFunction::createSmartPointer)
+        is KtNamedFunction -> KotlinTopLevelFunctionFqnNameIndex.getAllElements(topLevelFqName, project, scope) {
+            it.matchesWithExpect(declaration)
         }
 
-        is KtProperty -> {
-            KotlinTopLevelPropertyFqnNameIndex.getAllElements(topLevelFqName, project, scope) {
-                it.matchesWithExpect(declaration)
-            }.asSequence().map(KtProperty::createSmartPointer)
+        is KtProperty -> KotlinTopLevelPropertyFqnNameIndex.getAllElements(topLevelFqName, project, scope) {
+            it.matchesWithExpect(declaration)
         }
 
         else -> emptySequence()
-    }
+    }.map { it.createSmartPointer() }
 }
 
+@OptIn(KaExperimentalApi::class)
 private fun KtDeclaration.matchesWithExpect(expectDeclaration: KtDeclaration): Boolean {
     val declaration = this
     return declaration.isEffectivelyActual() && analyze(declaration) {
-        val symbol: KtDeclarationSymbol = declaration.getSymbol()
+        val symbol: KaDeclarationSymbol = declaration.symbol
         return symbol.getExpectsForActual().any { it.psi == expectDeclaration }
     }
 }

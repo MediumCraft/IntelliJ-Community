@@ -18,12 +18,13 @@ import com.intellij.vcs.log.impl.*;
 import com.intellij.vcs.log.ui.MainVcsLogUi;
 import com.intellij.vcs.log.ui.highlighters.CurrentBranchHighlighter;
 import com.intellij.vcs.log.ui.highlighters.MergeCommitsHighlighter;
-import com.intellij.vcs.log.ui.highlighters.MyCommitsHighlighter;
+import com.intellij.vcs.log.ui.highlighters.VcsLogCommitsHighlighter;
 import com.intellij.vcs.log.ui.highlighters.VcsLogHighlighterFactory;
 import com.intellij.vcs.log.ui.table.column.VcsLogColumnManager;
 import com.intellij.vcs.log.ui.table.column.VcsLogDefaultColumn;
 import com.intellij.vcs.log.util.GraphOptionsUtil;
 import kotlin.jvm.functions.Function1;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
@@ -37,6 +38,7 @@ import static com.intellij.vcs.log.ui.AbstractVcsLogUi.LOG_HIGHLIGHTER_FACTORY_E
 import static com.intellij.vcs.log.ui.table.column.VcsLogColumnUtilKt.getColumnsOrder;
 import static com.intellij.vcs.log.ui.table.column.VcsLogDefaultColumnKt.getDefaultDynamicColumns;
 
+@ApiStatus.Internal
 public @NonNls class VcsLogFeaturesCollector extends ProjectUsagesCollector {
   private static final EventLogGroup GROUP = new EventLogGroup("vcs.log.ui", 8);
   private static final EventId UI_INITIALIZED = GROUP.registerEvent("uiInitialized");
@@ -63,7 +65,7 @@ public @NonNls class VcsLogFeaturesCollector extends ProjectUsagesCollector {
   private static final VarargEventId TEXT_FILTER_MATCH_CASE = GROUP.registerVarargEvent("textFilter.matchCase", EventFields.Enabled);
   public static final String THIRD_PARTY = "THIRD_PARTY";
   private static final StringEventField LOG_HIGHLIGHTER_ID_FIELD =
-    EventFields.String("id", List.of(MyCommitsHighlighter.Factory.ID,
+    EventFields.String("id", List.of(VcsLogCommitsHighlighter.Factory.ID,
                                      MergeCommitsHighlighter.Factory.ID,
                                      CurrentBranchHighlighter.Factory.ID,
                                      THIRD_PARTY));

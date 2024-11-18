@@ -15,8 +15,14 @@ import com.intellij.codeInsight.intention.IntentionManager;
 import com.intellij.codeInsight.intention.impl.IntentionActionWithTextCaching;
 import com.intellij.codeInsight.intention.impl.IntentionContainer;
 import com.intellij.codeInsight.intention.impl.IntentionHintComponent;
+import com.intellij.codeInspection.InspectionManager;
+import com.intellij.codeInspection.LocalQuickFix;
+import com.intellij.codeInspection.ProblemDescriptor;
+import com.intellij.codeInspection.ProblemHighlightType;
 import com.intellij.ide.highlighter.JavaFileType;
+import com.intellij.lang.annotation.AnnotationHolder;
 import com.intellij.lang.annotation.HighlightSeverity;
+import com.intellij.lang.java.JavaLanguage;
 import com.intellij.openapi.actionSystem.IdeActions;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.command.CommandProcessor;
@@ -38,6 +44,8 @@ import com.intellij.openapi.projectRoots.impl.JavaAwareProjectJdkTableImpl;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.pom.java.LanguageLevel;
+import com.intellij.psi.PsiComment;
+import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.testFramework.DumbModeTestUtils;
 import com.intellij.testFramework.EditorTestUtil;
@@ -47,6 +55,7 @@ import com.intellij.ui.HintListener;
 import com.intellij.ui.LightweightHint;
 import com.intellij.util.ExceptionUtil;
 import com.intellij.util.IncorrectOperationException;
+import com.intellij.util.ThrowableRunnable;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.UIUtil;
 import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
@@ -58,9 +67,10 @@ import org.jetbrains.annotations.Nullable;
 import java.awt.*;
 import java.io.File;
 import java.io.IOException;
-import java.util.List;
 import java.util.*;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * test light bulb behaviour, intention action update and application
@@ -75,7 +85,6 @@ public class LightBulbTest extends DaemonAnalyzerTestCase {
     super.setUp();
     myDaemonCodeAnalyzer = (DaemonCodeAnalyzerImpl)DaemonCodeAnalyzer.getInstance(getProject());
     myDaemonCodeAnalyzer.setUpdateByTimerEnabled(true);
-    DaemonProgressIndicator.setDebug(true);
   }
 
   @Override
@@ -97,6 +106,11 @@ public class LightBulbTest extends DaemonAnalyzerTestCase {
       myDaemonCodeAnalyzer = null;
       super.tearDown();
     }
+  }
+
+  @Override
+  protected void runTestRunnable(@NotNull ThrowableRunnable<Throwable> testRunnable) throws Throwable {
+    DaemonProgressIndicator.runInDebugMode(() -> super.runTestRunnable(testRunnable));
   }
 
   @Override
@@ -124,7 +138,7 @@ public class LightBulbTest extends DaemonAnalyzerTestCase {
   }
 
   private void setActiveEditors(Editor @NotNull ... editors) {
-    ((EditorTrackerImpl)EditorTracker.getInstance(myProject)).setActiveEditors(Arrays.asList(editors));
+    EditorTracker.Companion.getInstance(myProject).setActiveEditors(Arrays.asList(editors));
   }
 
   @Override
@@ -216,6 +230,7 @@ public class LightBulbTest extends DaemonAnalyzerTestCase {
   }
 
   public void testLightBulbDoesNotUpdateIntentionsInEDT() {
+    AtomicInteger updateCount = new AtomicInteger();
     IntentionAction longLongUpdate = new AbstractIntentionAction() {
       @Override
       public void invoke(@NotNull Project project, Editor editor, PsiFile file) {
@@ -230,6 +245,7 @@ public class LightBulbTest extends DaemonAnalyzerTestCase {
 
       @Override
       public boolean isAvailable(@NotNull Project project, Editor editor, PsiFile file) {
+        updateCount.incrementAndGet();
         ApplicationManager.getApplication().assertIsNonDispatchThread();
         return true;
       }
@@ -239,24 +255,31 @@ public class LightBulbTest extends DaemonAnalyzerTestCase {
     configureByText(JavaFileType.INSTANCE, "class X { <caret>  }");
     DaemonRespondToChangesTest.makeEditorWindowVisible(new Point(0, 0), myEditor);
     doHighlighting();
-    myDaemonCodeAnalyzer.restart();
+    assertTrue("updateCount:"+updateCount, updateCount.get() > 0);
+    myDaemonCodeAnalyzer.restart(getTestName(false));
     DaemonRespondToChangesTest.runWithReparseDelay(0, () -> {
       for (int i = 0; i < 1000; i++) {
+        LOG.debug("i = " + i);
+        int updateCount0 = updateCount.get();
         caretRight();
         UIUtil.dispatchAllInvocationEvents();
         caretLeft();
-        Object updateProgress = new HashMap<>(myDaemonCodeAnalyzer.getUpdateProgress());
-        long waitForDaemonStart = System.currentTimeMillis();
-        while (myDaemonCodeAnalyzer.getUpdateProgress().equals(updateProgress) && System.currentTimeMillis() < waitForDaemonStart + 5000) { // wait until the daemon started
+        myDaemonCodeAnalyzer.restart();
+        assertFalse(myDaemonCodeAnalyzer.getFileStatusMap().allDirtyScopesAreNull(myEditor.getDocument()));
+        long daemonStartDeadline = System.currentTimeMillis() + 5000;
+        while (!myDaemonCodeAnalyzer.isRunning() && !myDaemonCodeAnalyzer.getFileStatusMap().allDirtyScopesAreNull(myEditor.getDocument()) && System.currentTimeMillis() < daemonStartDeadline) { // wait until the daemon started
           UIUtil.dispatchAllInvocationEvents();
         }
-        if (myDaemonCodeAnalyzer.getUpdateProgress().equals(updateProgress)) {
+        if (System.currentTimeMillis() > daemonStartDeadline) {
           throw new RuntimeException("Daemon failed to start in 5000 ms");
         }
         long start = System.currentTimeMillis();
-        while (myDaemonCodeAnalyzer.isRunning() && System.currentTimeMillis() < start + 500) {
+        while (myDaemonCodeAnalyzer.isRunning()) {
           UIUtil.dispatchAllInvocationEvents(); // wait for a bit more until ShowIntentionsPass.doApplyInformationToEditor() called
         }
+        long finish = System.currentTimeMillis();
+        LOG.debug("start: "+(daemonStartDeadline-5000)+"; started: "+start+"; finished: "+finish+"; updateCount:"+updateCount);
+        assertTrue("updateCount0: "+updateCount0+"; updateCount:"+updateCount, updateCount.get() > updateCount0);
       }
     });
   }
@@ -338,7 +361,7 @@ public class LightBulbTest extends DaemonAnalyzerTestCase {
     configureByText(JavaFileType.INSTANCE, text);
     WriteCommandAction.runWriteCommandAction(getProject(), () -> myEditor.getDocument().setText(text));
     doHighlighting();
-    myDaemonCodeAnalyzer.restart();
+    myDaemonCodeAnalyzer.restart(getTestName(false));
     doHighlighting();
   }
 
@@ -358,8 +381,8 @@ public class LightBulbTest extends DaemonAnalyzerTestCase {
     }
     class DumbFac implements TextEditorHighlightingPassFactory, DumbAware {
       @Override
-      public TextEditorHighlightingPass createHighlightingPass(@NotNull PsiFile file, @NotNull Editor editor) {
-        return new TestDumbAwareHighlightingPassesStartEvenInDumbModePass(editor, file);
+      public TextEditorHighlightingPass createHighlightingPass(@NotNull PsiFile psiFile, @NotNull Editor editor) {
+        return new TestDumbAwareHighlightingPassesStartEvenInDumbModePass(editor, psiFile);
       }
 
       class TestDumbAwareHighlightingPassesStartEvenInDumbModePass extends EditorBoundHighlightingPass implements DumbAware {
@@ -416,6 +439,76 @@ public class LightBulbTest extends DaemonAnalyzerTestCase {
         List<IntentionActionWithTextCaching> actions = hintComponent.getCachedIntentions().getAllActions();
         assertTrue(actions.toString(), ContainerUtil.exists(actions, a -> a.getText().equals(MyDumbFix.fixText)));
       }
+    });
+  }
+
+  static class MyDumbFix implements DumbAware, LocalQuickFix {
+    private static final String fixText = "myDumbFix13";
+
+    @Override
+    public @NotNull String getFamilyName() {
+      return "MyDumbFix";
+    }
+
+    @Override
+    public @NotNull String getName() {
+      return fixText;
+    }
+
+    @Override
+    public void applyFix(@NotNull Project project, @NotNull ProblemDescriptor descriptor) {
+
+    }
+  }
+  public static class MyDumbAnnotator extends DaemonAnnotatorsRespondToChangesTest.MyRecordingAnnotator {
+    static final String ERR_MSG = "w13";
+
+    public MyDumbAnnotator() {
+      iDidIt(); // is not supposed to ever do anything
+    }
+    @Override
+    public void annotate(@NotNull PsiElement element, @NotNull AnnotationHolder holder) {
+      if (element instanceof PsiComment) {
+        ProblemDescriptor descriptor = InspectionManager.getInstance(element.getProject())
+          .createProblemDescriptor(element, ERR_MSG, true, ProblemHighlightType.ERROR, true);
+        holder.newAnnotation(HighlightSeverity.ERROR, ERR_MSG).newLocalQuickFix(new MyDumbFix(), descriptor).registerFix().create();
+        iDidIt();
+      }
+      LOG.debug(getClass()+".annotate("+element+") = "+didIDoIt());
+    }
+  }
+
+  public void testLightBulbMustShowForLocalQuickFixGeneratedByDumbAwareAnnotatorInDumbMode() {
+    DaemonAnnotatorsRespondToChangesTest.useAnnotatorsIn(JavaLanguage.INSTANCE, new DaemonAnnotatorsRespondToChangesTest.MyRecordingAnnotator[]{new MyDumbAnnotator()}, () -> {
+      configureByText(JavaFileType.INSTANCE, """
+        class X {
+          // <caret>xxx
+        }
+        """);
+      ((EditorImpl)myEditor).getScrollPane().getViewport().setSize(1000, 1000);
+      DaemonCodeAnalyzerSettings.getInstance().setImportHintEnabled(true);
+      UIUtil.markAsFocused(getEditor().getContentComponent(), true); // to make ShowIntentionPass call its collectInformation()
+
+      HighlightInfo info = assertOneElement(highlightErrors());
+      assertEquals(MyDumbAnnotator.ERR_MSG, info.getDescription());
+      {
+        IntentionHintComponent hintComponent = myDaemonCodeAnalyzer.getLastIntentionHint();
+        List<IntentionActionWithTextCaching> actions = hintComponent.getCachedIntentions().getAllActions();
+        assertTrue(actions.toString(), ContainerUtil.exists(actions, a -> a.getText().equals(MyDumbFix.fixText)));
+      }
+
+      myDaemonCodeAnalyzer.mustWaitForSmartMode(false, getTestRootDisposable());
+      DumbModeTestUtils.runInDumbModeSynchronously(myProject, () -> {
+        myDaemonCodeAnalyzer.restart(getTestName(false));
+        HighlightInfo info2 = assertOneElement(highlightErrors());
+        assertEquals(MyDumbAnnotator.ERR_MSG, info2.getDescription());
+
+        {
+          IntentionHintComponent hintComponent = myDaemonCodeAnalyzer.getLastIntentionHint();
+          List<IntentionActionWithTextCaching> actions = hintComponent.getCachedIntentions().getAllActions();
+          assertTrue(actions.toString(), ContainerUtil.exists(actions, a -> a.getText().equals(MyDumbFix.fixText)));
+        }
+      });
     });
   }
 

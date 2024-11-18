@@ -105,7 +105,7 @@ public class JavaDebugProcess extends XDebugProcess {
         //noinspection NonAtomicOperationOnVolatileField
         myBreakpointHandlers = ArrayUtil.append(myBreakpointHandlers, extension.createHandler(myJavaSession.getProcess()));
       }
-    }, process.myDisposable);
+    }, process.disposable);
 
     myJavaSession.getContextManager().addListener(new DebuggerContextListener() {
       @Override
@@ -118,7 +118,7 @@ public class JavaDebugProcess extends XDebugProcess {
           final SuspendContextImpl newSuspendContext = newContext.getSuspendContext();
           if (newSuspendContext != null &&
               (shouldApplyContext(newContext) || event == DebuggerSession.Event.REFRESH_WITH_STACK)) {
-            process.getManagerThread().schedule(new SuspendContextCommandImpl(newSuspendContext) {
+            newSuspendContext.getManagerThread().schedule(new SuspendContextCommandImpl(newSuspendContext) {
               @Override
               public void contextAction(@NotNull SuspendContextImpl suspendContext) {
                 ThreadReferenceProxyImpl threadProxy = newContext.getThreadProxy();
@@ -198,7 +198,7 @@ public class JavaDebugProcess extends XDebugProcess {
       }
     });
     if (!DebuggerUtilsImpl.isRemote(process)) {
-      DfaAssist.installDfaAssist(myJavaSession, session, process.myDisposable);
+      DfaAssist.installDfaAssist(myJavaSession, session, process.disposable);
     }
 
     mySmartStepIntoActionHandler = new JvmSmartStepIntoActionHandler(javaSession);

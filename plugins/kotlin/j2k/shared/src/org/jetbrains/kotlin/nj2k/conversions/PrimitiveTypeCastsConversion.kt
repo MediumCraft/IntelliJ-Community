@@ -2,7 +2,7 @@
 
 package org.jetbrains.kotlin.nj2k.conversions
 
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
+import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.config.ApiVersion.Companion.KOTLIN_1_5
 import org.jetbrains.kotlin.nj2k.*
 import org.jetbrains.kotlin.nj2k.tree.*
@@ -18,7 +18,7 @@ import org.jetbrains.kotlin.nj2k.types.JKJavaPrimitiveType.Companion.SHORT
 import org.jetbrains.kotlin.utils.addToStdlib.safeAs
 
 class PrimitiveTypeCastsConversion(context: NewJ2kConverterContext) : RecursiveConversion(context) {
-    context(KtAnalysisSession)
+    context(KaSession)
     override fun applyToElement(element: JKTreeElement): JKTreeElement {
         return recurse(convertTypeCastExpression(element) ?: element)
     }
@@ -83,15 +83,17 @@ class PrimitiveTypeCastsConversion(context: NewJ2kConverterContext) : RecursiveC
                 // conversions of floating point types to integral types lesser than Int is an error (KT-30360)
                 // we have to convert in two steps
                 receiver
-                    .callOn(symbolProvider.provideMethodSymbol("kotlin.$initialTypeName.toInt"))
-                    .callOn(symbolProvider.provideMethodSymbol("kotlin.Int.$conversionFunctionName"))
+                    .callOn(symbolProvider.provideMethodSymbol("kotlin.$initialTypeName.toInt"), expressionType = typeFactory.types.int)
+                    .callOn(symbolProvider.provideMethodSymbol("kotlin.Int.$conversionFunctionName"), expressionType = toType)
             } else {
                 JKQualifiedExpression(
                     receiver,
                     JKCallExpressionImpl(
                         symbolProvider.provideMethodSymbol("kotlin.$initialTypeName.$conversionFunctionName"),
-                        JKArgumentList()
-                    )
+                        JKArgumentList(),
+                        expressionType = toType
+                    ),
+                    toType
                 )
             }
 
@@ -123,11 +125,13 @@ class PrimitiveTypeCastsConversion(context: NewJ2kConverterContext) : RecursiveC
 
             result = JKQualifiedExpression(
                 result,
-                JKFieldAccessExpression(symbolProvider.provideFieldSymbol("kotlin.code"))
+                JKFieldAccessExpression(symbolProvider.provideFieldSymbol("kotlin.code"), typeFactory.types.int),
+                typeFactory.types.int
             )
             if (toType != INT) {
                 result = result.callOn(
-                    symbolProvider.provideMethodSymbol("kotlin.Int.to${toType.kotlinName()}")
+                    symbolProvider.provideMethodSymbol("kotlin.Int.to${toType.kotlinName()}"),
+                    expressionType = toType
                 )
             }
             return result
@@ -144,16 +148,19 @@ class PrimitiveTypeCastsConversion(context: NewJ2kConverterContext) : RecursiveC
 
             if (fromType == FLOAT || fromType == DOUBLE) {
                 return result.callOn(
-                    symbolProvider.provideMethodSymbol("kotlin.${fromType.kotlinName()}.toInt")
+                    symbolProvider.provideMethodSymbol("kotlin.${fromType.kotlinName()}.toInt"),
+                    expressionType = typeFactory.types.int
                 ).callOn(
-                    symbolProvider.provideMethodSymbol("kotlin.Int.toChar")
+                    symbolProvider.provideMethodSymbol("kotlin.Int.toChar"),
+                    expressionType = typeFactory.types.char
                 )
             }
             return JKCallExpressionImpl(
                 symbolProvider.provideMethodSymbol("kotlin.Char"),
                 JKArgumentList(
-                    result.callOn(symbolProvider.provideMethodSymbol("kotlin.toUShort"))
-                )
+                    result.callOn(symbolProvider.provideMethodSymbol("kotlin.toUShort"), expressionType = typeFactory.types.short)
+                ),
+                expressionType = typeFactory.types.char
             )
         }
     }

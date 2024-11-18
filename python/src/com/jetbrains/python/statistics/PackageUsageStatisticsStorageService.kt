@@ -56,6 +56,7 @@ class PyPackageUsageStatistics : PersistentStateComponent<PyPackageUsageStatisti
   }
 }
 
+// All properties are nullable because otherwise serialization will not work
 data class PackageUsage(
   var name: String? = null,
   var version: String? = null,

@@ -4,7 +4,9 @@ isCompletionGolf = false
 const prefix = "ep@"
 const LC_KEYS = {
   delimiter: prefix + "delimiter"
-}
+};
+const EXTERNAL_VARIABLES = {}
+
 
 document.addEventListener("click", function (e) {
   if (e.target.closest(".multiline") != null) {
@@ -13,6 +15,7 @@ document.addEventListener("click", function (e) {
   }
   const suggestionDiv = e.target.closest(".suggestion")
   const featureValueDiv = e.target.closest(".feature-value")
+  const popupDiv = e.target.closest(".autocomplete-items")
   if (featureValueDiv != null) {
     e.stopPropagation()
     if (e.target.classList.contains("favorite-button")) {
@@ -30,7 +33,7 @@ document.addEventListener("click", function (e) {
   else if (suggestionDiv != null) {
     updateElementFeatures(suggestionDiv)
   }
-  else {
+  else if (popupDiv == null) {
     closeAllLists()
   }
 })
@@ -43,10 +46,8 @@ function updateBackgrounds(e, elementClasses, bgClass) {
   addClassForElements(selected, bgClass, true)
 }
 
-document.getElementById("wrong-filters").onchange = (e) => updateBackgrounds(e,
-  ["raw-filter", "analyzed-filter"], "bg-filters-skipped")
-document.getElementById("model-skipped").onchange = (e) => updateBackgrounds(e,
-  ["trigger-skipped", "filter-skipped"], "bg-model-skipped")
+document.getElementById("wrong-filters").onchange = (e) => updateBackgrounds(e,  ["raw-filter", "analyzed-filter"], "bg-filters-skipped")
+document.getElementById("model-skipped").onchange = (e) => updateBackgrounds(e, ["trigger-skipped", "filter-skipped"], "bg-model-skipped")
 
 function removeClassForElements(elementsClassName, classToAdd) {
   let tokens = document.getElementsByClassName(elementsClassName)
@@ -122,31 +123,84 @@ function updatePopup(sessionDiv) {
   popup.setAttribute("class", "autocomplete-items")
   const prefixDiv = document.createElement("DIV")
   prefixDiv.setAttribute("style", "background-color: lightgrey;")
+  const codeElement = document.querySelector('.code');
   if ("aia_user_prompt" in lookup["additionalInfo"]) {
-    prefixDiv.innerHTML = `user prompt: &quot;${lookup["additionalInfo"]["aia_user_prompt"]}&quot;; latency: ${lookup["latency"]}`
+    prefixDiv.textContent = `user prompt: "${lookup["additionalInfo"]["aia_user_prompt"]}"; latency: ${lookup["latency"]}`
   } else {
-    prefixDiv.innerHTML = `prefix: &quot;${lookup["prefix"]}&quot;; latency: ${lookup["latency"]}`
+    prefixDiv.textContent = `prefix: "${lookup["prefix"]}"; latency: ${lookup["latency"]}`
   }
   popup.appendChild(prefixDiv)
-  // order: () -> suggestions -> features -> contexts
-  const needAddFeatures = sessionDiv.classList.contains("suggestions")
+  // order: () -> (suggestions or diffView) -> features -> contexts
+  const needAddFeatures = sessionDiv.classList.contains("diffView") || sessionDiv.classList.contains("suggestions")
   const needAddContext = sessionDiv.classList.contains("features")
+  const isCodeGeneration = sessionDiv.classList.contains("code-generation");
   closeAllLists()
   if (needAddFeatures) {
     addCommonFeatures(sessionDiv, popup, lookup)
   }
-  else if (needAddContext) {
+  else if (needAddContext && "cc_context" in lookup["additionalInfo"]) {
     addContexts(sessionDiv, popup, lookup)
   }
   else {
-    addSuggestions(sessionDiv, popup, lookup)
+    if (isCodeGeneration) {
+      const originalCode  = "aia_original_content" in lookup["additionalInfo"]
+        ? lookup["additionalInfo"]["aia_original_content"]
+        : codeElement.innerText
+      addDiffView(sessionDiv, popup, lookup, originalCode)
+    } else {
+      addSuggestions(sessionDiv, popup, lookup);
+    }
   }
-  sessionDiv.appendChild(popup)
+  appendPopup(sessionDiv, popup)
+}
+
+// Add the `addDiffView` function
+function addDiffView(sessionDiv, popup, lookup, originalText) {
+  const lineDiff = new Diff();
+
+  sessionDiv.classList.add("diffView")
+  sessionDiv.classList.remove("features", "contexts","suggestions")
+  const diffDiv = document.createElement("DIV");
+  diffDiv.setAttribute("class", "diffView");
+
+  const suggestionsText = lookup["suggestions"].map(s => s.presentationText).join("\n");
+
+  const unifiedDiff = lineDiff.unifiedSlideDiff(originalText, suggestionsText, 1);
+
+  unifiedDiff.forEach(line => {
+    const lineDiv = document.createElement("DIV");
+    lineDiv.textContent = line.content;
+    lineDiv.style.whiteSpace = "pre"; // Ensure indentation is preserved
+
+    const oldLineNumberSpan = document.createElement("span");
+    oldLineNumberSpan.textContent = line.oldLineNumber !== '' ? line.oldLineNumber : ' ';
+    oldLineNumberSpan.style.width = '30px';
+    oldLineNumberSpan.style.display = 'inline-block';
+
+    const newLineNumberSpan = document.createElement("span");
+    newLineNumberSpan.textContent = line.newLineNumber !== '' ? line.newLineNumber : ' ';
+    newLineNumberSpan.style.width = '30px';
+    newLineNumberSpan.style.display = 'inline-block';
+
+    if (line.type === "added") {
+      lineDiv.style.color = "green";
+    } else if (line.type === "removed") {
+      lineDiv.style.color = "red";
+    } else {
+      lineDiv.style.color = "black";
+    }
+
+    lineDiv.prepend(newLineNumberSpan);
+    lineDiv.prepend(oldLineNumberSpan);
+    diffDiv.appendChild(lineDiv);
+  });
+
+  popup.appendChild(diffDiv);
 }
 
 function addCommonFeatures(sessionDiv, popup, lookup) {
   sessionDiv.classList.add("features")
-  sessionDiv.classList.remove("contexts", "suggestions")
+  sessionDiv.classList.remove("contexts", "diffView","suggestions")
   const parts = sessionDiv.id.split(" ")
   const sessionId = parts[0]
   const lookupOrder = parts[1]
@@ -168,7 +222,11 @@ function addCommonFeatures(sessionDiv, popup, lookup) {
   }
   addRelevanceModelBlock(popup, lookup, "trigger")
   addRelevanceModelBlock(popup, lookup, "filter")
-  addAssistantContextBlock(popup, lookup)
+  addAiaDiagnosticsBlock("Response", "aia_response", popup, lookup)
+  addAiaDiagnosticsBlock("Context", "aia_context", popup, lookup)
+  addAiaDiagnosticsBlock("Code snippets from response", "extracted_code_snippets", popup, lookup)
+  addAiaDiagnosticsBlock("Internal api calls from original code snippet", "ground_truth_internal_api_calls", popup, lookup)
+  addAiaDiagnosticsBlock("Extracted api calls from generated code snippet", "predicted_api_calls", popup, lookup)
   addDiagnosticsBlock("RAW SUGGESTIONS", "raw_proposals", popup, lookup)
   addDiagnosticsBlock("RAW FILTERED", "raw_filtered", popup, lookup)
   addDiagnosticsBlock("ANALYZED SUGGESTIONS", "analyzed_proposals", popup, lookup)
@@ -178,17 +236,19 @@ function addCommonFeatures(sessionDiv, popup, lookup) {
 
 function addContexts(sessionDiv, popup, lookup) {
   sessionDiv.classList.add("contexts")
-  sessionDiv.classList.remove("features", "suggestions")
+  sessionDiv.classList.remove("features", "diffView","suggestions")
 
   if (!("cc_context" in lookup["additionalInfo"])) return
 
   const contextJson = lookup["additionalInfo"]["cc_context"]
-  maybeAddButtonToCopyCompletionContext(contextJson, sessionDiv, popup, lookup)
+  addButtonToCopyCompletionContext(contextJson, sessionDiv, popup, lookup)
 
-  const contextObject = JSON.parse(contextJson)
-  contextObject.contexts.items.forEach(context => {
-      popup.appendChild(createContextBlock(context))
-  })
+  if (contextJson !== "") {
+    const contextObject = JSON.parse(contextJson)
+    contextObject.context.forEach(item => {
+      popup.appendChild(createContextBlock(item))
+    })
+  }
 }
 
 function createContextBlock(context) {
@@ -201,12 +261,17 @@ function createContextBlock(context) {
 
 function createCodeElement(context) {
   const code = document.createElement("code")
-  code.innerHTML = `<b>File: ${context.filetype}</b><br><b>Type: ${context.type}</b><br><pre>${context.content}</pre>`
+  code.innerHTML = `<b>File: ${context.filepath}</b><br><b>Type: ${context.type}</b><br><pre>${context.content}</pre>`
   code.style.whiteSpace = "inherit"
   return code
 }
 
-function maybeAddButtonToCopyCompletionContext(context, sessionDiv, popup, lookup) {
+function appendPopup(session, popup) {
+  const target = session.querySelector(".autocomplete-items-position") ?? session
+  target.appendChild(popup)
+}
+
+function addButtonToCopyCompletionContext(context, sessionDiv, popup, lookup) {
   let buttonDiv = document.createElement("DIV")
   let button = document.createElement("BUTTON")
   button.textContent = "Copy Context"
@@ -229,10 +294,12 @@ function addSuggestions(sessionDiv, popup, lookup) {
     suggestionDiv.setAttribute("id", `${sessionDiv.id} ${i}`)
     let p = document.createElement("pre")
     p.setAttribute("class", "suggestion-p")
-    if (lookup["selectedPosition"] == i) {
+    if (lookup["selectedPosition"] === i) {
       p.setAttribute("style", "font-weight: bold;")
     }
-    p.innerHTML = suggestions[i].presentationText.replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    const presentationText = suggestions[i].presentationText.replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    p.innerHTML = EXTERNAL_VARIABLES["suggestion.indent.preserve"] === "true" ?
+      presentationText : removeCommonIndentFromCodeSnippet(presentationText)
     suggestionDiv.appendChild(p)
     popup.appendChild(suggestionDiv)
   }
@@ -247,13 +314,12 @@ function addRelevanceModelBlock(popup, lookup, relevanceMode) {
   popup.appendChild(relevanceModelResults)
 }
 
-function addAssistantContextBlock(popup, lookup) {
-  if (!("aia_context" in lookup["additionalInfo"])) return
-  let addInfo = lookup["additionalInfo"]
+function addAiaDiagnosticsBlock(description, field, popup, lookup) {
+  if (!(field in lookup["additionalInfo"])) return
   let contextBlock = document.createElement("DIV")
   contextBlock.style.whiteSpace = "inherit"
   let code = document.createElement("code")
-  code.innerHTML = addInfo["aia_context"]
+  code.textContent = `${description}:\n\n${lookup["additionalInfo"][field]}`
   contextBlock.appendChild(code)
   code.style.whiteSpace = "inherit"
   popup.appendChild(contextBlock)
@@ -304,9 +370,7 @@ function addDiagnosticsBlock(description, field, popup, lookup) {
     elements++
 
     let li = document.createElement("li")
-
-    let code = document.createElement("code")
-    code.innerHTML = diagnostics[i]["first"] + " (" + diagnostics[i]["second"] + ")"
+    let code = addDiagnosticsItem(diagnostics, i)
 
     li.appendChild(code)
     ul.appendChild(li)
@@ -332,6 +396,34 @@ function addDiagnosticsBlock(description, field, popup, lookup) {
   }
 }
 
+function addDiagnosticsItem(diagnostics, num) {
+  let codeContainer = document.createElement("DIV")
+  let code = document.createElement("pre")
+  code.innerHTML = removeCommonIndentFromCodeSnippet(diagnostics[num]["first"])
+  let meta = document.createElement("pre")
+  meta.innerHTML = "(" + diagnostics[num]["second"] + ")"
+  codeContainer.appendChild(meta)
+  codeContainer.appendChild(code)
+  return codeContainer
+}
+
+/**
+ * Removes the common leading indent from a multi-line code snippet, while keeping the first line unchanged.
+ *
+ * @param {string} code - The multi-line code snippet from which the common leading indentation will be removed.
+ * @return {string} - The code snippet with the common leading indentation removed from all lines except the first one.
+ */
+function removeCommonIndentFromCodeSnippet(code) {
+  const lines = code.split('\n')
+  const offsets = lines.slice(1)
+    .filter(line => line.length !== 0)
+    .map(line => line.search(/\S/))
+  const minOffset = Math.min(...offsets)
+  if (minOffset <= 0) return code
+  const trimmedLines = lines.slice(1).map(line => line.slice(minOffset)).join('\n')
+  return lines[0] + '\n' + trimmedLines
+}
+
 function updateElementFeatures(suggestionDiv) {
   if (suggestionDiv.childElementCount === 2) {
     suggestionDiv.removeChild(suggestionDiv.childNodes[1])
@@ -339,9 +431,15 @@ function updateElementFeatures(suggestionDiv) {
   }
   const parts = suggestionDiv.id.split(" ")
   const sessionId = parts[0]
-  if (!(sessionId in features)) return
   const lookupOrder = parts[1]
   const suggestionIndex = parts[2]
+
+  if (suggestionDiv.parentElement?.parentElement?.classList.contains("chat")) {
+    addFunctionCallingDiagnostics(suggestionDiv, sessions[sessionId]?._lookups[lookupOrder]?.suggestions[suggestionIndex])
+    return;
+  }
+
+  if (!(sessionId in features)) return
   const featuresJson = JSON.parse(pako.ungzip(atob(features[sessionId]), {to: 'string'}))
   const lookupFeatures = featuresJson[lookupOrder]
   if (lookupFeatures["element"].length <= suggestionIndex) return
@@ -471,11 +569,12 @@ function updateMultilinePopup(event) {
   if (showSuggestion) {
     addMultilineSuggestion(sessionDiv, popup, lookup)
     addMultilineExpectedText(popup, expectedText)
+    addCommonFeatures(sessionDiv, popup, lookup)
   }
   else {
     addMultilineAttachments(sessionDiv, popup, expectedText)
   }
-  sessionDiv.appendChild(popup)
+  appendPopup(sessionDiv, popup)
 }
 
 function addMultilineHeaders(popup, showSuggestion) {
@@ -543,7 +642,7 @@ function addMultilineExpectedText(popup, expectedText) {
   const expected = document.createElement("DIV")
   expected.setAttribute("class", "expected")
   const p = document.createElement("pre")
-  p.innerHTML = expectedText
+  p.innerHTML = removeCommonIndentFromCodeSnippet(expectedText)
   expected.appendChild(p)
   popup.appendChild(expected)
 }

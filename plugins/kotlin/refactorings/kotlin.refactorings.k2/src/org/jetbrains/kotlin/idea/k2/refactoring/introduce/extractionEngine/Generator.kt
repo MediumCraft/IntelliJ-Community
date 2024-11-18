@@ -2,7 +2,7 @@
 package org.jetbrains.kotlin.idea.k2.refactoring.introduce.extractionEngine
 
 import org.jetbrains.kotlin.analysis.api.analyze
-import org.jetbrains.kotlin.analysis.api.types.KtType
+import org.jetbrains.kotlin.analysis.api.types.KaType
 import org.jetbrains.kotlin.idea.base.psi.unifier.KotlinPsiRange
 import org.jetbrains.kotlin.idea.codeinsight.utils.isAnnotatedDeep
 import org.jetbrains.kotlin.idea.codeinsight.utils.isConvertableToExpressionBody
@@ -10,25 +10,17 @@ import org.jetbrains.kotlin.idea.codeinsight.utils.replaceWithExpressionBodyPres
 import org.jetbrains.kotlin.idea.k2.refactoring.extractFunction.ExtractionGeneratorConfiguration
 import org.jetbrains.kotlin.idea.k2.refactoring.extractFunction.ExtractionResult
 import org.jetbrains.kotlin.idea.k2.refactoring.util.areTypeArgumentsRedundant
-import org.jetbrains.kotlin.idea.refactoring.introduce.extractionEngine.ExtractFunctionGenerator
-import org.jetbrains.kotlin.idea.refactoring.introduce.extractionEngine.IExtractionData
-import org.jetbrains.kotlin.idea.refactoring.introduce.extractionEngine.IExtractionGeneratorConfiguration
-import org.jetbrains.kotlin.idea.refactoring.introduce.extractionEngine.IExtractionNameSuggester
-import org.jetbrains.kotlin.idea.refactoring.introduce.extractionEngine.TypeDescriptor
-import org.jetbrains.kotlin.psi.KtBlockExpression
-import org.jetbrains.kotlin.psi.KtDeclarationWithBody
-import org.jetbrains.kotlin.psi.KtNamedDeclaration
-import org.jetbrains.kotlin.psi.KtProperty
-import org.jetbrains.kotlin.psi.KtTypeArgumentList
+import org.jetbrains.kotlin.idea.refactoring.introduce.extractionEngine.*
+import org.jetbrains.kotlin.psi.*
 
-internal object Generator : ExtractFunctionGenerator<KtType, ExtractionResult>() {
-    override val nameGenerator: IExtractionNameSuggester<KtType> = KotlinNameSuggester
+internal object Generator : ExtractFunctionGenerator<KaType, ExtractionResult>() {
+    override val nameGenerator: IExtractionNameSuggester<KaType> = KotlinNameSuggester
 
-    override fun createTypeDescriptor(data: IExtractionData): TypeDescriptor<KtType> {
+    override fun createTypeDescriptor(data: IExtractionData): TypeDescriptor<KaType> {
         return KotlinTypeDescriptor(data)
     }
 
-    override fun IExtractionGeneratorConfiguration<KtType>.collapseBody(
+    override fun IExtractionGeneratorConfiguration<KaType>.collapseBody(
         blockExpression: KtBlockExpression
     ) {
         val declarationWithBody = blockExpression.parent as? KtDeclarationWithBody ?: return
@@ -44,10 +36,10 @@ internal object Generator : ExtractFunctionGenerator<KtType, ExtractionResult>()
 
     override fun checkTypeArgumentsAreRedundant(args: KtTypeArgumentList): Boolean {
         return args.arguments.none { it.typeReference?.isAnnotatedDeep() == true } &&
-                analyze(args) { areTypeArgumentsRedundant(args) }
+                analyze(args) { areTypeArgumentsRedundant(args, approximateFlexible = false) }
     }
 
-    override fun IExtractionGeneratorConfiguration<KtType>.createExtractionResult(
+    override fun IExtractionGeneratorConfiguration<KaType>.createExtractionResult(
         declaration: KtNamedDeclaration,
         duplicatesReplacer: Map<KotlinPsiRange, () -> Unit>
     ): ExtractionResult = ExtractionResult(this as ExtractionGeneratorConfiguration, declaration, duplicatesReplacer)

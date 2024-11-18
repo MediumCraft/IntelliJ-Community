@@ -10,6 +10,7 @@ import com.intellij.openapi.util.TextRange;
 import com.intellij.pom.java.JavaFeature;
 import com.intellij.psi.*;
 import com.intellij.psi.codeStyle.JavaCodeStyleManager;
+import com.intellij.psi.codeStyle.VariableKind;
 import com.intellij.psi.impl.source.JavaVarTypeUtil;
 import com.intellij.psi.util.PsiFormatUtil;
 import com.intellij.psi.util.PsiTreeUtil;
@@ -17,10 +18,12 @@ import com.intellij.psi.util.PsiUtil;
 import com.intellij.psi.util.TypeConversionUtil;
 import com.intellij.util.ObjectUtils;
 import com.intellij.util.containers.ContainerUtil;
+import com.siyeh.ig.psiutils.VariableNameGenerator;
 import one.util.streamex.EntryStream;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.function.Consumer;
@@ -166,8 +169,14 @@ public final class JavaPatternCompletionUtil {
     static PatternModel create(@NotNull PsiClass record, @NotNull PsiElement context, boolean onlyDeconstructionList) {
       JavaCodeStyleManager manager = JavaCodeStyleManager.getInstance(record.getProject());
       PsiDeconstructionPattern deconstructionPattern = PsiTreeUtil.getParentOfType(context, PsiDeconstructionPattern.class);
-      List<String> names =
-        ContainerUtil.map(record.getRecordComponents(), cmp -> manager.suggestUniqueVariableName(cmp.getName(), context, true));
+      List<String> names = new ArrayList<>();
+      for (PsiRecordComponent component : record.getRecordComponents()) {
+        String name = new VariableNameGenerator(context, VariableKind.LOCAL_VARIABLE)
+          .byName(component.getName())
+          .skipNames(names)
+          .generate(true);
+        names.add(name);
+      }
       List<PsiType> types = findTypes(deconstructionPattern, record);
       return new PatternModel(record, names, types, onlyDeconstructionList);
     }

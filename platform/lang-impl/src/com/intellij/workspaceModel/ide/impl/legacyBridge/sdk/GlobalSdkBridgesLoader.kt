@@ -14,7 +14,9 @@ import com.intellij.platform.workspace.storage.*
 import com.intellij.workspaceModel.ide.impl.legacyBridge.sdk.SdkBridgeImpl.Companion.mutableSdkMap
 import com.intellij.workspaceModel.ide.impl.legacyBridge.sdk.SdkBridgeImpl.Companion.sdkMap
 import com.intellij.workspaceModel.ide.legacyBridge.GlobalSdkTableBridge
+import org.jetbrains.annotations.ApiStatus
 
+@ApiStatus.Internal
 class GlobalSdkBridgeInitializer : BridgeInitializer {
   override fun isEnabled(): Boolean = true
 
@@ -25,15 +27,16 @@ class GlobalSdkBridgeInitializer : BridgeInitializer {
 
     for (addChange in addChanges) {
       // Will initialize the bridge if missing
-      builder.mutableSdkMap.getOrPutDataByEntity(addChange.entity) {
+      builder.mutableSdkMap.getOrPutDataByEntity(addChange.newEntity) {
         val sdkEntityCopy = SdkBridgeImpl.createEmptySdkEntity("", "", "")
-        sdkEntityCopy.applyChangesFrom(addChange.entity)
+        sdkEntityCopy.applyChangesFrom(addChange.newEntity)
         ProjectJdkImpl(SdkBridgeImpl(sdkEntityCopy))
       }
     }
   }
 }
 
+@ApiStatus.Internal
 class GlobalSdkBridgesLoader: GlobalSdkTableBridge {
 
   override fun initializeBridgesAfterLoading(mutableStorage: MutableEntityStorage,
@@ -61,9 +64,9 @@ class GlobalSdkBridgesLoader: GlobalSdkTableBridge {
 
     for (addChange in addChanges) {
       // Will initialize the bridge if missing
-      builder.mutableSdkMap.getOrPutDataByEntity(addChange.entity) {
+      builder.mutableSdkMap.getOrPutDataByEntity(addChange.newEntity) {
         val sdkEntityCopy = SdkBridgeImpl.createEmptySdkEntity("", "", "")
-        sdkEntityCopy.applyChangesFrom(addChange.entity)
+        sdkEntityCopy.applyChangesFrom(addChange.newEntity)
         ProjectJdkImpl(SdkBridgeImpl(sdkEntityCopy))
       }
     }
@@ -72,15 +75,14 @@ class GlobalSdkBridgesLoader: GlobalSdkTableBridge {
   override fun handleBeforeChangeEvents(event: VersionedStorageChange) { }
 
   override fun handleChangedEvents(event: VersionedStorageChange) {
-    // Since the listener is not deprecated, it will be better to keep the order of events as remove -> replace -> add
-    val changes = event.getChanges(SdkEntity::class.java).orderToRemoveReplaceAdd()
+    val changes = event.getChanges(SdkEntity::class.java)
     if (changes.isEmpty()) return
 
     for (change in changes) {
       LOG.debug { "Process sdk change $change" }
       when (change) {
         is EntityChange.Added -> {
-          val createdSdkBridge = event.storageAfter.sdkMap.getDataByEntity(change.entity)
+          val createdSdkBridge = event.storageAfter.sdkMap.getDataByEntity(change.newEntity)
                                       ?: error("Sdk bridge should be created before in `GlobalWorkspaceModel.initializeBridges`")
           ApplicationManager.getApplication().getMessageBus().syncPublisher(ProjectJdkTable.JDK_TABLE_TOPIC).jdkAdded(createdSdkBridge)
         }
@@ -96,8 +98,8 @@ class GlobalSdkBridgesLoader: GlobalSdkTableBridge {
           }
         }
         is EntityChange.Removed -> {
-          val sdkBridge = event.storageBefore.sdkMap.getDataByEntity(change.entity)
-          LOG.debug { "Fire 'jdkRemoved' event for ${change.entity.name}, sdk = $sdkBridge" }
+          val sdkBridge = event.storageBefore.sdkMap.getDataByEntity(change.oldEntity)
+          LOG.debug { "Fire 'jdkRemoved' event for ${change.oldEntity.name}, sdk = $sdkBridge" }
           if (sdkBridge != null) {
             ApplicationManager.getApplication().getMessageBus().syncPublisher(ProjectJdkTable.JDK_TABLE_TOPIC).jdkRemoved(sdkBridge)
           }

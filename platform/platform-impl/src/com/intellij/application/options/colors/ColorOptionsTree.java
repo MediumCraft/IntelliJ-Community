@@ -14,6 +14,7 @@ import com.intellij.util.ObjectUtils;
 import com.intellij.util.ui.StartupUiUtil;
 import com.intellij.util.ui.StatusText;
 import org.jdesktop.swingx.treetable.DefaultMutableTreeTableNode;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -21,8 +22,9 @@ import javax.swing.tree.*;
 import java.awt.event.ActionListener;
 import java.util.*;
 
-import static com.intellij.openapi.editor.colors.EditorSchemeAttributeDescriptorWithPath.NAME_SEPARATOR;
+import static com.intellij.openapi.editor.colors.EditorSchemeAttributeDescriptorWithPath.getNameSeparator;
 
+@ApiStatus.Internal
 public final class ColorOptionsTree extends Tree {
   private final String myCategoryName;
   private final DefaultTreeModel myTreeModel;
@@ -108,7 +110,7 @@ public final class ColorOptionsTree extends Tree {
   }
 
   public void selectOptionByName(@NotNull String name) {
-    String optionName = name.replace(FontUtil.rightArrow(StartupUiUtil.getLabelFont()), NAME_SEPARATOR);
+    String optionName = name.replace(FontUtil.rightArrow(StartupUiUtil.getLabelFont()), getNameSeparator());
     selectPath(findOption(myTreeModel.getRoot(), new DescriptorMatcher() {
       @Override
       public boolean matches(@NotNull Object data) {
@@ -143,12 +145,12 @@ public final class ColorOptionsTree extends Tree {
     if (descriptor instanceof EditorSchemeAttributeDescriptorWithPath) {
       String name = descriptor.toString();
       List<String> path = new ArrayList<>();
-      int separatorStart = name.indexOf(NAME_SEPARATOR);
+      int separatorStart = name.indexOf(getNameSeparator());
       int nextChunkStart = 0;
       while(separatorStart > 0) {
         path.add(name.substring(nextChunkStart, separatorStart));
-        nextChunkStart = separatorStart + NAME_SEPARATOR.length();
-        separatorStart = name.indexOf(NAME_SEPARATOR, nextChunkStart);
+        nextChunkStart = separatorStart + getNameSeparator().length();
+        separatorStart = name.indexOf(getNameSeparator(), nextChunkStart);
       }
       if (nextChunkStart < name.length()) {
         path.add(name.substring(nextChunkStart));

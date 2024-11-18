@@ -12,6 +12,7 @@ import com.intellij.util.indexing.impl.MapIndexStorage;
 import com.intellij.util.io.DataExternalizer;
 import com.intellij.util.io.KeyDescriptor;
 import it.unimi.dsi.fastutil.ints.IntSet;
+import org.jetbrains.annotations.ApiStatus.Internal;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
@@ -20,6 +21,7 @@ import java.io.IOException;
 import java.nio.file.FileSystem;
 import java.nio.file.Path;
 
+@Internal
 public class VfsAwareMapIndexStorage<Key, Value> extends MapIndexStorage<Key, Value> implements VfsAwareIndexStorage<Key, Value> {
   private final boolean myBuildKeyHashToVirtualFileMapping;
   private @Nullable KeyHashLog<Key> myKeyHashToVirtualFileMapping;
@@ -96,7 +98,7 @@ public class VfsAwareMapIndexStorage<Key, Value> extends MapIndexStorage<Key, Va
   public boolean processKeys(@NotNull Processor<? super Key> processor, GlobalSearchScope scope, @Nullable IdFilter idFilter)
     throws StorageException {
     try {
-      clearCachedMappings();
+      invalidateCachedMappings();
 
       Project project = scope.getProject();
       if (myKeyHashToVirtualFileMapping != null && project != null && idFilter != null) {

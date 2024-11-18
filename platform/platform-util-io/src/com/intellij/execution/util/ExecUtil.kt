@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.execution.util
 
 import com.intellij.execution.CommandLineUtil
@@ -8,6 +8,7 @@ import com.intellij.execution.process.CapturingProcessHandler
 import com.intellij.execution.process.ProcessAdapter
 import com.intellij.execution.process.ProcessEvent
 import com.intellij.execution.process.ProcessOutput
+import com.intellij.execution.sudo.SudoCommandProvider
 import com.intellij.openapi.application.PathManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.util.NlsSafe
@@ -15,8 +16,10 @@ import com.intellij.openapi.util.SystemInfoRt
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.util.io.PathExecLazyValue
 import com.intellij.openapi.util.registry.Registry
+import com.intellij.util.concurrency.annotations.RequiresBackgroundThread
 import com.intellij.util.io.IdeUtilIoBundle
 import com.intellij.util.io.SuperUserStatus
+import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.Nls
 import java.io.*
 import java.nio.charset.Charset
@@ -46,8 +49,10 @@ object ExecUtil {
 
   @JvmStatic
   val windowsShellName: String
+    @Deprecated("Inline this property")
     get() = CommandLineUtil.getWinShellName()
 
+  @ApiStatus.Internal
   @JvmStatic
   @Throws(IOException::class)
   fun loadTemplate(loader: ClassLoader, templateName: String, variables: Map<String, String>?): String {
@@ -81,17 +86,20 @@ object ExecUtil {
 
   @JvmStatic
   @Throws(ExecutionException::class)
+  @RequiresBackgroundThread(generateAssertion = false)
   fun execAndGetOutput(commandLine: GeneralCommandLine): ProcessOutput {
     return CapturingProcessHandler(commandLine).runProcess()
   }
 
   @JvmStatic
   @Throws(ExecutionException::class)
+  @RequiresBackgroundThread(generateAssertion = false)
   fun execAndGetOutput(commandLine: GeneralCommandLine, timeoutInMilliseconds: Int): ProcessOutput {
     return CapturingProcessHandler(commandLine).runProcess(timeoutInMilliseconds)
   }
 
   @JvmStatic
+  @RequiresBackgroundThread(generateAssertion = false)
   fun execAndGetOutput(commandLine: GeneralCommandLine, stdin: String): String {
     return CapturingProcessHandler(commandLine).also { processHandler ->
       processHandler.addProcessListener(object : ProcessAdapter() {
@@ -105,6 +113,7 @@ object ExecUtil {
   }
 
   @JvmStatic
+  @RequiresBackgroundThread(generateAssertion = false)
   fun execAndReadLine(commandLine: GeneralCommandLine): String? {
     return try {
       readFirstLine(commandLine.createProcess().inputStream, commandLine.charset)
@@ -115,6 +124,8 @@ object ExecUtil {
     }
   }
 
+  @ApiStatus.Internal
+  @RequiresBackgroundThread(generateAssertion = false)
   @JvmStatic
   fun readFirstLine(stream: InputStream, cs: Charset?): String? {
     return try {
@@ -135,12 +146,14 @@ object ExecUtil {
    * @param prompt the prompt string for the users (not used on Windows)
    * @return the results of running the process
    */
+  @ApiStatus.Internal
   @JvmStatic
   @Throws(ExecutionException::class, IOException::class)
   fun sudo(commandLine: GeneralCommandLine, prompt: @Nls String): Process {
     return sudoCommand(commandLine, prompt).createProcess()
   }
 
+  @ApiStatus.Internal
   @JvmStatic
   @Throws(ExecutionException::class, IOException::class)
   fun sudoCommand(commandLine: GeneralCommandLine, prompt: @Nls String): GeneralCommandLine {
@@ -162,6 +175,7 @@ object ExecUtil {
       .withRedirectErrorStream(commandLine.isRedirectErrorStream)
   }
 
+  @ApiStatus.Internal
   fun envCommand(commandLine: GeneralCommandLine): List<String> =
     when (val args = envCommandArgs(commandLine)) {
       emptyList<String>() -> emptyList()
@@ -176,6 +190,7 @@ object ExecUtil {
       else -> env.map { entry -> "${entry.key}=${entry.value}" }
     }
 
+  @ApiStatus.Internal
   @JvmStatic
   @Throws(IOException::class, ExecutionException::class)
   fun sudoAndGetOutput(commandLine: GeneralCommandLine, prompt: @Nls String): ProcessOutput =
@@ -184,15 +199,25 @@ object ExecUtil {
   @NlsSafe
   internal fun escapeAppleScriptArgument(arg: String) = "quoted form of \"${arg.replace("\"", "\\\"").replace("\\", "\\\\")}\""
 
+  @ApiStatus.Internal
+  @Deprecated(
+    "It is an oversimplified quoting. Prefer CommandLineUtil.posixQuote instead.",
+    ReplaceWith(
+      "CommandLineUtil.posixQuote(arg)",
+      "com.intellij.execution.CommandLineUtil.posixQuote",
+    ),
+  )
   @JvmStatic
   fun escapeUnixShellArgument(arg: String): String = "'${arg.replace("'", "'\"'\"'")}'"
 
+  @ApiStatus.Internal
   @JvmStatic
   fun hasTerminalApp(): Boolean {
     return SystemInfoRt.isWindows || SystemInfoRt.isMac ||
            hasKdeTerminal.get() || hasGnomeTerminal.get() || hasUrxvt.get() || hasXTerm.get()
   }
 
+  @ApiStatus.Internal
   @NlsSafe
   @JvmStatic
   fun getTerminalCommand(@Nls(capitalization = Nls.Capitalization.Title) title: String?, command: String): List<String> {
@@ -245,6 +270,7 @@ object ExecUtil {
    *
    * NOTE. Windows implementation does not return the original process exit code!
    */
+  @ApiStatus.Internal
   @JvmStatic
   fun setupLowPriorityExecution(commandLine: GeneralCommandLine) {
     if (canRunLowPriority()) {
@@ -262,6 +288,7 @@ object ExecUtil {
 
   private fun canRunLowPriority() = Registry.`is`("ide.allow.low.priority.process") && (SystemInfoRt.isWindows || hasNice)
 
+  @ApiStatus.Internal
   @JvmStatic
   fun setupNoTtyExecution(commandLine: GeneralCommandLine) {
     if (SystemInfoRt.isLinux && hasSetsid.get()) {

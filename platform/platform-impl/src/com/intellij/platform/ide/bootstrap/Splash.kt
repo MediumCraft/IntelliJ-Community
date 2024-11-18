@@ -24,7 +24,7 @@ internal class Splash(private val image: BufferedImage, isAlwaysOnTop: Boolean) 
     }
     // makes tiling window managers on a Linux show window as floating
     isResizable = false
-    focusableWindowState = false
+    focusableWindowState = isAlwaysOnTop
     val size = Dimension(image.width, image.height)
     this.size = size
 

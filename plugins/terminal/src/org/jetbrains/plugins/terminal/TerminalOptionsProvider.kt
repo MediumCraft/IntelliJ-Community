@@ -24,7 +24,7 @@ class TerminalOptionsProvider : PersistentStateComponent<TerminalOptionsProvider
 
   class State {
     var myShellPath: String? = null
-    var myTabName: @Nls String? = null
+    var myTabName: @Nls String = TerminalBundle.message("local.terminal.default.name")
     var myCloseSessionOnLogout: Boolean = true
     var myReportMouse: Boolean = true
     var mySoundBell: Boolean = true
@@ -60,7 +60,7 @@ class TerminalOptionsProvider : PersistentStateComponent<TerminalOptionsProvider
     }
 
   var tabName: @Nls String
-    get() = state.myTabName ?: TerminalBundle.message("local.terminal.default.name")
+    get() = state.myTabName
     set(@Nls tabName) {
       if (state.myTabName != tabName) {
         state.myTabName = tabName
@@ -149,6 +149,7 @@ class TerminalOptionsProvider : PersistentStateComponent<TerminalOptionsProvider
       }
     }
 
+  @Deprecated("Use BlockTerminalOptions#promptStyle instead")
   var useShellPrompt: Boolean
     get() = state.useShellPrompt
     set(value) {

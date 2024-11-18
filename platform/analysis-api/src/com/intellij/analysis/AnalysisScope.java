@@ -1,5 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
-
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.analysis;
 
 import com.intellij.codeInsight.daemon.ProblemHighlightFilter;
@@ -100,9 +99,13 @@ public class AnalysisScope {
   }
 
   public AnalysisScope(@NotNull PsiDirectory psiDirectory) {
+    this(psiDirectory, null);
+  }
+
+  public AnalysisScope(@NotNull PsiDirectory psiDirectory, @Nullable Module module) {
     myProject = psiDirectory.getProject();
     myModules = null;
-    myModule = null;
+    myModule = module;
     myScope = null;
     myElement = psiDirectory;
     myType = DIRECTORY;
@@ -110,9 +113,13 @@ public class AnalysisScope {
   }
 
   public AnalysisScope(@NotNull PsiFile psiFile) {
+    this(psiFile, null);
+  }
+
+  public AnalysisScope(@NotNull PsiFile psiFile, @Nullable Module module) {
     myProject = psiFile.getProject();
     myElement = psiFile;
-    myModule = null;
+    myModule = module;
     myModules = null;
     myScope = null;
     myType = FILE;
@@ -182,10 +189,11 @@ public class AnalysisScope {
            ModuleRootManager.getInstance(myModule).getFileIndex();
   }
 
-  private static @NotNull String displayProjectRelativePath(@NotNull PsiFileSystemItem item) {
+  private static @NotNull String displayProjectRelativePath(@NotNull PsiFileSystemItem item, @Nullable Module module) {
     VirtualFile virtualFile = item.getVirtualFile();
     LOG.assertTrue(virtualFile != null, item);
-    return ProjectUtilCore.displayUrlRelativeToProject(virtualFile, virtualFile.getPresentableUrl(), item.getProject(), true, false);
+    String filePath = ProjectUtilCore.displayFilePath(item.getProject(), virtualFile);
+    return module == null ? filePath : ProjectUtilCore.appendModuleName(module, filePath, false);
   }
 
   public boolean contains(@NotNull PsiElement psiElement) {
@@ -452,8 +460,8 @@ public class AnalysisScope {
         yield AnalysisBundle.message("scope.module.list", modules, myModules.size());
       }
       case PROJECT -> AnalysisBundle.message("scope.project", myProject.getName());
-      case FILE -> AnalysisBundle.message("scope.file", displayProjectRelativePath((PsiFileSystemItem)myElement));
-      case DIRECTORY -> AnalysisBundle.message("scope.directory", displayProjectRelativePath((PsiFileSystemItem)myElement));
+      case FILE -> AnalysisBundle.message("scope.file", displayProjectRelativePath((PsiFileSystemItem)myElement, myModule));
+      case DIRECTORY -> AnalysisBundle.message("scope.directory", displayProjectRelativePath((PsiFileSystemItem)myElement, myModule));
       case VIRTUAL_FILES -> AnalysisBundle.message("scope.virtual.files");
       default -> "";
     };
@@ -503,7 +511,7 @@ public class AnalysisScope {
   }
 
   private @NotNull String getRelativePath() {
-    String relativePath = displayProjectRelativePath((PsiFileSystemItem)myElement);
+    String relativePath = displayProjectRelativePath((PsiFileSystemItem)myElement, myModule);
     if (relativePath.length() > 100) {
       return ((PsiFileSystemItem)myElement).getName();
     }

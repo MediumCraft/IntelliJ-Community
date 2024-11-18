@@ -18,7 +18,9 @@ import java.time.ZoneOffset
 import java.time.ZonedDateTime
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.locks.ReentrantLock
 import java.util.function.Consumer
+import kotlin.concurrent.withLock
 import kotlin.reflect.KMutableProperty1
 
 private val indexingActivitySessionIdSequencer = AtomicLong()
@@ -33,8 +35,8 @@ data class ProjectScanningHistoryImpl(override val project: Project,
 
     fun startDumbModeBeginningTracking(project: Project,
                                        scanningHistory: ProjectScanningHistoryImpl): Runnable {
-      val now = ZonedDateTime.now(ZoneOffset.UTC)
       val callback = Runnable {
+        val now = ZonedDateTime.now(ZoneOffset.UTC)
         scanningHistory.createScanningDumbModeCallBack().accept(now)
       }
       ReadAction.run<RuntimeException> {
@@ -66,9 +68,11 @@ data class ProjectScanningHistoryImpl(override val project: Project,
   private val scanningStatisticsItems: AtomicReference<PersistentList<JsonScanningStatistics>> = AtomicReference(persistentListOf())
   override val scanningStatistics: List<JsonScanningStatistics> get() = scanningStatisticsItems.get()
 
+  /**
+   * Covers [currentDumbModeStart] and [events]
+   */
+  private val eventsLock = ReentrantLock()
   private val events = mutableListOf<Event>()
-
-  @Volatile
   private var currentDumbModeStart: ZonedDateTime? = null
 
   fun addScanningStatistics(statistics: ScanningStatistics) {
@@ -84,13 +88,13 @@ data class ProjectScanningHistoryImpl(override val project: Project,
   }
 
   fun startStage(stage: Stage, instant: Instant) {
-    synchronized(events) {
+    eventsLock.withLock {
       events.add(Event.StageEvent(stage, true, instant))
     }
   }
 
   fun stopStage(stage: Stage, instant: Instant) {
-    synchronized(events) {
+    eventsLock.withLock {
       events.add(Event.StageEvent(stage, false, instant))
     }
   }
@@ -100,7 +104,7 @@ data class ProjectScanningHistoryImpl(override val project: Project,
   fun stopSuspendingStages(instant: Instant): Unit = doSuspend(instant, false)
 
   private fun doSuspend(instant: Instant, start: Boolean) {
-    synchronized(events) {
+    eventsLock.withLock {
       events.add(Event.SuspensionEvent(start, instant))
     }
   }
@@ -111,14 +115,15 @@ data class ProjectScanningHistoryImpl(override val project: Project,
   }
 
   fun scanningFinished() {
-    val now = ZonedDateTime.now(ZoneOffset.UTC)
-    timesImpl.updatingEnd = now
     timesImpl.totalUpdatingTime = System.nanoTime() - timesImpl.totalUpdatingTime
+    timesImpl.updatingEnd = timesImpl.updatingStart.plusNanos(timesImpl.totalUpdatingTime)
 
-    currentDumbModeStart?.let {
-      timesImpl.dumbModeStart = it
-      stopStage(Stage.DumbMode, now.toInstant())
-      timesImpl.dumbModeWithPausesDuration = Duration.between(it, timesImpl.updatingEnd)
+    eventsLock.withLock {
+      currentDumbModeStart?.let {
+        timesImpl.dumbModeStart = it
+        stopStage(Stage.DumbMode, timesImpl.updatingEnd.toInstant())
+        timesImpl.dumbModeWithPausesDuration = Duration.between(it, timesImpl.updatingEnd)
+      }
     }
 
     writeStagesToDurations()
@@ -134,21 +139,23 @@ data class ProjectScanningHistoryImpl(override val project: Project,
   }
 
   private fun createScanningDumbModeCallBack(): Consumer<ZonedDateTime> = Consumer { now ->
-    currentDumbModeStart = now
-    startStage(Stage.DumbMode, now.toInstant())
+    eventsLock.withLock {
+      currentDumbModeStart = now
+      startStage(Stage.DumbMode, now.toInstant())
+    }
   }
 
   /**
-   * Some StageEvent may appear between the beginning and end of suspension,
+   * Some StageEvent may appear between the beginning and end of suspension
    * because it actually takes place only on ProgressIndicator's check.
    * These normalizations move the moment of suspension start from declared to after all other events between it and suspension end:
-   * suspended, event1, ..., eventN, unsuspended -> event1, ..., eventN, suspended, unsuspended
+   * suspended, event1, ..., eventN, unsuspended → event1, ..., eventN, suspended, unsuspended
    *
    * Suspended and unsuspended events appear only in pairs with none in between.
    */
   private fun getNormalizedEvents(): List<Event> {
     val normalizedEvents = mutableListOf<Event>()
-    synchronized(events) {
+    eventsLock.withLock {
       var suspensionStartTime: Instant? = null
       for (event in events) {
         when (event) {
@@ -164,7 +171,7 @@ data class ProjectScanningHistoryImpl(override val project: Project,
                 suspensionStartTime = normalizedEvents.lastOrNull()?.instant
               }
 
-              if (suspensionStartTime != null) { //observation may miss the start of suspension, see IDEA-281514
+              if (suspensionStartTime != null) { //the current observation may miss the start of suspension, see IDEA-281514
                 normalizedEvents.add(Event.SuspensionEvent(true, suspensionStartTime))
                 normalizedEvents.add(Event.SuspensionEvent(false, event.instant))
               }
@@ -192,12 +199,12 @@ data class ProjectScanningHistoryImpl(override val project: Project,
     var pausedDuration = Duration.ZERO
     val startMap = hashMapOf<Stage, Instant>()
     val durationMap = hashMapOf<Stage, Duration>()
-    for (stage in Stage.values()) {
+    for (stage in Stage.entries) {
       durationMap[stage] = Duration.ZERO
     }
     var suspendStart: Instant? = null
 
-    for (event in normalizedEvents) {
+    for ((i, event) in normalizedEvents.withIndex()) {
       when (event) {
         is Event.SuspensionEvent -> {
           if (event.started) {
@@ -221,13 +228,22 @@ data class ProjectScanningHistoryImpl(override val project: Project,
           }
           else {
             val start = startMap.remove(event.stage)
-            log.assertTrue(start != null, "${event.stage} is not started, tries to stop. Events $normalizedEvents")
-            durationMap[event.stage] = durationMap[event.stage]!!.plus(Duration.between(start, event.instant))
+            if (start != null) {
+              durationMap[event.stage] = durationMap[event.stage]!!.plus(Duration.between(start, event.instant))
+            }
+            else if (event.stage == Stage.DumbMode) {
+              val lastFinishOfDumbMode = normalizedEvents.subList(0, i).findLast { it is Event.StageEvent && it.stage == Stage.DumbMode && !it.started }
+              val artificialStart = lastFinishOfDumbMode?.instant ?: times.updatingStart.toInstant()
+              durationMap[event.stage] = durationMap[event.stage]!!.plus(Duration.between(artificialStart, event.instant))
+            }
+            else {
+              log.error("${event.stage} is not started, tries to stop. Events $normalizedEvents")
+            }
           }
         }
       }
 
-      for (stage in Stage.values()) {
+      for (stage in Stage.entries) {
         stage.getProperty().set(timesImpl, durationMap[stage]!!)
       }
     }
@@ -320,7 +336,7 @@ data class ProjectDumbIndexingHistoryImpl(override val project: Project) : Proje
   }
 
   fun addProviderStatistics(statistics: IndexingFileSetStatistics) {
-    // Convert to Json to release memory occupied by statistic values.
+    // Convert to JSON to release memory occupied by statistic values.
     providerStatistics += statistics.toJsonStatistics(visibleTimeToAllThreadsTimeRatio)
 
     for ((fileType, fileTypeStats) in statistics.statsPerFileType) {
@@ -377,15 +393,13 @@ data class ProjectDumbIndexingHistoryImpl(override val project: Project) : Proje
 
   fun indexingFinished() {
     writeStagesToDurations()
+    
+    timesImpl.totalUpdatingTime = System.nanoTime() - timesImpl.totalUpdatingTime
+    timesImpl.updatingEnd = timesImpl.updatingStart.plusNanos(timesImpl.totalUpdatingTime)
   }
 
   fun setWasInterrupted() {
     timesImpl.wasInterrupted = true
-  }
-
-  fun finishTotalUpdatingTime() {
-    timesImpl.updatingEnd = ZonedDateTime.now(ZoneOffset.UTC)
-    timesImpl.totalUpdatingTime = System.nanoTime() - timesImpl.totalUpdatingTime
   }
 
   private fun writeStagesToDurations() {

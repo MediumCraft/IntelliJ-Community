@@ -9,18 +9,25 @@ import com.intellij.openapi.components.*
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.extensions.ExtensionPointName
 import com.intellij.openapi.util.ModificationTracker
+import com.intellij.util.ThreeState
 import com.intellij.util.containers.ContainerUtil
 import org.jdom.Element
+import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.jps.model.serialization.JpsGlobalLoader.PathVariablesSerializer
 import org.jetbrains.jps.model.serialization.PathMacroUtil
 import java.util.*
 import java.util.concurrent.atomic.AtomicLong
 
+@ApiStatus.Internal
 @State(
   name = "PathMacrosImpl",
   category = SettingsCategory.SYSTEM,
   exportable = true,
-  storages = [Storage(value = PathVariablesSerializer.STORAGE_FILE_NAME, roamingType = RoamingType.DISABLED, usePathMacroManager = false)],
+  storages = [Storage(value = PathVariablesSerializer.STORAGE_FILE_NAME,
+                      roamingType = RoamingType.DISABLED,
+                      usePathMacroManager = false,
+                      useSaveThreshold = ThreeState.NO
+  )],
   useLoadedStateAsExisting = false,
   reportStatistic = false,
 )

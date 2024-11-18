@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.util.gotoByName;
 
 import com.intellij.concurrency.JobLauncher;
@@ -228,7 +228,9 @@ public abstract class ContributorsBasedGotoByModel implements ChooseByNameModelE
         LOG.debug(TimeoutUtil.getDurationMillis(start) + "," + contributor + "," + count[0]);
       }
     }
-    catch (ProcessCanceledException ex) {
+    catch (IndexNotReadyException ignore) {
+    }
+    catch (ProcessCanceledException ignore) {
       // index corruption detected, ignore
     }
     catch (Throwable ex) {
@@ -247,7 +249,7 @@ public abstract class ContributorsBasedGotoByModel implements ChooseByNameModelE
    *  which {@link #acceptItem(NavigationItem)} returns {@code true}.
    */
   @Override
-  public Object @NotNull [] getElementsByName(@NotNull final String name, final boolean checkBoxState, @NotNull final String pattern) {
+  public Object @NotNull [] getElementsByName(final @NotNull String name, final boolean checkBoxState, final @NotNull String pattern) {
     return getElementsByName(name, FindSymbolParameters.wrap(pattern, myProject, checkBoxState), new ProgressIndicatorBase());
   }
 
@@ -292,8 +294,7 @@ public abstract class ContributorsBasedGotoByModel implements ChooseByNameModelE
     return pattern;
   }
 
-  @NotNull
-  public Project getProject() {
+  public @NotNull Project getProject() {
     return myProject;
   }
 }

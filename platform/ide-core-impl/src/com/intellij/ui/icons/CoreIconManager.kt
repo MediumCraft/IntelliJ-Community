@@ -8,6 +8,7 @@ import com.intellij.AbstractBundle
 import com.intellij.DynamicBundle
 import com.intellij.icons.AllIcons
 import com.intellij.ide.IconLayerProvider
+import com.intellij.ide.plugins.PluginManager
 import com.intellij.ide.plugins.PluginManagerCore
 import com.intellij.ide.plugins.cl.PluginAwareClassLoader
 import com.intellij.openapi.diagnostic.logger
@@ -110,8 +111,13 @@ class CoreIconManager : IconManager, CoreAwareIconManager {
   }
 
   override fun loadRasterizedIcon(path: String, classLoader: ClassLoader, cacheKey: Int, flags: Int): Icon {
+    return loadRasterizedIcon(path, null, classLoader, cacheKey, flags)
+  }
+
+  override fun loadRasterizedIcon(path: String, expUIPath: String?, classLoader: ClassLoader, cacheKey: Int, flags: Int): Icon {
     assert(!path.startsWith('/'))
     return loadRasterizedIcon(path = path,
+                              expUIPath = expUIPath,
                               classLoader = classLoader,
                               cacheKey = cacheKey,
                               flags = flags,
@@ -251,6 +257,12 @@ class CoreIconManager : IconManager, CoreAwareIconManager {
     else {
       return plugin.content.modules.firstOrNull { it.name == moduleId }?.requireDescriptor()?.classLoader
     }
+  }
+
+  override fun getClassLoaderByClassName(className: String): ClassLoader? {
+    val pluginId = PluginManager.getPluginByClassNameAsNoAccessToClass(className)
+    val plugin = PluginManagerCore.getPlugin(pluginId)
+    return plugin?.classLoader
   }
 }
 

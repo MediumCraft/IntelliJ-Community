@@ -3,10 +3,18 @@
 
   <content>
     <module name="intellij.platform.images.copyright"/>
+    <module name="intellij.platform.images.backend.svg"/>
     <module name="intellij.platform.lvcs.impl"/>
     <module name="intellij.platform.smRunner.vcs"/>
     <module name="intellij.platform.collaborationTools"/>
+    <module name="intellij.libraries.microba"/>
+    <module name="intellij.libraries.skiko"/>
+    <module name="intellij.libraries.compose.desktop"/>
+    <module name="intellij.platform.compose"/>
+    <module name="intellij.platform.diagnostic.freezeAnalyzer"/>
+    <module name="intellij.platform.diagnostic.freezes"/>
   </content>
 
   <xi:include href="/META-INF/vcs-modules.xml"/>
+
 </idea-plugin>

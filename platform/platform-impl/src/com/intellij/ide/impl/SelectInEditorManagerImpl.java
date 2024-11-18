@@ -5,6 +5,7 @@ import com.intellij.ide.SelectInEditorManager;
 import com.intellij.injected.editor.DocumentWindow;
 import com.intellij.injected.editor.VirtualFileWindow;
 import com.intellij.openapi.Disposable;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.colors.EditorColors;
 import com.intellij.openapi.editor.event.CaretEvent;
@@ -19,16 +20,17 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.ProperTextRange;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.vfs.VirtualFile;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
 import java.awt.event.FocusEvent;
 import java.awt.event.FocusListener;
 
 /**
  * @author MYakovlev
  */
+@ApiStatus.Internal
 public final class SelectInEditorManagerImpl extends SelectInEditorManager implements Disposable, FocusListener, CaretListener{
   private final Project myProject;
   private RangeHighlighter mySegmentHighlighter;
@@ -58,7 +60,7 @@ public final class SelectInEditorManagerImpl extends SelectInEditorManager imple
     openEditor(file, endOffset);
     final Editor editor = openEditor(file, textRange.getStartOffset());
 
-    SwingUtilities.invokeLater(() -> {
+    ApplicationManager.getApplication().invokeLater(() -> {
       if (editor != null && !editor.isDisposed()) {
         doSelect(toUseNormalSelection, editor, toSelectLine, textRange);
       }

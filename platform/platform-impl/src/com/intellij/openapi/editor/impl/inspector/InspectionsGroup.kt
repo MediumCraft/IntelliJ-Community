@@ -6,11 +6,12 @@ import com.intellij.icons.AllIcons
 import com.intellij.ide.BrowserUtil
 import com.intellij.ide.HelpTooltip
 import com.intellij.ide.PowerSaveMode
-import com.intellij.internal.statistic.eventLog.events.EventFields
+import com.intellij.ide.ui.UISettings
 import com.intellij.openapi.actionSystem.*
 import com.intellij.openapi.actionSystem.ex.CustomComponentAction
 import com.intellij.openapi.actionSystem.impl.ActionButton
 import com.intellij.openapi.actionSystem.impl.ActionButtonWithText
+import com.intellij.openapi.actionSystem.remoting.ActionRemoteBehaviorSpecification
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.application.ex.ApplicationInfoEx
 import com.intellij.openapi.components.service
@@ -22,7 +23,6 @@ import com.intellij.openapi.editor.markup.StatusItem
 import com.intellij.openapi.keymap.KeymapUtil
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.util.registry.Registry
 import com.intellij.openapi.wm.IdeFocusManager
 import com.intellij.platform.util.coroutines.childScope
 import com.intellij.ui.ColorUtil
@@ -45,7 +45,9 @@ import javax.swing.Icon
 import javax.swing.JComponent
 import javax.swing.SwingUtilities
 
-class InspectionsGroup(val analyzerGetter: () -> AnalyzerStatus, val editor: EditorImpl) : DefaultActionGroup() {
+class InspectionsGroup(
+  val analyzerGetter: () -> AnalyzerStatus, val editor: EditorImpl
+) : DefaultActionGroup(), ActionRemoteBehaviorSpecification.Frontend {
   companion object {
     val INSPECTION_TYPED_ERROR = DataKey.create<StatusItem>("INSPECTION_TYPED_ERROR")
     val idCounter = AtomicInteger(0)
@@ -57,7 +59,7 @@ class InspectionsGroup(val analyzerGetter: () -> AnalyzerStatus, val editor: Edi
   private var myInspectionsSettingAction: InspectionsSettingAction = InspectionsSettingAction(analyzerGetter, fusTabId)
 
   override fun getChildren(e: AnActionEvent?): Array<AnAction> {
-    if (!Registry.`is`("ide.redesigned.inspector", false) || PowerSaveMode.isEnabled()) return emptyArray()
+    if (!RedesignedInspectionsManager.isAvailable() || PowerSaveMode.isEnabled()) return emptyArray()
 
     val presentation = e?.presentation ?: return emptyArray()
 
@@ -111,6 +113,10 @@ class InspectionsGroup(val analyzerGetter: () -> AnalyzerStatus, val editor: Edi
       return ActionUpdateThread.BGT
     }
 
+    init {
+      templatePresentation.text = DaemonBundle.message("iw.inspection.cog.tooltip")
+    }
+
     override fun createCustomComponent(presentation: Presentation, place: String): ActionButton {
       return object : ActionButton(this, presentation, place, ActionToolbar.DEFAULT_MINIMUM_BUTTON_SIZE) {
         /*override fun onMousePresenceChanged(setInfo: Boolean) {
@@ -145,11 +151,20 @@ class InspectionsGroup(val analyzerGetter: () -> AnalyzerStatus, val editor: Edi
     }
   }
 
-  private open class InspectionsBaseAction(var item: StatusItem, val editor: EditorImpl, var title: @Nls String? = null, var description: @Nls String? = null, var actionLink: Link? = null, protected val fusTabId: Int) : DumbAwareAction(), CustomComponentAction {
+  private open class InspectionsBaseAction(item: StatusItem, val editor: EditorImpl, var title: @Nls String? = null, var description: @Nls String? = null, var actionLink: Link? = null, protected val fusTabId: Int) : DumbAwareAction(), CustomComponentAction {
+    var item = item
+      set(value) {
+        if(field == value) return
+        field = value
+        itemUpdated()
+      }
+
     companion object {
       private val ICON_TEXT_COLOR: ColorKey = ColorKey.createColorKey("ActionButton.iconTextForeground",
                                                                       UIUtil.getContextHelpForeground())
     }
+
+    protected open fun itemUpdated(){}
 
     override fun getActionUpdateThread(): ActionUpdateThread {
       return ActionUpdateThread.BGT
@@ -182,7 +197,7 @@ class InspectionsGroup(val analyzerGetter: () -> AnalyzerStatus, val editor: Edi
         override fun getMargins(): Insets = JBUI.insets(0, 3)
 
         override fun updateToolTipText() {
-          if (Registry.`is`("ide.helptooltip.enabled")) {
+          if (UISettings.isIdeHelpTooltipEnabled()) {
             HelpTooltip.dispose(this)
             val tooltip = HelpTooltip()
               .setTitle(title)
@@ -225,14 +240,19 @@ class InspectionsGroup(val analyzerGetter: () -> AnalyzerStatus, val editor: Edi
       private fun isGotItAvailable(): Boolean {
         return ApplicationInfoEx.getInstanceEx().isEAP
       }
-
-      private val fusActionNotFound = InspectionsFUS.group.registerEvent("inspection_action_not_found", EventFields.Int("tabId"), EventFields.String("actionId", listOf(PREVIOUS_ACTION_ID, NEXT_ACTION_ID)))
     }
 
     init {
       item.detailsText?.let {
         title = DaemonBundle.message("iw.inspection.title", it)
       }
+    }
+
+    override fun itemUpdated() {
+      super.itemUpdated()
+       item.detailsText?.let {
+         title = DaemonBundle.message("iw.inspection.title", it)
+      } ?: run { title = null }
     }
 
     override fun isSecondActionEvent(e: InputEvent?): Boolean {
@@ -245,7 +265,7 @@ class InspectionsGroup(val analyzerGetter: () -> AnalyzerStatus, val editor: Edi
         fun getInstance(project: Project): MyService = project.service()
       }
 
-      val scope = scope.childScope(supervisor = true, context = Dispatchers.EDT)
+      val scope = scope.childScope(supervisor = true, context = Dispatchers.EDT, name = "InspectionWidgetGotItTooltipService")
       private var currentJob: Job? = null
 
       @Suppress("DEPRECATION")
@@ -298,7 +318,7 @@ class InspectionsGroup(val analyzerGetter: () -> AnalyzerStatus, val editor: Edi
       }
 
       val action = ActionManager.getInstance().getAction(actionId) ?: run {
-        fusActionNotFound.log(fusTabId, actionId)
+        InspectionsFUS.actionNotFound(e.project, fusTabId, if (actionId == PREVIOUS_ACTION_ID) InspectionsFUS.InspectionsActions.GotoPreviousError else InspectionsFUS.InspectionsActions.GotoNextError)
         return
       }
 
@@ -331,11 +351,8 @@ class InspectionsGroup(val analyzerGetter: () -> AnalyzerStatus, val editor: Edi
     }
 
     private fun wrapDataContext(originalContext: DataContext): DataContext =
-      CustomizedDataContext.create(originalContext) { dataId ->
-        when {
-          INSPECTION_TYPED_ERROR.`is`(dataId) -> item
-          else -> null
-        }
+      CustomizedDataContext.withSnapshot(originalContext) { sink ->
+        sink[INSPECTION_TYPED_ERROR] = item
       }
 
     override fun update(e: AnActionEvent) {

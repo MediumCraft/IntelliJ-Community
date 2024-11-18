@@ -11,6 +11,7 @@ import com.intellij.ide.file.BatchFileChangeListener;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.actionSystem.impl.SimpleDataContext;
 import com.intellij.openapi.application.AccessToken;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileEditor.FileEditor;
 import com.intellij.openapi.fileEditor.FileEditorManager;
@@ -23,6 +24,7 @@ import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.text.NaturalComparator;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.AbstractVcs;
 import com.intellij.openapi.vcs.ProjectLevelVcsManager;
@@ -96,7 +98,7 @@ public final class DvcsUtil {
   }
 
   public static <T extends Repository> void disableActionIfAnyRepositoryIsFresh(@NotNull AnActionEvent e,
-                                                                                @NotNull List<T> repositories,
+                                                                                @NotNull Collection<T> repositories,
                                                                                 @Nls String operationName) {
     boolean isFresh = ContainerUtil.exists(repositories, Repository::isFresh);
     if (isFresh) {
@@ -178,7 +180,8 @@ public final class DvcsUtil {
     };
   }
 
-  public static final Comparator<Repository> REPOSITORY_COMPARATOR = Comparator.comparing(Repository::getPresentableUrl);
+  public static final Comparator<Repository> REPOSITORY_COMPARATOR =
+    Comparator.comparing(DvcsUtil::getShortRepositoryName, NaturalComparator.INSTANCE);
 
   public static void assertFileExists(File file, @NonNls @Nls String message) throws IllegalStateException {
     if (!file.exists()) {
@@ -475,18 +478,7 @@ public final class DvcsUtil {
       return root;
     }
 
-    // For libraries, check VCS for the owner module
-    List<OrderEntry> entries = ProjectRootManager.getInstance(project).getFileIndex().getOrderEntriesForFile(file);
-    Set<VirtualFile> modulesVcsRoots = new HashSet<>();
-    for (OrderEntry entry : entries) {
-      if (entry instanceof LibraryOrderEntry || entry instanceof JdkOrderEntry) {
-        VirtualFile moduleVcsRoot = vcsManager.getVcsRootFor(entry.getOwnerModule().getModuleFile());
-        if (moduleVcsRoot != null) {
-          modulesVcsRoots.add(moduleVcsRoot);
-        }
-      }
-    }
-
+    Set<VirtualFile> modulesVcsRoots = ReadAction.compute(() -> findVcsRootForModuleLibrary(project, file));
     if (modulesVcsRoots.isEmpty()) {
       LOG.debug("No library roots");
       return null;
@@ -502,6 +494,25 @@ public final class DvcsUtil {
     }
     LOG.debug("Several library roots, returning " + topRoot);
     return topRoot;
+  }
+
+  /**
+   * IJPL-95268 For libraries, check VCS for the owner module
+   */
+  private static Set<VirtualFile> findVcsRootForModuleLibrary(@NotNull Project project, @NotNull VirtualFile file) {
+    ProjectLevelVcsManager vcsManager = ProjectLevelVcsManager.getInstance(project);
+
+    List<OrderEntry> entries = ProjectRootManager.getInstance(project).getFileIndex().getOrderEntriesForFile(file);
+    Set<VirtualFile> modulesVcsRoots = new HashSet<>();
+    for (OrderEntry entry : entries) {
+      if (entry instanceof LibraryOrderEntry || entry instanceof JdkOrderEntry) {
+        VirtualFile moduleVcsRoot = vcsManager.getVcsRootFor(entry.getOwnerModule().getModuleFile());
+        if (moduleVcsRoot != null) {
+          modulesVcsRoots.add(moduleVcsRoot);
+        }
+      }
+    }
+    return modulesVcsRoots;
   }
 
   /**

@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.debugger.engine.dfaassist;
 
 import com.intellij.codeInspection.dataFlow.TypeConstraint;
@@ -12,12 +12,11 @@ import com.intellij.codeInspection.dataFlow.lang.ir.ControlFlow;
 import com.intellij.codeInspection.dataFlow.lang.ir.DataFlowIRProvider;
 import com.intellij.codeInspection.dataFlow.lang.ir.DfaInstructionState;
 import com.intellij.codeInspection.dataFlow.memory.DfaMemoryState;
+import com.intellij.codeInspection.dataFlow.memory.DfaMemoryStateImpl;
 import com.intellij.codeInspection.dataFlow.types.DfType;
 import com.intellij.codeInspection.dataFlow.types.DfTypes;
-import com.intellij.codeInspection.dataFlow.value.DfaValue;
-import com.intellij.codeInspection.dataFlow.value.DfaValueFactory;
-import com.intellij.codeInspection.dataFlow.value.DfaVariableValue;
-import com.intellij.codeInspection.dataFlow.value.RelationType;
+import com.intellij.codeInspection.dataFlow.value.*;
+import com.intellij.debugger.engine.DebuggerUtils;
 import com.intellij.debugger.engine.evaluation.EvaluateException;
 import com.intellij.debugger.impl.DebuggerUtilsEx;
 import com.intellij.debugger.jdi.StackFrameProxyEx;
@@ -149,7 +148,7 @@ public class DebuggerDfaRunner {
       long modificationStamp = PsiModificationTracker.getInstance(project).getModificationCount();
       int offset = flow.getStartOffset(anchor).getInstructionOffset();
       if (offset < 0) return null;
-      Map<Value, List<DfaVariableValue>> jdiToDfa = createPreliminaryJdiMap(provider, anchor, factory, proxy);
+      Map<Value, List<DfaVariableValue>> jdiToDfa = createPreliminaryJdiMap(provider, anchor, flow, proxy);
       if (jdiToDfa.isEmpty()) return null;
       return new Larva(project, anchor, body, flow, factory, modificationStamp, provider, jdiToDfa, proxy, offset);
     }
@@ -157,15 +156,21 @@ public class DebuggerDfaRunner {
     @NotNull
     private static Map<Value, List<DfaVariableValue>> createPreliminaryJdiMap(@NotNull DfaAssistProvider provider,
                                                                               @NotNull PsiElement anchor,
-                                                                              @NotNull DfaValueFactory factory,
+                                                                              @NotNull ControlFlow flow,
                                                                               @NotNull StackFrameProxyEx proxy) throws EvaluateException {
+      DfaValueFactory factory = flow.getFactory();
+      Set<VariableDescriptor> descriptors = StreamEx.of(flow.getInstructions()).flatCollection(inst -> inst.getRequiredDescriptors(factory))
+        .toSet();
       Map<Value, List<DfaVariableValue>> myMap = new HashMap<>();
-      for (DfaValue dfaValue : factory.getValues().toArray(DfaValue.EMPTY_ARRAY)) {
-        if (dfaValue instanceof DfaVariableValue dfaVar) {
-          Value jdiValue = resolveJdiValue(provider, anchor, proxy, dfaVar);
-          if (jdiValue != null) {
-            myMap.computeIfAbsent(jdiValue, v -> new ArrayList<>()).add(dfaVar);
-          }
+      StreamEx<DfaVariableValue> stream =
+        StreamEx.of(factory.getValues().toArray(DfaValue.EMPTY_ARRAY))
+          .flatMap(dfaValue -> StreamEx.of(descriptors).map(desc -> desc.createValue(factory, dfaValue)).append(dfaValue))
+          .select(DfaVariableValue.class)
+          .distinct();
+      for (DfaVariableValue dfaVar : stream) {
+        Value jdiValue = resolveJdiValue(provider, anchor, proxy, dfaVar);
+        if (jdiValue != null) {
+          myMap.computeIfAbsent(jdiValue, v -> new ArrayList<>()).add(dfaVar);
         }
       }
       return myMap;
@@ -237,7 +242,7 @@ public class DebuggerDfaRunner {
                 classLoaderClass = classLoaderClass.superclass();
               }
               if (classLoaderClass != null) {
-                Field parent = classLoaderClass.fieldByName("parent");
+                Field parent = DebuggerUtils.findField(classLoaderClass, "parent");
                 if (parent != null) {
                   loaders = StreamEx.iterate(
                       classLoader, Objects::nonNull, loader -> ObjectUtils.tryCast(loader.getValue(parent), ClassLoaderReference.class))
@@ -282,19 +287,22 @@ public class DebuggerDfaRunner {
   }
 
   private void addConditions(@NotNull DfaVariableValue var, @Nullable JdiValueInfo valueInfo, @NotNull DfaMemoryState state) {
-    if (valueInfo instanceof JdiValueInfo.PrimitiveConstant) {
-      state.applyCondition(var.eq(((JdiValueInfo.PrimitiveConstant)valueInfo).getDfType()));
+    if (valueInfo instanceof JdiValueInfo.PrimitiveConstant primitiveConstant) {
+      ((DfaMemoryStateImpl)state).recordVariableType(var, primitiveConstant.getDfType());
     }
-    else if (valueInfo instanceof JdiValueInfo.StringConstant) {
+    else if (valueInfo instanceof JdiValueInfo.StringConstant stringConstant) {
       TypeConstraint stringType = myProvider.constraintFromJvmClassName(myBody, "java/lang/String");
-      state.applyCondition(var.eq(DfTypes.referenceConstant(((JdiValueInfo.StringConstant)valueInfo).getValue(), stringType)));
+      state.applyCondition(var.eq(DfTypes.referenceConstant(stringConstant.getValue(), stringType)));
     }
-    else if (valueInfo instanceof JdiValueInfo.ObjectRef) {
-      TypeConstraint exactType = getType(myBody, ((JdiValueInfo.ObjectRef)valueInfo).getSignature());
-      if (exactType == TypeConstraints.TOP) return;
+    else if (valueInfo instanceof JdiValueInfo.ObjectRef objectRef) {
+      TypeConstraint exactType = getType(myBody, objectRef.getSignature());
+      if (exactType == TypeConstraints.TOP) {
+        state.meetDfType(var, DfTypes.NOT_NULL_OBJECT);
+        return;
+      }
       state.meetDfType(var, exactType.asDfType().meet(DfTypes.NOT_NULL_OBJECT));
-      if (valueInfo instanceof JdiValueInfo.EnumConstant) {
-        String name = ((JdiValueInfo.EnumConstant)valueInfo).getName();
+      if (valueInfo instanceof JdiValueInfo.EnumConstant enumConstant) {
+        String name = enumConstant.getName();
         if (exactType.isEnum()) {
           PsiClass enumClass = PsiUtil.resolveClassInClassTypeOnly(exactType.getPsiType(myProject));
           if (enumClass != null) {

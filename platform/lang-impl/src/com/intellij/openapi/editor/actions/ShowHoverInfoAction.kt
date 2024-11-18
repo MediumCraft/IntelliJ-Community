@@ -17,7 +17,9 @@ import com.intellij.openapi.project.DumbAware
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.jetbrains.annotations.ApiStatus
 
+@ApiStatus.Internal
 class ShowHoverInfoAction: AnAction(), ActionToIgnore, PopupAction, DumbAware, PerformWithDocumentsCommitted {
   override fun getActionUpdateThread() = ActionUpdateThread.BGT
 
@@ -41,7 +43,7 @@ class ShowHoverInfoAction: AnAction(), ActionToIgnore, PopupAction, DumbAware, P
       }
       withContext(Dispatchers.EDT + ModalityState.any().asContextElement()) {
         if (highlightInfo != null) {
-          EditorMouseHoverPopupManager.getInstance().showInfoTooltip(editor, highlightInfo, editor.caretModel.offset, false, true, true)
+          EditorMouseHoverPopupManager.getInstance().showInfoTooltip(editor, highlightInfo, editor.caretModel.offset, false, true, true, true)
         }
         else {
           // No errors, just show doc

@@ -139,7 +139,8 @@ public final class ScratchFileServiceImpl extends ScratchFileService implements 
       @Override
       public void fileOpened(@NotNull FileEditorManager source, @NotNull VirtualFile file) {
         RootType rootType = getRootType(file);
-        Document document = FileDocumentManager.getInstance().getDocument(file);
+        // an opened text file already has its document cached
+        Document document = FileDocumentManager.getInstance().getCachedDocument(file);
         if (document == null || rootType == null || rootType.isHidden()) return;
         rootType.fileOpened(file, source);
       }
@@ -307,7 +308,7 @@ public final class ScratchFileServiceImpl extends ScratchFileService implements 
 
   static final class FilePresentation implements FileIconProvider, FileIconPatcher, EditorTabTitleProvider, ProjectViewNodeDecorator, DumbAware {
     @Override
-    public void decorate(ProjectViewNode<?> node, PresentationData data) {
+    public void decorate(@NotNull ProjectViewNode<?> node, @NotNull PresentationData data) {
       Object value = node.getValue();
       RootType rootType;
       VirtualFile virtualFile = null;

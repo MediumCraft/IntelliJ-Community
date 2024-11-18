@@ -4,10 +4,11 @@ package com.intellij.debugger.engine
 import com.intellij.debugger.engine.events.SuspendContextCommandImpl
 import com.intellij.debugger.jdi.ThreadReferenceProxyImpl
 import com.intellij.diagnostic.ThreadDumper
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Attachment
-import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.util.registry.Registry
 import com.intellij.util.containers.toArray
+import com.sun.jdi.event.EventSet
 import com.sun.jdi.request.EventRequest
 
 private enum class ThreadModelState {
@@ -43,6 +44,9 @@ object DebuggerDiagnosticsUtil {
   val recursionTracker = ThreadLocal<Boolean>()
 
   @JvmStatic
+  fun needAnonymizedReports() = !ApplicationManager.getApplication().isInternal
+
+  @JvmStatic
   fun checkThreadsConsistency(process: DebugProcessImpl, reportDiffWithRealCounter: Boolean) {
     val suspendManager = process.suspendManager
     val invocationWatching = process.myThreadBlockedMonitor.myInvocationWatching
@@ -57,6 +61,9 @@ object DebuggerDiagnosticsUtil {
     val problems = mutableListOf<String>()
 
     for (threadProxy in allThreads) {
+      if (threadProxy.isIgnoreModelSuspendCount) {
+        continue
+      }
       val suspendingContexts = SuspendManagerUtil.getSuspendingContexts(suspendManager, threadProxy)
       val resumedByWatching = if (invocationWatching != null && suspendingContexts.contains(invocationWatching.mySuspendAllContext)) 1
       else 0
@@ -141,7 +148,7 @@ object DebuggerDiagnosticsUtil {
     }
 
     if (problems.isNotEmpty()) {
-      logError(process, "Found ${problems.size} problems", attachment = Attachment("Problems", problems.joinToString(separator = "\n")))
+      process.logError("Found ${problems.size} problems", Attachment("Problems.txt", problems.joinToString(separator = "\n")))
     }
   }
 
@@ -165,36 +172,36 @@ object DebuggerDiagnosticsUtil {
   }
 
   @JvmStatic
-  fun assertTrue(process: DebugProcessImpl, value: Boolean, text: () -> String) {
-    if (value) return
-    logError(process, "Assertion failed: " + text())
-  }
-
-  @JvmStatic
   @JvmOverloads
-  fun logError(process: DebugProcessImpl, message: String, e: Throwable? = null, attachment: Attachment? = null) {
-    val paramAttachment = if (attachment != null) listOf(attachment) else emptyList()
-    val attachments = (paramAttachment + createStateAttachments(process)).toArray(Attachment.EMPTY_ARRAY)
-    if (e == null) {
-      thisLogger().error(message, *attachments)
+  fun getAttachments(process: DebugProcessImpl, first: Attachment? = null): Array<Attachment> {
+    if (!DebuggerManagerThreadImpl.isManagerThread()) {
+      return Attachment.EMPTY_ARRAY
     }
-    else {
-      thisLogger().error(message, e, *attachments)
+    val paramAttachment = if (first != null) listOf(first) else emptyList()
+    val result = paramAttachment + createStateAttachments(process)
+    for (attachment in result) {
+      attachment.isIncluded = true
     }
+    return result.toArray(Attachment.EMPTY_ARRAY)
   }
 
   @JvmStatic
   private fun createStateAttachments(process: DebugProcessImpl) : List<Attachment> {
     if (recursionTracker.get() == true) {
-      return listOf(Attachment("Recursion problem detected, just thread dump", noErr { ThreadDumper.dumpThreadsToString() }))
+      return listOf(Attachment("Recursion_problem_detected_Just_dump.txt", noErr { ThreadDumper.dumpThreadsToString() }))
     }
     else {
       try {
         recursionTracker.set(true)
-        return listOf(getDebuggerStateOverview(process),
-                      createThreadsAttachment(process),
-                      Attachment("VM thread dump", noErr { ThreadDumper.dumpThreadsToString() })) +
-               process.suspendManager.eventContexts.map { it.toAttachment() }
+
+        return buildList {
+          add(getDebuggerStateOverview(process))
+          if (process.isAttached) {
+            add(createThreadsAttachment(process))
+          }
+          add(Attachment("IDE_thread_dump.txt", noErr { ThreadDumper.dumpThreadsToString() }))
+          add(Attachment("context_detailed_information.txt", process.suspendManager.eventContexts.joinToString("\n") { it.toAttachmentString() }))
+        }
       }
       finally {
         recursionTracker.remove()
@@ -219,7 +226,7 @@ object DebuggerDiagnosticsUtil {
         "old invocation watcher is using"
       }
     } else "no suspend-all invocation watcher is activated"
-    return Attachment("Threads state", "$vmModelCount\n$blockedThreadsInfo\n$threads")
+    return Attachment("Application_threads_state.txt", "$vmModelCount\n$blockedThreadsInfo\n$threads")
   }
 
   @JvmStatic
@@ -230,14 +237,14 @@ object DebuggerDiagnosticsUtil {
     val currentSuspendContext = (currentCommand as? SuspendContextCommandImpl)?.suspendContext
     val currentSuspendContextText = "Current Command Suspend context = $currentSuspendContext\n"
     val registryInfo = Registry.getAll()
-      .filter { it.key.startsWith("debugger.") && it.isChangedFromDefault }
+      .filter { it.key.startsWith("debugger.") && it.isChangedFromDefault() }
       .joinToString(separator = "") { "${it.key} = ${it.asString()}\n" }
     val content = registryInfo +
                   currentCommandText +
                   currentSuspendContextText +
                   noErr { process.stateForDiagnostics } +
                   noErr { (suspendManager as SuspendManagerImpl).stateForDiagnostics }
-    return Attachment("Debugger state overview", content)
+    return Attachment("Debugger_state_overview.txt", content)
   }
 
   @JvmStatic
@@ -251,7 +258,5 @@ object DebuggerDiagnosticsUtil {
   }
 
   @JvmStatic
-  fun logDebug(message: String) {
-    thisLogger().debug(message)
-  }
+  fun getEventSetClasses(eventSet: EventSet): String = "[${eventSet.map { it.javaClass.simpleName }.joinToString(", ")}]"
 }

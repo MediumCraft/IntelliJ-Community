@@ -1,7 +1,6 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.actionSystem;
 
-import com.intellij.openapi.actionSystem.ex.ActionUtil;
 import com.intellij.openapi.util.NlsActions.ActionDescription;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -12,8 +11,12 @@ import java.util.function.Supplier;
 import static com.intellij.openapi.util.NlsActions.ActionText;
 
 /**
- * An action which has a selected state, and which toggles its selected state when performed.
+ * An action which has a "selected" state and which toggles it when performed.
  * Can be used to represent a menu item with a checkbox, or a toolbar button which keeps its pressed state.
+ * <p>
+ * Toggle actions are {@link KeepPopupOnPerform#IfPreferred} by default.
+ * Make it {@link KeepPopupOnPerform#IfRequested} if you want the toggle to keep its popup open only when
+ * the user explicitly requests that.
  */
 public abstract class ToggleAction extends AnAction implements Toggleable {
   public ToggleAction() {
@@ -47,9 +50,7 @@ public abstract class ToggleAction extends AnAction implements Toggleable {
   @NotNull
   Presentation createTemplatePresentation() {
     Presentation presentation = super.createTemplatePresentation();
-    if (ActionUtil.isMakeAllToggleActionsMultiChoice()) {
-      presentation.setMultiChoice(true);
-    }
+    presentation.setKeepPopupOnPerform(KeepPopupOnPerform.IfPreferred);
     return presentation;
   }
 

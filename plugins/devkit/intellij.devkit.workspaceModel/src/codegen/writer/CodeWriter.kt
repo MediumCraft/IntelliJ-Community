@@ -48,7 +48,8 @@ object CodeWriter {
   @RequiresEdt
   suspend fun generate(
     project: Project, module: Module, sourceFolder: VirtualFile,
-    processAbstractTypes: Boolean, explicitApiEnabled: Boolean, isTestModule: Boolean,
+    processAbstractTypes: Boolean, explicitApiEnabled: Boolean,
+    isTestSourceFolder: Boolean, isTestModule: Boolean,
     targetFolderGenerator: () -> VirtualFile?,
     existingTargetFolder: () -> VirtualFile?
   ) {
@@ -86,7 +87,7 @@ object CodeWriter {
       val title = DevKitWorkspaceModelBundle.message("progress.title.generating.code")
       ApplicationManagerEx.getApplicationEx().runWriteActionWithCancellableProgressInDispatchThread(title, project, null) { indicator ->
         indicator.text = DevKitWorkspaceModelBundle.message("progress.text.collecting.classes.metadata")
-        val objModules = loadObjModules(ktClasses, module, processAbstractTypes)
+        val objModules = loadObjModules(ktClasses, module, processAbstractTypes, isTestSourceFolder)
 
         val results = generate(codeGenerator, objModules, explicitApiEnabled, isTestModule)
         val generatedCode = results.flatMap { it.generatedCode }
@@ -255,14 +256,14 @@ object CodeWriter {
     return apiVersion ?: CodegenApiVersion.UNKNOWN_VERSION
   }
 
-  private fun loadObjModules(ktClasses: HashMap<String, KtClass>, module: Module, processAbstractTypes: Boolean): List<CompiledObjModule> {
+  private fun loadObjModules(ktClasses: HashMap<String, KtClass>, module: Module, processAbstractTypes: Boolean, isTestSourceFolder: Boolean): List<CompiledObjModule> {
     val packages = ktClasses.values.mapTo(LinkedHashSet()) { it.containingKtFile.packageFqName.asString() }
 
     val metaModelProvider: WorkspaceMetaModelProvider = WorkspaceMetaModelProviderImpl(
       processAbstractTypes = processAbstractTypes,
       module.project
     )
-    return packages.filter { it != "" }.map { metaModelProvider.getObjModule(it, module) }
+    return packages.filter { it != "" }.map { metaModelProvider.getObjModule(it, module, isTestSourceFolder) }
   }
 
   private fun generate(codeGenerator: CodeGenerator, objModules: List<CompiledObjModule>,
@@ -311,7 +312,8 @@ object CodeWriter {
     val sourceFile = sourceFilePerObjModule[packageFqnName]!!
     val targetDirectory = getPsiDirectory(project, genFolder, sourceFolder, sourceFile)
 
-    val implImports = Imports(packageFqnName)
+    val implPackageFqnName = "$packageFqnName.impl"
+    val implImports = Imports(implPackageFqnName)
     val implFile = psiFactory.createFile("${code.fileName}.kt", implImports.findAndRemoveFqns(code.generatedCode))
 
     targetDirectory.findFile(implFile.name)?.delete()
@@ -343,7 +345,9 @@ object CodeWriter {
     if (implementationClassText != null) {
       val sourceFile = apiClass.containingFile.virtualFile
       val targetDirectory = getPsiDirectory(project, genFolder, sourceFolder, sourceFile)
-      val implImports = Imports(apiFile.packageFqName.asString())
+
+      val implPackageFqnName = "${apiFile.packageFqName.asString()}.impl"
+      val implImports = Imports(implPackageFqnName)
       val implFile = psiFactory.createFile("${code.target.name}Impl.kt", implImports.findAndRemoveFqns(implementationClassText))
       copyHeaderComment(apiFile, implFile)
       apiClass.containingKtFile.importDirectives.mapNotNull { it.importPath }.forEach { import ->
@@ -359,7 +363,8 @@ object CodeWriter {
 
   private fun getPsiDirectory(project: Project, genFolder: VirtualFile, sourceFolder: VirtualFile, sourceFile: VirtualFile): PsiDirectory {
     val relativePath = VfsUtil.getRelativePath(sourceFile.parent, sourceFolder, '/')
-    val packageFolder = VfsUtil.createDirectoryIfMissing(genFolder, "$relativePath")
+    // We store entities' implementation in impl package
+    val packageFolder = VfsUtil.createDirectoryIfMissing(genFolder, "$relativePath/impl")
     return PsiManager.getInstance(project).findDirectory(packageFolder)!!
   }
 

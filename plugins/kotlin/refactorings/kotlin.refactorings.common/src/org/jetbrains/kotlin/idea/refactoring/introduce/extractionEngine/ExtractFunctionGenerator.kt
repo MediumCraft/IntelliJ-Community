@@ -12,8 +12,7 @@ import org.jetbrains.kotlin.analysis.api.permissions.KaAllowAnalysisFromWriteAct
 import org.jetbrains.kotlin.analysis.api.permissions.KaAllowAnalysisOnEdt
 import org.jetbrains.kotlin.analysis.api.permissions.allowAnalysisFromWriteAction
 import org.jetbrains.kotlin.analysis.api.permissions.allowAnalysisOnEdt
-import org.jetbrains.kotlin.analysis.api.types.KtFunctionalType
-import org.jetbrains.kotlin.analysis.api.types.KtUsualClassType
+import org.jetbrains.kotlin.analysis.api.types.KaFunctionType
 import org.jetbrains.kotlin.idea.base.codeInsight.ShortenReferencesFacility
 import org.jetbrains.kotlin.idea.base.psi.isMultiLine
 import org.jetbrains.kotlin.idea.base.psi.moveInsideParenthesesAndReplaceWith
@@ -47,6 +46,7 @@ import org.jetbrains.kotlin.psi.KtDeclaration
 import org.jetbrains.kotlin.psi.KtElement
 import org.jetbrains.kotlin.psi.KtEnumEntry
 import org.jetbrains.kotlin.psi.KtExpression
+import org.jetbrains.kotlin.psi.KtFile
 import org.jetbrains.kotlin.psi.KtLambdaArgument
 import org.jetbrains.kotlin.psi.KtNamedDeclaration
 import org.jetbrains.kotlin.psi.KtNamedFunction
@@ -151,7 +151,7 @@ abstract class ExtractFunctionGenerator<KotlinType, ExtractionResult : IExtracti
                         is ExpressionValue -> resultExpression
                         is Jump -> if (it.conditional) psiFactory.createExpression("false") else null
                         is ParameterUpdate -> psiFactory.createExpression(it.parameter.nameForRef)
-                        is Initializer -> psiFactory.createExpression(it.initializedDeclaration.name!!)
+                        is Initializer -> psiFactory.createExpression(it.initializedDeclaration.name!!.quoteIfNeeded())
                         else -> throw IllegalArgumentException("Unknown output value: $it")
                     }
                 }
@@ -434,16 +434,28 @@ abstract class ExtractFunctionGenerator<KotlinType, ExtractionResult : IExtracti
 
             val defaultValue = controlFlow.defaultOutputValue
 
-            controlFlow.outputValues
+            val elements = controlFlow.outputValues
                 .filter { it != defaultValue }
                 .flatMap { wrapCall(it, unboxingExpressions.getValue(it)) }
-                .withIndex()
-                .forEach { (i, wrappedCall) ->
-                    if (i > 0) {
-                        block.addBefore(newLine, anchorInBlock)
+
+            val needParenthesis = anchorParent !is KtBlockExpression && anchorParent !is KtClassBody && anchorParent !is KtFile
+            if (controlFlow.outputValues.size < 2 && elements.size > 1 && needParenthesis) {
+                val wrapperBlock = psiFactory.createExpression(
+                    """{
+                       ${elements.joinToString(separator = "") { it.text }}
+                    }""".trimIndent()
+                )
+                anchor.replace(wrapperBlock)
+            } else {
+                elements
+                    .withIndex()
+                    .forEach { (i, wrappedCall) ->
+                        if (i > 0) {
+                            block.addBefore(newLine, anchorInBlock)
+                        }
+                        block.addBefore(wrappedCall, anchorInBlock)
                     }
-                    block.addBefore(wrappedCall, anchorInBlock)
-                }
+            }
 
             defaultValue?.let {
                 if (!inlinableCall) {
@@ -649,7 +661,7 @@ abstract class ExtractFunctionGenerator<KotlinType, ExtractionResult : IExtracti
             val presentation = typeDescriptor.renderType(returnType, isReceiver = false, Variance.OUT_VARIANCE)
             if (typeDescriptor.unitType == returnType ||
                 with(typeDescriptor) { returnType.isError() } ||
-                extractionTarget == ExtractionTarget.PROPERTY_WITH_INITIALIZER && returnType !is KtFunctionalType) {
+                extractionTarget == ExtractionTarget.PROPERTY_WITH_INITIALIZER && returnType !is KaFunctionType) {
                 noReturnType()
             } else {
                 returnType(presentation)

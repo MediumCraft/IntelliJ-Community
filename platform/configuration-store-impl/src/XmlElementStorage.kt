@@ -4,6 +4,7 @@ package com.intellij.configurationStore
 import com.fasterxml.aalto.UncheckedStreamException
 import com.intellij.diagnostic.PluginException
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.writeIntentReadAction
 import com.intellij.openapi.components.PathMacroManager
 import com.intellij.openapi.components.PathMacroSubstitutor
 import com.intellij.openapi.components.PersistentStateComponent
@@ -35,6 +36,7 @@ import java.io.Writer
 import javax.xml.stream.XMLStreamException
 import kotlin.math.min
 
+@ApiStatus.Internal
 abstract class XmlElementStorage protected constructor(
   @JvmField val fileSpec: String,
   @JvmField protected val rootElementName: String?,

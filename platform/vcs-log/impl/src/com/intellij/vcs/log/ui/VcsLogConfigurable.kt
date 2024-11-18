@@ -25,7 +25,6 @@ import com.intellij.vcs.log.history.isNewHistoryEnabled
 import com.intellij.vcs.log.impl.*
 import com.intellij.vcs.log.ui.table.column.*
 import com.intellij.vcsUtil.VcsUtil
-import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.Nls
 import org.jetbrains.annotations.PropertyKey
 
@@ -39,12 +38,12 @@ internal class VcsLogConfigurable(private val project: Project) : BoundConfigura
     val vcsNamesToShow = getVcsNames()
     return panel {
       group(VcsLogBundle.message("group.Vcs.Log.PresentationSettings.text")) {
-        booleanPropertyCheckboxRow("vcs.log.action.description.show.compact.references.view", CommonUiProperties.COMPACT_REFERENCES_VIEW,
+        booleanPropertyCheckboxRow("action.Vcs.Log.CompactReferencesView.description", CommonUiProperties.COMPACT_REFERENCES_VIEW,
                                    applicationSettings)
-        booleanPropertyCheckboxRow("vcs.log.action.description.show.tag.names", CommonUiProperties.SHOW_TAG_NAMES, applicationSettings)
-        booleanPropertyCheckboxRow("prefer.commit.timestamp.action.description", CommonUiProperties.PREFER_COMMIT_DATE, applicationSettings)
-        booleanPropertyCheckboxRow("vcs.log.action.description.align.labels", CommonUiProperties.LABELS_LEFT_ALIGNED, applicationSettings)
-        booleanPropertyCheckboxRow("vcs.log.action.description.show.all.changes.from.parent",
+        booleanPropertyCheckboxRow("action.Vcs.Log.ShowTagNames.description", CommonUiProperties.SHOW_TAG_NAMES, applicationSettings)
+        booleanPropertyCheckboxRow("action.Vcs.Log.PreferCommitDate.description", CommonUiProperties.PREFER_COMMIT_DATE, applicationSettings)
+        booleanPropertyCheckboxRow("action.Vcs.Log.AlignLabels.description", CommonUiProperties.LABELS_LEFT_ALIGNED, applicationSettings)
+        booleanPropertyCheckboxRow("action.Vcs.Log.ShowChangesFromParents.description",
                                    MainVcsLogUiProperties.SHOW_CHANGES_FROM_PARENTS, applicationSettings)
         diffPreviewLocationGroup(applicationSettings)
         columnVisibilityGroup(applicationSettings)
@@ -62,7 +61,7 @@ internal class VcsLogConfigurable(private val project: Project) : BoundConfigura
       }
       if (isNewFileHistoryAvailable()) {
         group(VcsLogBundle.message("vcs.log.settings.group.file.history.title")) {
-          booleanPropertyCheckboxRow("vcs.log.action.description.show.details", CommonUiProperties.SHOW_DETAILS, fileHistorySettings)
+          booleanPropertyCheckboxRow("action.Vcs.Log.ShowDetailsAction.description", CommonUiProperties.SHOW_DETAILS, fileHistorySettings)
           booleanPropertyCheckboxRow("vcs.log.settings.show.file.names", CommonUiProperties.SHOW_ROOT_NAMES, fileHistorySettings)
           diffPreviewLocationGroup(fileHistorySettings)
           columnVisibilityGroup(fileHistorySettings)
@@ -88,7 +87,7 @@ internal class VcsLogConfigurable(private val project: Project) : BoundConfigura
     if (!properties.exists(CommonUiProperties.SHOW_DIFF_PREVIEW)) return
     lateinit var diffPreviewCheckbox: Cell<JBCheckBox>
     row {
-      diffPreviewCheckbox = booleanPropertyCheckbox(VcsLogBundle.message("vcs.log.action.description.show.diff.preview"),
+      diffPreviewCheckbox = booleanPropertyCheckbox(VcsLogBundle.message("action.Vcs.Log.ShowDiffPreview.description"),
                                                     CommonUiProperties.SHOW_DIFF_PREVIEW, properties)
     }
     if (properties.exists(MainVcsLogUiProperties.DIFF_PREVIEW_VERTICAL_SPLIT)) {
@@ -158,8 +157,7 @@ private class VcsLogIndexAvailabilityPredicate(private val project: Project, pri
   override fun invoke() = isVcsLogIndexAvailable
 }
 
-@ApiStatus.Internal
-class VcsLogConfigurableProvider(private val project: Project) : ConfigurableProvider() {
+internal class VcsLogConfigurableProvider(private val project: Project) : ConfigurableProvider() {
   override fun createConfigurable(): Configurable? {
     if (VcsProjectLog.getLogProviders(project).isEmpty()) return null
     return VcsLogConfigurable(project)

@@ -1,8 +1,9 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.internal.statistic.eventLog
 
 import com.intellij.ide.plugins.ProductLoadingStrategy
 import com.intellij.idea.AppMode
+import com.intellij.internal.statistic.StatisticsServiceScope
 import com.intellij.internal.statistic.eventLog.logger.StatisticsEventLogThrottleWriter
 import com.intellij.internal.statistic.persistence.UsageStatisticsPersistenceComponent
 import com.intellij.openapi.application.ApplicationManager
@@ -10,6 +11,8 @@ import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.extensions.ExtensionPointName
 import com.intellij.openapi.util.Disposer
 import com.intellij.platform.runtime.product.ProductMode
+import kotlinx.coroutines.*
+import org.jetbrains.annotations.ApiStatus
 import java.io.File
 import java.util.*
 import java.util.concurrent.CompletableFuture
@@ -29,12 +32,16 @@ interface StatisticsEventLogger {
   fun rollOver()
 }
 
+/**
+ * [useDefaultRecorderId] - When enabled, device and machine ids would match FUS(default) recorder. Must NOT be enabled for non-anonymized recorders.
+ */
 abstract class StatisticsEventLoggerProvider(val recorderId: String,
                                              val version: Int,
                                              val sendFrequencyMs: Long,
                                              private val maxFileSizeInBytes: Int,
                                              val sendLogsOnIdeClose: Boolean = false,
-                                             val isCharsEscapingRequired: Boolean = true) {
+                                             val isCharsEscapingRequired: Boolean = true,
+                                             val useDefaultRecorderId: Boolean = false) {
 
   @Deprecated(message = "Use primary constructor instead")
   constructor(recorderId: String,
@@ -77,8 +84,10 @@ abstract class StatisticsEventLoggerProvider(val recorderId: String,
     }
   }
 
+  open val coroutineScope: CoroutineScope = StatisticsServiceScope.getScope()
   private val localLogger: StatisticsEventLogger by lazy { createLocalLogger() }
   private val actualLogger: StatisticsEventLogger by lazy { createLogger() }
+  internal val eventLogSystemLogger: EventLogSystemCollector by lazy { EventLogSystemCollector(this) }
 
   open val logger: StatisticsEventLogger
     get() = if (isLoggingEnabled()) actualLogger else localLogger
@@ -119,27 +128,28 @@ abstract class StatisticsEventLoggerProvider(val recorderId: String,
     // Use `String?` instead of boolean flag for future expansion with other IDE modes
     val ideMode = if(AppMode.isRemoteDevHost()) "RDH" else null
     val currentProductModeId = ProductLoadingStrategy.strategy.currentModeId
-    val productMode = if (currentProductModeId != ProductMode.LOCAL_IDE.id) {
+    val productMode = if (currentProductModeId != ProductMode.MONOLITH.id) {
       currentProductModeId
     } else if (detectClionNova()) {
-      ProductMode.NOVA.id
+      "nova"
     } else {
       null
     }
     val eventLogConfiguration = EventLogConfiguration.getInstance()
-    val config = eventLogConfiguration.getOrCreate(recorderId)
+    val config = eventLogConfiguration.getOrCreate(recorderId, if (useDefaultRecorderId) "FUS" else null)
     val writer = StatisticsEventLogFileWriter(recorderId, this, maxFileSizeInBytes, isEap, eventLogConfiguration.build)
 
     val configService = EventLogConfigOptionsService.getInstance()
     val throttledWriter = StatisticsEventLogThrottleWriter(
-      configService, recorderId, version.toString(), writer
+      configService, recorderId, version.toString(), writer, coroutineScope
     )
 
     val logger = StatisticsFileEventLogger(
       recorderId, config.sessionId, isHeadless, eventLogConfiguration.build, config.bucket.toString(), version.toString(),
       throttledWriter, UsageStatisticsPersistenceComponent.getInstance(), createEventsMergeStrategy(), ideMode, productMode
     )
-    Disposer.register(ApplicationManager.getApplication(), logger)
+
+    coroutineScope.coroutineContext.job.invokeOnCompletion { Disposer.dispose(logger) }
     return logger
   }
 
@@ -170,7 +180,7 @@ abstract class StatisticsEventLoggerProvider(val recorderId: String,
  * */
 abstract class StatisticsEventLoggerProviderExt(recorderId: String, version: Int, sendFrequencyMs: Long,
                                                 maxFileSizeInBytes: Int, sendLogsOnIdeClose: Boolean = false) :
-  StatisticsEventLoggerProvider(recorderId, version, sendFrequencyMs, maxFileSizeInBytes, sendLogsOnIdeClose) {
+  StatisticsEventLoggerProvider(recorderId, version, sendFrequencyMs, maxFileSizeInBytes, sendLogsOnIdeClose, false) {
   override fun isLoggingAlwaysActive(): Boolean = StatisticsEventLogProviderUtil.forceLoggingAlwaysEnabled()
 }
 

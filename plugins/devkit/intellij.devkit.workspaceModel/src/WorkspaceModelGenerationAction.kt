@@ -3,9 +3,9 @@ package com.intellij.devkit.workspaceModel
 
 import com.intellij.openapi.actionSystem.*
 import com.intellij.openapi.module.ModuleManager
-import org.jetbrains.idea.devkit.util.PsiUtil
+import com.intellij.openapi.project.IntelliJProjectUtil
 
-class WorkspaceModelGenerationAction: AnAction() {
+internal class WorkspaceModelGenerationAction: AnAction() {
 
   override fun getActionUpdateThread() = ActionUpdateThread.BGT
 
@@ -17,7 +17,7 @@ class WorkspaceModelGenerationAction: AnAction() {
   }
 
   override fun update(event: AnActionEvent) {
-    if (!PsiUtil.isIdeaProject(event.project)) {
+    if (!IntelliJProjectUtil.isIntelliJPlatformProject(event.project)) {
       event.presentation.isEnabledAndVisible = false
       return
     }
@@ -30,7 +30,7 @@ class WorkspaceModelGenerationAction: AnAction() {
   }
 }
 
-class WorkspaceModelGenerateAllModulesAction: AnAction() {
+internal class WorkspaceModelGenerateAllModulesAction: AnAction() {
 
   override fun getActionUpdateThread() = ActionUpdateThread.BGT
 
@@ -44,7 +44,7 @@ class WorkspaceModelGenerateAllModulesAction: AnAction() {
   }
 
   override fun update(event: AnActionEvent) {
-    if (!PsiUtil.isIdeaProject(event.project)) {
+    if (!IntelliJProjectUtil.isIntelliJPlatformProject(event.project)) {
       event.presentation.isEnabledAndVisible = false
       return
     }

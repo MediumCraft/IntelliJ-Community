@@ -11,10 +11,8 @@ import com.intellij.platform.workspace.storage.WorkspaceEntity
 import com.intellij.platform.workspace.storage.impl.*
 import com.intellij.platform.workspace.storage.impl.containers.PersistentBidirectionalMap
 import com.intellij.platform.workspace.storage.impl.containers.PersistentBidirectionalMapImpl
-import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentationApi
 import java.util.*
 
-@OptIn(EntityStorageInstrumentationApi::class)
 internal open class ExternalEntityMappingImpl<T> internal constructor(internal open val index: PersistentBidirectionalMap<EntityId, T>)
   : ExternalEntityMapping<T> {
   protected lateinit var entityStorage: AbstractEntityStorage
@@ -103,7 +101,7 @@ internal class MutableExternalEntityMappingImpl<T> private constructor(
   }
 
   internal fun remove(id: EntityId): T? {
-    LOG.trace { "Remove $id from external index" }
+    LOG.trace { "Remove ${id.asString()} from external index" }
     val removed = index.remove(id)
     if (removed != null) {
       indexLogBunches.add(id, IndexLogRecord.Remove(id))

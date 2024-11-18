@@ -9,9 +9,13 @@ import com.intellij.ide.startup.importSettings.wizard.themeChooser.ThemeChooserP
 import com.intellij.util.ui.accessibility.ScreenReader
 import com.jetbrains.rd.util.lifetime.SequentialLifetimes
 
-interface WizardController : BaseController {
+internal sealed interface WizardController : BaseController {
   companion object {
-    fun createController(dialog: OnboardingDialog, service: StartupWizardService, goBackAction: (() -> Unit)?): WizardController {
+    fun createController(
+      dialog: OnboardingDialog,
+      service: StartupWizardService,
+      goBackAction: (() -> Unit)?
+    ): WizardController {
       return WizardControllerImpl(dialog, service, goBackAction)
     }
   }
@@ -25,11 +29,12 @@ interface WizardController : BaseController {
   fun goToPluginPage()
   fun goToInstallPluginPage(ids: List<String>)
   fun skipPlugins()
+  fun goToPostImportPage()
 
   fun cancelPluginInstallation()
 }
 
-class WizardControllerImpl(dialog: OnboardingDialog,
+internal class WizardControllerImpl(dialog: OnboardingDialog,
                            override val service: StartupWizardService,
                            override val goBackAction: (() -> Unit)?) : WizardController, BaseControllerImpl(dialog) {
 
@@ -59,7 +64,11 @@ class WizardControllerImpl(dialog: OnboardingDialog,
   }
 
   override fun goToPluginPage() {
-    val page = WizardPluginsPage(this)
+    val page = WizardPluginsPage(this, service.getPluginService(), goBackAction = {
+      goToKeymapPage(isForwardDirection = false)
+    }, goForwardAction = { ids ->
+      goToInstallPluginPage(ids)
+    }, continueButtonTextOverride = null)
     dialog.changePage(page)
     page.onEnter()
   }
@@ -79,6 +88,10 @@ class WizardControllerImpl(dialog: OnboardingDialog,
   override fun skipPlugins() {
     service.getPluginService().skipPlugins()
     dialog.dialogClose()
+  }
+
+  override fun goToPostImportPage() {
+    goToPluginPage()
   }
 
   override fun cancelPluginInstallation() {

@@ -34,11 +34,10 @@ import org.jetbrains.kotlin.analysis.api.permissions.KaAllowAnalysisOnEdt
 import org.jetbrains.kotlin.analysis.api.permissions.allowAnalysisOnEdt
 import org.jetbrains.kotlin.idea.KotlinFileType
 import org.jetbrains.kotlin.idea.base.codeInsight.pathBeforeJavaToKotlinConversion
-import org.jetbrains.kotlin.idea.base.plugin.KotlinPluginModeProvider
+import org.jetbrains.kotlin.idea.base.plugin.KotlinPluginModeProvider.Companion.isK2Mode
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.base.util.KotlinPlatformUtils
 import org.jetbrains.kotlin.idea.codeinsight.utils.commitAndUnblockDocument
-import org.jetbrains.kotlin.idea.configuration.ExperimentalFeatures.K2J2K
 import org.jetbrains.kotlin.idea.configuration.ExperimentalFeatures.NewJ2k
 import org.jetbrains.kotlin.idea.core.util.toPsiDirectory
 import org.jetbrains.kotlin.idea.core.util.toPsiFile
@@ -79,7 +78,13 @@ class JavaToKotlinAction : AnAction() {
                 val progressIndicator = ProgressManager.getInstance().progressIndicator!!
 
                 val conversionTime = measureTimeMillis {
-                    converterResult = converter.filesToKotlin(javaFiles, postProcessor, progressIndicator)
+                    converterResult = converter.filesToKotlin(
+                        javaFiles,
+                        postProcessor,
+                        progressIndicator,
+                        preprocessorExtensions = J2kPreprocessorExtension.EP_NAME.extensionList,
+                        postprocessorExtensions = J2kPostprocessorExtension.EP_NAME.extensionList
+                    )
                 }
                 val linesCount = runReadAction {
                     javaFiles.sumOf { StringUtil.getLineBreakCount(it.text) }
@@ -89,20 +94,21 @@ class JavaToKotlinAction : AnAction() {
                 J2KFusCollector.log(ConversionType.FILES, j2kKind == K1_NEW, conversionTime, linesCount, javaFiles.size)
             }
 
-            if (!runSynchronousProcess(project, ::convertWithStatistics)) return emptyList()
+            // Perform user interaction first to avoid interrupting J2K in the middle of conversion and breaking "undo"
+            val question = KotlinBundle.message("action.j2k.correction.required")
+            val shouldProcessExternalCode = enableExternalCodeProcessing &&
+                    (!askExternalCodeProcessing ||
+                            Messages.showYesNoDialog(project, question, title, Messages.getQuestionIcon()) == Messages.YES)
 
-            val result = converterResult ?: return emptyList()
-            val externalCodeProcessing = result.externalCodeProcessing
-            val externalCodeUpdate =
-                prepareExternalCodeUpdate(project, externalCodeProcessing, enableExternalCodeProcessing, askExternalCodeProcessing)
-
-            lateinit var newFiles: List<KtFile>
+            var newFiles: List<KtFile> = emptyList()
 
             // We execute a single command with the following steps:
             //
-            // 1. Create new Kotlin files in a transparent global write action.
-            // 2. Prepare external code processing in a read action.
-            // 3. Update external usages in a transparent global write action.
+            // * Run Java to Kotlin converter, including the post-processings
+            // * Find external usages that may need to be updated (part 1)
+            // * Create new Kotlin files in a transparent global write action
+            // * Prepare external code processing in a read action (part 2)
+            // * Update external usages in a transparent global write action
             //
             // "Transparent" means that it will not be considered as a separate step for undo/redo purposes,
             // so when you undo a J2K conversion, it undoes the whole outermost command at once.
@@ -110,6 +116,16 @@ class JavaToKotlinAction : AnAction() {
             // "Global" means that you can undo it from any changed file: the converted files,
             // or the external files that were updated.
             project.executeCommand(KotlinBundle.message("action.j2k.task.name")) {
+                if (!ProgressManager.getInstance().runProcessWithProgressSynchronously(
+                        { convertWithStatistics() },
+                        title, /* canBeCanceled = */ true,
+                        project
+                    )) return@executeCommand
+
+                val result = converterResult ?: return@executeCommand
+                val externalCodeProcessing = result.externalCodeProcessing
+                val externalCodeUpdate = prepareExternalCodeUpdate(project, externalCodeProcessing, shouldProcessExternalCode)
+
                 newFiles = project.runUndoTransparentGlobalWriteAction {
                     saveResults(javaFiles, result.results)
                         .map { it.toPsiFile(project) as KtFile }
@@ -135,30 +151,18 @@ class JavaToKotlinAction : AnAction() {
             return newFiles
         }
 
-        private fun prepareExternalCodeUpdate(
-            project: Project,
-            processing: ExternalCodeProcessing?,
-            isEnabled: Boolean,
-            shouldAsk: Boolean
-        ): (() -> Unit)? {
+        private fun prepareExternalCodeUpdate(project: Project, processing: ExternalCodeProcessing?, isEnabled: Boolean): (() -> Unit)? {
             if (!isEnabled || processing == null) return null
 
             var result: (() -> Unit)? = null
-            val question = KotlinBundle.message("action.j2k.correction.required")
-
-            if (!shouldAsk || Messages.showYesNoDialog(project, question, title, Messages.getQuestionIcon()) == Messages.YES) {
-                runSynchronousProcess(project) {
-                    runReadAction {
-                        result = processing.prepareWriteOperation(ProgressManager.getInstance().progressIndicator!!)
-                    }
+            ProgressManager.getInstance().runProcessWithProgressSynchronously({
+                runReadAction {
+                    result = processing.prepareWriteOperation(ProgressManager.getInstance().progressIndicator!!)
                 }
-            }
+            }, title, /* canBeCanceled = */ true, project)
 
             return result
         }
-
-        private fun runSynchronousProcess(project: Project, process: () -> Unit): Boolean =
-            ProgressManager.getInstance().runProcessWithProgressSynchronously(process, title, /* canBeCanceled = */ true, project)
 
         private fun <T> Project.runUndoTransparentGlobalWriteAction(command: () -> T): T =
             CommandProcessor.getInstance().withUndoTransparentAction().use {
@@ -224,8 +228,17 @@ class JavaToKotlinAction : AnAction() {
             enableExternalCodeProcessing: Boolean = true,
             askExternalCodeProcessing: Boolean = true,
             forceUsingOldJ2k: Boolean = false
-        ): List<KtFile> =
-            convertFiles(files, project, module, enableExternalCodeProcessing, askExternalCodeProcessing, forceUsingOldJ2k, defaultSettings)
+        ): List<KtFile> {
+            return convertFiles(
+                files,
+                project,
+                module,
+                enableExternalCodeProcessing,
+                askExternalCodeProcessing,
+                forceUsingOldJ2k,
+                defaultSettings
+            )
+        }
     }
 
     override fun actionPerformed(e: AnActionEvent) {
@@ -293,8 +306,6 @@ class JavaToKotlinAction : AnAction() {
     }
 
     private fun isEnabled(e: AnActionEvent): Boolean {
-        if (KotlinPluginModeProvider.isK2Mode() && !K2J2K.isEnabled) return false
-
         if (KotlinPlatformUtils.isCidr) return false
         val files = e.getData(CommonDataKeys.VIRTUAL_FILE_ARRAY) ?: return false
         val project = e.project ?: return false
@@ -324,7 +335,7 @@ class JavaToKotlinAction : AnAction() {
 }
 
 private fun getJ2kKind(forceUsingOldJ2k: Boolean = false): J2kConverterExtension.Kind = when {
-    KotlinPluginModeProvider.isK2Mode() -> K2
+    isK2Mode() -> K2
     forceUsingOldJ2k || !NewJ2k.isEnabled -> K1_OLD
     else -> K1_NEW
 }

@@ -7,7 +7,6 @@ import com.intellij.diff.tools.util.base.HighlightingLevel;
 import com.intellij.diff.tools.util.base.TextDiffSettingsHolder.TextDiffSettings;
 import com.intellij.diff.tools.util.breadcrumbs.BreadcrumbsPlacement;
 import com.intellij.icons.AllIcons;
-import com.intellij.idea.ActionsBundle;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.actionSystem.ex.ActionUtil;
 import com.intellij.openapi.diff.DiffBundle;
@@ -17,6 +16,7 @@ import com.intellij.openapi.editor.ex.EditorGutterComponentEx;
 import com.intellij.openapi.editor.impl.EditorImpl;
 import com.intellij.openapi.project.DumbAware;
 import com.intellij.util.containers.ContainerUtil;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -33,11 +33,13 @@ public class SetEditorSettingsActionGroup extends ActionGroup implements DumbAwa
 
   protected final AnAction @NotNull [] myActions;
 
+  @ApiStatus.Internal
   public SetEditorSettingsActionGroup(@NotNull TextDiffSettings settings,
                                       @NotNull List<? extends Editor> editors) {
     this(settings, () -> editors);
   }
 
+  @ApiStatus.Internal
   public SetEditorSettingsActionGroup(@NotNull TextDiffSettings settings,
                                       @NotNull Supplier<? extends List<? extends Editor>> editors) {
     super(DiffBundle.message("editor.settings"), null, AllIcons.General.GearPlain);
@@ -187,7 +189,8 @@ public class SetEditorSettingsActionGroup extends ActionGroup implements DumbAwa
     actions.add(Separator.getInstance());
 
     if (e != null && e.getData(DiffDataKeys.MERGE_VIEWER) != null) {
-      actions.add(new ResolveConflictsInImportsToggleAction());
+      actions.add(Separator.getInstance());
+      actions.add(ActionManager.getInstance().getAction(IdeActions.ACTION_CONTEXT_HELP));
     }
 
     if (e != null && ActionPlaces.DIFF_TOOLBAR.equals(e.getPlace())) {
@@ -343,26 +346,5 @@ public class SetEditorSettingsActionGroup extends ActionGroup implements DumbAwa
 
   private interface EditorSettingAction {
     void applyDefaults(@NotNull List<? extends Editor> editors);
-  }
-
-  private class ResolveConflictsInImportsToggleAction extends ToggleAction implements DumbAware {
-    private ResolveConflictsInImportsToggleAction() {
-      super(ActionsBundle.message("action.EditorToggleResolveConflictsInImports.text"));
-    }
-
-    @Override
-    public @NotNull ActionUpdateThread getActionUpdateThread() {
-      return ActionUpdateThread.EDT;
-    }
-
-    @Override
-    public boolean isSelected(@NotNull AnActionEvent e) {
-      return myTextSettings.isAutoResolveImportConflicts();
-    }
-
-    @Override
-    public void setSelected(@NotNull AnActionEvent e, boolean state) {
-      myTextSettings.setAutoResolveImportConflicts(state);
-    }
   }
 }

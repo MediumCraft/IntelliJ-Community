@@ -1,5 +1,5 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
-@file:Suppress("ReplaceGetOrSet", "ReplacePutWithAssignment", "ReplaceJavaStaticMethodWithKotlinAnalog")
+@file:Suppress("ReplaceGetOrSet", "ReplacePutWithAssignment", "ReplaceJavaStaticMethodWithKotlinAnalog", "OVERRIDE_DEPRECATION", "RemoveRedundantQualifierName")
 
 package com.intellij.openapi.actionSystem.impl
 
@@ -7,7 +7,6 @@ import com.intellij.AbstractBundle
 import com.intellij.BundleBase
 import com.intellij.DynamicBundle
 import com.intellij.codeWithMe.ClientId
-import com.intellij.codeWithMe.ClientId.Companion.withClientId
 import com.intellij.concurrency.installThreadContext
 import com.intellij.diagnostic.PluginException
 import com.intellij.diagnostic.StartUpMeasurer
@@ -27,7 +26,7 @@ import com.intellij.internal.statistic.collectors.fus.actions.persistence.Action
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.*
 import com.intellij.openapi.actionSystem.ex.*
-import com.intellij.openapi.actionSystem.ex.ActionUtil.showDumbModeWarning
+import com.intellij.openapi.actionSystem.ex.ActionUtil.getActionUnavailableMessage
 import com.intellij.openapi.actionSystem.impl.ActionConfigurationCustomizer.LightCustomizeStrategy
 import com.intellij.openapi.application.*
 import com.intellij.openapi.application.impl.RawSwingDispatcher
@@ -45,6 +44,8 @@ import com.intellij.openapi.keymap.impl.KeymapImpl
 import com.intellij.openapi.keymap.impl.UpdateResult
 import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.progress.blockingContext
+import com.intellij.openapi.project.DumbService
+import com.intellij.openapi.project.DumbServiceImpl
 import com.intellij.openapi.project.IndexNotReadyException
 import com.intellij.openapi.project.ProjectType
 import com.intellij.openapi.util.*
@@ -89,8 +90,8 @@ import java.util.*
 import java.util.concurrent.CancellationException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.function.Function
-import java.util.function.Supplier
 import javax.swing.Icon
+import javax.swing.JLabel
 import kotlin.coroutines.ContinuationInterceptor
 import kotlin.coroutines.resume
 import kotlin.time.Duration
@@ -119,8 +120,8 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
 
   init {
     val app = ApplicationManager.getApplication()
-    if (!app.isUnitTestMode && !app.isHeadlessEnvironment && !app.isCommandLine) {
-      ThreadingAssertions.assertBackgroundThread()
+    if (!app.isUnitTestMode && !app.isHeadlessEnvironment && !app.isCommandLine && app.isDispatchThread) {
+      LOG.error("Instantiating ActionManager in EDT is prohibited")
     }
 
     val idToAction = HashMap<String, AnAction>(5_000, 0.5f)
@@ -133,30 +134,16 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
                       actionRegistrar = actionPreInitRegistrar)
 
     coroutineScope.launch {
-      val schema = CustomActionsSchema.getInstanceAsync()
-      for (url in schema.getActions()) {
-        schema.incrementModificationStamp()
-      }
+      CustomActionsSchema.getInstanceAsync().incrementModificationStamp()
     }
 
     this.keymapToOperations = keymapToOperations
 
-    val mutator = PreInitActionRuntimeRegistrar(idToAction = idToAction, actionRegistrar = actionPreInitRegistrar)
-
-    val heavyTasks = mutableListOf<ActionConfigurationCustomizer.CustomizeStrategy>()
-    ActionConfigurationCustomizer.EP.forEachExtensionSafe { extension ->
-      val customizeStrategy = extension.customize()
-      if (customizeStrategy is LightCustomizeStrategy) {
-        // same thread - mutator is not thread-safe by intention
-        // todo use plugin-aware coroutineScope
-        coroutineScope.launch(Dispatchers.Unconfined) {
-          customizeStrategy.customize(mutator)
-        }
-      }
-      else {
-        heavyTasks.add(customizeStrategy)
-      }
-    }
+    val heavyTasks = preInitRegistration(
+      idToAction = idToAction,
+      actionPreInitRegistrar = actionPreInitRegistrar,
+      coroutineScope = coroutineScope,
+    )
 
     // by intention, _after_ doRegisterActions
     actionPostInitRegistrar = PostInitActionRegistrar(idToAction = idToAction, boundShortcuts = boundShortcuts, state = state)
@@ -179,7 +166,7 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
     }
 
     DYNAMIC_EP_NAME.forEachExtensionSafe { customizer ->
-      callDynamicRegistration(customizer, mutator)
+      callDynamicRegistration(customizer, actionPostInitRuntimeRegistrar)
     }
 
     DYNAMIC_EP_NAME.addExtensionPointListener(coroutineScope, object : ExtensionPointListener<DynamicActionConfigurationCustomizer> {
@@ -249,6 +236,7 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
   }
 
   internal fun getKeymapPendingOperations(keymapName: String): List<KeymapShortcutOperation> {
+    @Suppress("RemoveRedundantQualifierName")
     return keymapToOperations.get(keymapName) ?: java.util.List.of()
   }
 
@@ -258,7 +246,7 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
     }
 
     if (timer == null) {
-      timer = MyTimer(coroutineScope.childScope())
+      timer = MyTimer(coroutineScope.childScope(toString() + " timer"))
     }
 
     val wrappedListener = if (AppExecutorUtil.propagateContext() && listener !is CapturingListener) {
@@ -375,6 +363,8 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
         }
       }
 
+      val bundleSupplier = { bundleName?.let { DynamicBundle.getResourceBundle(module.classLoader, it) } ?: bundle }
+
       when (descriptor) {
         is ActionDescriptorAction -> {
           processActionElement(className = descriptor.className,
@@ -382,7 +372,7 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
                                element = element,
                                actionRegistrar = actionRegistrar,
                                module = module,
-                               bundle = bundle,
+                               bundleSupplier = bundleSupplier,
                                keymapToOperations = keymapToOperations,
                                classLoader = module.classLoader)
         }
@@ -392,7 +382,7 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
                               element = element,
                               actionRegistrar = actionRegistrar,
                               module = module,
-                              bundle = bundle,
+                              bundleSupplier = bundleSupplier,
                               keymapToOperations = keymapToOperations,
                               classLoader = module.classLoader)
         }
@@ -401,11 +391,11 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
             ActionDescriptorName.separator -> processSeparatorNode(parentGroup = null,
                                                                    element = element,
                                                                    module = module,
-                                                                   bundle = bundle,
+                                                                   bundleSupplier = bundleSupplier,
                                                                    actionRegistrar = actionRegistrar)
             ActionDescriptorName.reference -> processReferenceNode(element = element,
                                                                    module = module,
-                                                                   bundle = bundle,
+                                                                   bundleSupplier = bundleSupplier,
                                                                    actionRegistrar = actionRegistrar)
             ActionDescriptorName.unregister -> processUnregisterNode(element = element, module = module, actionRegistrar = actionRegistrar)
             ActionDescriptorName.prohibit -> processProhibitNode(element = element, module = module)
@@ -418,7 +408,12 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
   }
 
   final override fun getAction(id: String): AnAction? {
-    val action = getAction(id = id, canReturnStub = false, actionRegistrar = actionPostInitRegistrar)
+    val action = getAction(
+      id = id,
+      canReturnStub = false,
+      actionRegistrar = actionPostInitRegistrar,
+      actionSupplier = { getAction(it) }
+    )
     if (action == null && SystemProperties.getBooleanProperty("action.manager.log.available.actions.if.not.found", false)) {
       val availableActionIds = actionPostInitRegistrar.getActionIdList("")
       LOG.info("Action $id is not found. Available actions: $availableActionIds")
@@ -463,7 +458,7 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
                                    element: XmlElement,
                                    actionRegistrar: ActionRegistrar,
                                    module: IdeaPluginDescriptorImpl,
-                                   bundle: ResourceBundle?,
+                                   bundleSupplier: () -> ResourceBundle?,
                                    keymapToOperations: MutableMap<String, MutableList<KeymapShortcutOperation>>,
                                    classLoader: ClassLoader): AnAction? {
     // read ID and register a loaded action
@@ -485,15 +480,15 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
     val descriptionValue = element.attributes.get(DESCRIPTION)
     val stub = ActionStub(className, id, module, iconPath, ProjectType.create(projectType)) {
       val presentation = Presentation.newTemplatePresentation()
-      presentation.setText(Supplier {
-        computeActionText(bundle = bundle, id = id, elementType = ACTION_ELEMENT_NAME, textValue = textValue, classLoader = classLoader)
-      })
-      if (bundle == null) {
+      presentation.setText {
+        computeActionText(bundleSupplier = bundleSupplier, id = id, elementType = ACTION_ELEMENT_NAME, textValue = textValue, classLoader = classLoader)
+      }
+      if (bundleSupplier() == null) {
         presentation.description = descriptionValue
       }
       else {
         presentation.setDescription {
-          computeDescription(bundle = bundle,
+          computeDescription(bundleSupplier = bundleSupplier,
                              id = id,
                              elementType = ACTION_ELEMENT_NAME,
                              descriptionValue = descriptionValue,
@@ -524,8 +519,8 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
                                                               id = stub.id,
                                                               element = child,
                                                               module = module,
-                                                              bundle = bundle)
-        SYNONYM_ELEMENT_NAME -> processSynonymNode(action = stub, element = child, module = module, bundle = bundle)
+                                                              bundleSupplier = bundleSupplier)
+        SYNONYM_ELEMENT_NAME -> processSynonymNode(action = stub, element = child, module = module, bundleSupplier = bundleSupplier)
         else -> {
           reportActionError(module, "unexpected name of element \"${child.name}\"")
           return null
@@ -544,7 +539,7 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
                                   id: String?,
                                   element: XmlElement,
                                   module: IdeaPluginDescriptorImpl,
-                                  bundle: ResourceBundle?,
+                                  bundleSupplier: () -> ResourceBundle?,
                                   keymapToOperations: MutableMap<String, MutableList<KeymapShortcutOperation>>,
                                   actionRegistrar: ActionRegistrar,
                                   classLoader: ClassLoader): AnAction? {
@@ -613,7 +608,7 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
                                        description = element.attributes.get(DESCRIPTION),
                                        textValue = element.attributes.get(TEXT_ATTR_NAME),
                                        group = group,
-                                       bundle = bundle,
+                                       bundleSupplier = bundleSupplier,
                                        id = id,
                                        classLoader = classLoader,
                                        iconPath = iconPath,
@@ -642,7 +637,7 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
                                                 isInternal = child.attributes.get(INTERNAL_ATTR_NAME).toBoolean(),
                                                 element = child,
                                                 module = module,
-                                                bundle = bundle,
+                                                bundleSupplier = bundleSupplier,
                                                 actionRegistrar = actionRegistrar,
                                                 keymapToOperations = keymapToOperations,
                                                 classLoader = classLoader)
@@ -660,7 +655,7 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
             processSeparatorNode(parentGroup = group as DefaultActionGroup,
                                  element = child,
                                  module = module,
-                                 bundle = bundle,
+                                 bundleSupplier = bundleSupplier,
                                  actionRegistrar = actionRegistrar)
           }
           GROUP_ELEMENT_NAME -> {
@@ -683,7 +678,7 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
                                                id = childId,
                                                element = child,
                                                module = module,
-                                               bundle = bundle,
+                                               bundleSupplier = bundleSupplier,
                                                keymapToOperations = keymapToOperations,
                                                actionRegistrar = actionRegistrar,
                                                classLoader = classLoader)
@@ -715,7 +710,7 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
                          secondary = isSecondary(child))
             }
           }
-          OVERRIDE_TEXT_ELEMENT_NAME -> processOverrideTextNode(action = group, id = id, element = child, module = module, bundle = bundle)
+          OVERRIDE_TEXT_ELEMENT_NAME -> processOverrideTextNode(action = group, id = id, element = child, module = module, bundleSupplier = bundleSupplier)
           else -> {
             reportActionError(module, "unexpected name of element \"${child.name}\n")
             return null
@@ -735,7 +730,7 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
 
   private fun processReferenceNode(element: XmlElement,
                                    module: IdeaPluginDescriptor,
-                                   bundle: ResourceBundle?,
+                                   bundleSupplier: () -> ResourceBundle?,
                                    actionRegistrar: ActionRegistrar) {
     val action = processReferenceElement(element = element, module = module, actionRegistrar = actionRegistrar) ?: return
     for (child in element.children) {
@@ -747,7 +742,7 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
                               actionRegistrar = actionRegistrar)
       }
       else if (SYNONYM_ELEMENT_NAME == child.name) {
-        processSynonymNode(action = action, element = child, module = module, bundle = bundle)
+        processSynonymNode(action = action, element = child, module = module, bundleSupplier = bundleSupplier)
       }
     }
   }
@@ -828,13 +823,13 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
   private fun processSeparatorNode(parentGroup: DefaultActionGroup?,
                                    element: XmlElement,
                                    module: IdeaPluginDescriptor,
-                                   bundle: ResourceBundle?,
+                                   bundleSupplier: () -> ResourceBundle?,
                                    actionRegistrar: ActionRegistrar) {
     val text = element.attributes.get(TEXT_ATTR_NAME)
     val key = element.attributes.get(KEY_ATTR_NAME)
     val separator = when {
       text != null -> Separator(text)
-      key != null -> createSeparator(bundle, key)
+      key != null -> createSeparator(bundleSupplier, key)
       else -> Separator.getInstance()
     }
     parentGroup?.add(separator, this)
@@ -1108,14 +1103,20 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
     for (listener in actionListeners) {
       listener.beforeEditorTyping(c, dataContext)
     }
-    publisher().beforeEditorTyping(c, dataContext)
+    //maybe readaction
+    WriteIntentReadAction.run {
+      publisher().beforeEditorTyping(c, dataContext)
+    }
   }
 
   override fun fireAfterEditorTyping(c: Char, dataContext: DataContext) {
     for (listener in actionListeners) {
       listener.afterEditorTyping(c, dataContext)
     }
-    publisher().afterEditorTyping(c, dataContext)
+    //maybe readaction
+    WriteIntentReadAction.run {
+      publisher().afterEditorTyping(c, dataContext)
+    }
   }
 
   val actionIds: Set<String>
@@ -1191,7 +1192,10 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
       result.isPerformed -> Unit
       result.failureCause is IndexNotReadyException -> {
         LOG.info(result.failureCause)
-        showDumbModeWarning(project, action, event)
+        if (project != null) {
+          val dumbServiceImpl = DumbService.getInstance(project) as DumbServiceImpl
+          dumbServiceImpl.showDumbModeNotificationForFailedAction(getActionUnavailableMessage(event.presentation.text), getId(action))
+        }
       }
       else -> throw result.failureCause
     }
@@ -1228,7 +1232,7 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
     else {
       service<CoreUiCoroutineScopeHolder>().coroutineScope.launch(Dispatchers.EDT) {
         try {
-          tryToExecuteSuspend(action, place, contextComponent, inputEvent, result)
+          tryToExecuteSuspend(action, place, contextComponent, inputEvent, this@ActionManagerImpl, result)
         }
         finally {
           if (!result.isProcessed) {
@@ -1253,7 +1257,6 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
     val listeners: MutableList<TimerListener> = ContainerUtil.createLockFreeCopyOnWriteList()
 
     private var lastTimePerformed = 0
-    private val clientId = ClientId.current
 
     init {
       val connection = ApplicationManager.getApplication().messageBus.simpleConnect()
@@ -1302,11 +1305,8 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
 
       _timerEvents.tryEmit(Unit)
 
-      @Suppress("ForbiddenInSuspectContextMethod")
-      withClientId(clientId).use {
-        for (listener in listeners) {
-          runListenerAction(listener)
-        }
+      for (listener in listeners) {
+        runListenerAction(listener)
       }
     }
   }
@@ -1345,14 +1345,15 @@ private fun tryToExecuteNow(action: AnAction,
                             inputEvent: InputEvent?,
                             result: ActionCallback) {
   val presentationFactory = PresentationFactory()
-  val dataContext = DataManager.getInstance().run {
-    if (contextComponent == null) dataContext else getDataContext(contextComponent)
+  @Suppress("DEPRECATION")
+  val dataContext = DataManager.getInstance().let {
+    if (contextComponent == null) it.dataContext else it.getDataContext(contextComponent)
   }
   val wrappedContext = Utils.createAsyncDataContext(dataContext)
   val componentAdjusted = PlatformDataKeys.CONTEXT_COMPONENT.getData(wrappedContext) ?: contextComponent
   val actionProcessor = object : ActionProcessor() {}
   val inputEventAdjusted = inputEvent ?: KeyEvent(
-    componentAdjusted, KeyEvent.KEY_PRESSED, 0L, 0, KeyEvent.VK_UNDEFINED, '\u0000')
+    componentAdjusted ?: JLabel(), KeyEvent.KEY_PRESSED, 0L, 0, KeyEvent.VK_UNDEFINED, '\u0000')
   val event = Utils.runWithInputEventEdtDispatcher(componentAdjusted) block@{
     Utils.runUpdateSessionForInputEvent(
       listOf(action), inputEventAdjusted, wrappedContext, place, actionProcessor, presentationFactory) { rearranged, updater, events ->
@@ -1375,38 +1376,40 @@ private suspend fun tryToExecuteSuspend(action: AnAction,
                                         place: String,
                                         contextComponent: Component?,
                                         inputEvent: InputEvent?,
+                                        actionManager: ActionManagerImpl,
                                         result: ActionCallback) {
   (if (contextComponent != null) IdeFocusManager.findInstanceByComponent(contextComponent)
   else IdeFocusManager.getGlobalInstance()).awaitFocusSettlesDown()
 
-  val dataContext = DataManager.getInstance().run {
-    if (contextComponent == null) dataContext else getDataContext(contextComponent)
+  @Suppress("DEPRECATION")
+  val dataContext = DataManager.getInstance().let {
+    if (contextComponent == null) it.dataContext else it.getDataContext(contextComponent)
   }
   val wrappedContext = Utils.createAsyncDataContext(dataContext)
 
+  val uiKind = ActionUiKind.NONE
   val presentationFactory = PresentationFactory()
-  Utils.expandActionGroupSuspend(DefaultActionGroup(action), presentationFactory, wrappedContext, place, false, false)
+  Utils.expandActionGroupSuspend(DefaultActionGroup(action), presentationFactory, wrappedContext, place, uiKind, false)
   val presentation = presentationFactory.getPresentation(action)
   val event = if (presentation.isEnabled) AnActionEvent(
-    inputEvent, wrappedContext, place, presentation, ActionManager.getInstance(), 0, false, false)
+    wrappedContext, presentation, place, uiKind, inputEvent, 0, actionManager)
   else null
   if (event != null && event.presentation.isEnabled) {
-    blockingContext {
+    //todo fix all clients and move locks into them
+    writeIntentReadAction {
       doPerformAction(action, event, result)
     }
   }
 }
 
 private class CapturingListener(@JvmField val timerListener: TimerListener) : TimerListener by timerListener {
-  val childContext: ChildContext = createChildContext()
+  val childContext: ChildContext = createChildContext("ActionManager: $timerListener")
 
   override fun run() {
     // this is periodic runnable that is invoked on timer; it should not complete a parent job
-    childContext.runAsCoroutine(completeOnFinish = false, {
-      installThreadContext(childContext.context, true).use {
-        timerListener.run()
-      }
-    })
+    childContext.runInChildContext(completeOnFinish = false) {
+      timerListener.run()
+    }
   }
 }
 
@@ -1464,7 +1467,7 @@ private fun <T> instantiate(stubClassName: String,
   catch (e: ProcessCanceledException) {
     throw e
   }
-  catch (e: ExtensionNotApplicableException) {
+  catch (_: ExtensionNotApplicableException) {
     return null
   }
   catch (e: Throwable) {
@@ -1481,7 +1484,12 @@ private fun <T> instantiate(stubClassName: String,
   return null
 }
 
-private fun updateIconFromStub(stub: ActionStubBase, anAction: AnAction, componentManager: ComponentManager) {
+private fun updateIconFromStub(
+  stub: ActionStubBase,
+  anAction: AnAction,
+  componentManager: ComponentManager,
+  actionSupplier: (String) -> AnAction?,
+) {
   val iconPath = stub.iconPath
   if (iconPath != null) {
     val module = stub.plugin
@@ -1494,7 +1502,7 @@ private fun updateIconFromStub(stub: ActionStubBase, anAction: AnAction, compone
   val customActionsSchema = componentManager.serviceIfCreated<CustomActionsSchema>()
   if (customActionsSchema != null && !customActionsSchema.getIconPath(stub.id).isEmpty()) {
     RecursionManager.doPreventingRecursion<Any?>(stub.id, false) {
-      customActionsSchema.initActionIcon(anAction = anAction, actionId = stub.id, actionManager = ActionManager.getInstance())
+      customActionsSchema.initActionIcon(anAction = anAction, actionId = stub.id, actionSupplier = actionSupplier)
       null
     }
   }
@@ -1522,7 +1530,12 @@ private fun convertGroupStub(stub: ActionGroupStub, actionRegistrar: ActionRegis
       }
     }
   })
-  updateIconFromStub(stub = stub, anAction = group, componentManager = componentManager)
+  updateIconFromStub(
+    stub = stub,
+    anAction = group,
+    componentManager = componentManager,
+    actionSupplier = { actionRegistrar.getAction(it) },
+  )
   return group
 }
 
@@ -1548,12 +1561,12 @@ private fun loadIcon(module: PluginDescriptor, iconPath: String, requestor: Stri
 }
 
 @Suppress("HardCodedStringLiteral")
-private fun computeDescription(bundle: ResourceBundle?,
+private fun computeDescription(bundleSupplier: () -> ResourceBundle?,
                                id: String,
                                elementType: String,
                                descriptionValue: String?,
                                classLoader: ClassLoader): @NlsActions.ActionDescription String? {
-  var effectiveBundle = bundle
+  var effectiveBundle = bundleSupplier()
   if (effectiveBundle != null && DefaultBundleService.isDefaultBundle()) {
     effectiveBundle = DynamicBundle.getResourceBundle(classLoader, effectiveBundle.baseBundleName)
   }
@@ -1561,12 +1574,12 @@ private fun computeDescription(bundle: ResourceBundle?,
 }
 
 @Suppress("HardCodedStringLiteral")
-private fun computeActionText(bundle: ResourceBundle?,
+private fun computeActionText(bundleSupplier: () -> ResourceBundle?,
                               id: String,
                               elementType: String,
                               textValue: String?,
                               classLoader: ClassLoader): @NlsActions.ActionText String? {
-  var effectiveBundle = bundle
+  var effectiveBundle = bundleSupplier()
   if (effectiveBundle != null && DefaultBundleService.isDefaultBundle()) {
     effectiveBundle = DynamicBundle.getResourceBundle(classLoader, effectiveBundle.baseBundleName)
   }
@@ -1620,7 +1633,7 @@ private fun obtainActionId(element: XmlElement, className: String?): String {
 private fun processOverrideTextNode(action: AnAction,
                                     id: String,
                                     element: XmlElement,
-                                    module: IdeaPluginDescriptor, bundle: ResourceBundle?) {
+                                    module: IdeaPluginDescriptor, bundleSupplier: () -> ResourceBundle?) {
   val place = element.attributes.get("place")
   if (place == null) {
     reportActionError(module, "$id: override-text specified without place")
@@ -1632,11 +1645,12 @@ private fun processOverrideTextNode(action: AnAction,
     action.copyActionTextOverride(useTextOfPlace, place, id)
   }
   else {
+    val bundle = bundleSupplier()
     val text = element.attributes.get(TEXT_ATTR_NAME)
     if (text.isNullOrEmpty() && bundle != null) {
       val prefix = if (action is ActionGroup) "group" else "action"
       val key = "$prefix.$id.$place.text"
-      action.addTextOverride(place) { BundleBase.message(bundle, key) }
+      action.addTextOverride(place) { BundleBase.message(bundleSupplier()!!, key) }
     }
     else {
       action.addTextOverride(place) { text }
@@ -1644,15 +1658,15 @@ private fun processOverrideTextNode(action: AnAction,
   }
 }
 
-private fun processSynonymNode(action: AnAction, element: XmlElement, module: IdeaPluginDescriptor, bundle: ResourceBundle?) {
+private fun processSynonymNode(action: AnAction, element: XmlElement, module: IdeaPluginDescriptor, bundleSupplier: () -> ResourceBundle?) {
   val text = element.attributes.get(TEXT_ATTR_NAME)
   if (!text.isNullOrEmpty()) {
     action.addSynonym { text }
   }
   else {
     val key = element.attributes.get(KEY_ATTR_NAME)
-    if (key != null && bundle != null) {
-      action.addSynonym { BundleBase.message(bundle, key) }
+    if (key != null && bundleSupplier() != null) {
+      action.addSynonym { BundleBase.message(bundleSupplier()!!, key) }
     }
     else {
       reportActionError(module, "Can't process synonym: neither text nor resource bundle key is specified")
@@ -1660,7 +1674,8 @@ private fun processSynonymNode(action: AnAction, element: XmlElement, module: Id
   }
 }
 
-private fun createSeparator(bundle: ResourceBundle?, key: String): Separator {
+private fun createSeparator(bundleSupplier: () -> ResourceBundle?, key: String): Separator {
+  val bundle = bundleSupplier()
   val text = if (bundle == null) null else AbstractBundle.messageOrNull(bundle, key)
   return if (text == null) Separator.getInstance() else Separator(text)
 }
@@ -1688,15 +1703,16 @@ private fun updateHandlers(action: Any?) {
   }
 }
 
-internal fun convertStub(stub: ActionStub): AnAction? {
+internal fun convertStub(stub: ActionStub, actionSupplier: (String) -> AnAction?): AnAction? {
   val componentManager = ApplicationManager.getApplication() ?: throw AlreadyDisposedException("Application is already disposed")
-  val anAction = instantiate(stubClassName = stub.className,
-                             pluginDescriptor = stub.plugin,
-                             expectedClass = AnAction::class.java,
-                             componentManager = componentManager)
-                 ?: return null
+  val anAction = instantiate(
+    stubClassName = stub.className,
+    pluginDescriptor = stub.plugin,
+    expectedClass = AnAction::class.java,
+    componentManager = componentManager,
+  ) ?: return null
   stub.initAction(anAction)
-  updateIconFromStub(stub = stub, anAction = anAction, componentManager = componentManager)
+  updateIconFromStub(stub = stub, anAction = anAction, componentManager = componentManager, actionSupplier = actionSupplier)
   return anAction
 }
 
@@ -1704,7 +1720,7 @@ private fun configureGroupDescriptionAndIcon(presentation: Presentation,
                                              @NlsSafe description: String?,
                                              textValue: String?,
                                              group: ActionGroup,
-                                             bundle: ResourceBundle?,
+                                             bundleSupplier: () -> ResourceBundle?,
                                              id: String,
                                              classLoader: ClassLoader,
                                              iconPath: String?,
@@ -1712,26 +1728,26 @@ private fun configureGroupDescriptionAndIcon(presentation: Presentation,
                                              className: String?) {
   // don't override value which was set in API with empty value from xml descriptor
   presentation.setFallbackPresentationText {
-    computeActionText(bundle = bundle, id = id, elementType = GROUP_ELEMENT_NAME, textValue = textValue, classLoader = classLoader)
+    computeActionText(bundleSupplier = bundleSupplier, id = id, elementType = GROUP_ELEMENT_NAME, textValue = textValue, classLoader = classLoader)
   }
 
   // description
-  if (bundle == null) {
+  if (bundleSupplier() == null) {
     // don't override value which was set in API with empty value from xml descriptor
     if (!description.isNullOrEmpty() || presentation.description == null) {
       presentation.description = description
     }
   }
   else {
-    val descriptionSupplier = Supplier {
-      computeDescription(bundle = bundle,
+    val descriptionSupplier = {
+      computeDescription(bundleSupplier = bundleSupplier,
                          id = id,
                          elementType = GROUP_ELEMENT_NAME,
                          descriptionValue = description,
                          classLoader = classLoader)
     }
     // don't override value which was set in API with empty value from xml descriptor
-    if (!descriptionSupplier.get().isNullOrEmpty() || presentation.description == null) {
+    if (!descriptionSupplier().isNullOrEmpty() || presentation.description == null) {
       presentation.setDescription(descriptionSupplier)
     }
   }
@@ -1752,27 +1768,28 @@ private fun addToMap(actionId: String,
                      action: AnAction,
                      projectType: ProjectType?,
                      registrar: ActionRegistrar): Boolean {
-  if (existing is ChameleonAction) {
-    return existing.addAction(action, projectType)
-  }
-  else if (existing != null) {
-    // we need to create ChameleonAction even if 'projectType==null', in case 'ActionStub.getProjectType() != null'
-    val chameleonAction = ChameleonAction(existing, null)
-    if (!chameleonAction.addAction(action, projectType)) {
+  val actionSupplier: (String) -> AnAction? = { registrar.getAction(it) }
+  when {
+    existing is ChameleonAction -> {
+      return existing.addAction(action, projectType, actionSupplier)
+    }
+    existing != null -> {
+      // we need to create ChameleonAction even if 'projectType==null', in case 'ActionStub.getProjectType() != null'
+      val chameleonAction = ChameleonAction(actionId, existing, null, actionSupplier)
+      if (chameleonAction.addAction(action, projectType, actionSupplier)) {
+        registrar.putAction(actionId, chameleonAction)
+        return true
+      }
       return false
     }
-
-    registrar.putAction(actionId, chameleonAction)
-    return true
-  }
-  else if (projectType != null) {
-    val chameleonAction = ChameleonAction(action, projectType)
-    registrar.putAction(actionId, chameleonAction)
-    return true
-  }
-  else {
-    registrar.putAction(actionId, action)
-    return true
+    projectType != null -> {
+      registrar.putAction(actionId, ChameleonAction(actionId, action, projectType, actionSupplier))
+      return true
+    }
+    else -> {
+      registrar.putAction(actionId, action)
+      return true
+    }
   }
 }
 
@@ -1836,6 +1853,9 @@ private class PostInitActionRegistrar(
   fun getId(action: AnAction): String? {
     if (action is ActionStubBase) {
       return action.id
+    }
+    if (action is ChameleonAction) {
+      return action.actionId
     }
     synchronized(state.lock) {
       return state.actionToId.get(action)
@@ -2110,7 +2130,12 @@ private fun replaceStub(stub: ActionStubBase, convertedAction: AnAction, actionR
   updateHandlers(convertedAction)
 
   actionRegistrar.state.actionToId.put(convertedAction, stub.id)
-  val result = (if (stub is ActionStub) stub.projectType else null)?.let { ChameleonAction(convertedAction, it) } ?: convertedAction
+
+  val projectType = (stub as? ActionStub)?.projectType
+  val result = when {
+    projectType != null -> ChameleonAction(stub.id, convertedAction, projectType) { actionRegistrar.getAction(it) }
+    else -> convertedAction
+  }
   actionRegistrar.putAction(stub.id, result)
   return result
 }
@@ -2165,14 +2190,19 @@ private fun registerAction(actionId: String,
   actionRegistrar.actionRegistered(actionId, action)
 }
 
-private fun getAction(id: String, canReturnStub: Boolean, actionRegistrar: ActionRegistrar): AnAction? {
+private fun getAction(
+  id: String,
+  canReturnStub: Boolean,
+  actionRegistrar: ActionRegistrar,
+  actionSupplier: (String) -> AnAction? = { actionRegistrar.getAction(it) },
+): AnAction? {
   var action = actionRegistrar.getAction(id)
   if (canReturnStub || action !is ActionStubBase) {
     return action
   }
 
   val converted = if (action is ActionStub) {
-    convertStub(action)
+    convertStub(stub = action, actionSupplier = actionSupplier)
   }
   else {
     convertGroupStub(stub = action as ActionGroupStub, actionRegistrar = actionRegistrar)
@@ -2323,4 +2353,28 @@ private fun registerOrReplaceActionInner(element: XmlElement,
     }
     onActionLoadedFromXml(actionId = id, plugin = plugin)
   }
+}
+
+private fun preInitRegistration(
+  idToAction: HashMap<String, AnAction>,
+  actionPreInitRegistrar: ActionPreInitRegistrar,
+  coroutineScope: CoroutineScope,
+): MutableList<ActionConfigurationCustomizer.CustomizeStrategy> {
+  val mutator = PreInitActionRuntimeRegistrar(idToAction = idToAction, actionRegistrar = actionPreInitRegistrar)
+
+  val heavyTasks = mutableListOf<ActionConfigurationCustomizer.CustomizeStrategy>()
+  ActionConfigurationCustomizer.EP.forEachExtensionSafe { extension ->
+    val customizeStrategy = extension.customize()
+    if (customizeStrategy is LightCustomizeStrategy) {
+      // same thread - mutator is not thread-safe by intention
+      // todo use plugin-aware coroutineScope
+      coroutineScope.launch(Dispatchers.Unconfined) {
+        customizeStrategy.customize(mutator)
+      }
+    }
+    else {
+      heavyTasks.add(customizeStrategy)
+    }
+  }
+  return heavyTasks
 }

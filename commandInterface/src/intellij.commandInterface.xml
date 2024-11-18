@@ -1,7 +1,7 @@
 <idea-plugin package="com.intellij.commandInterface">
   <dependencies>
     <!-- uses messages.PyBundle -->
-    <module name="intellij.python.community.impl"/>
+    <plugin id="com.intellij.modules.python"/>
   </dependencies>
   <!--
    Extension points to support gnu command line language.
@@ -16,7 +16,7 @@
                               implementation="com.intellij.commandInterface.commandLine.CommandLineReferenceContributor"/>
     <lang.elementManipulator forClass="com.intellij.commandInterface.commandLine.CommandLineElement"
                              implementationClass="com.intellij.commandInterface.commandLine.CommandLineElementManipulator"/>
-    <localInspection language="CommandLine" shortName="CommandLineInspection" bundle="com.intellij.commandInterface.CommandInterfaceBundle"
+    <localInspection language="CommandLine" shortName="CommandLineInspection" bundle="messages.CommandInterfaceBundle"
                      key="commandLine.inspection.name"
                      enabledByDefault="true" level="WARNING"
                      groupKey="INSP.GROUP.python"

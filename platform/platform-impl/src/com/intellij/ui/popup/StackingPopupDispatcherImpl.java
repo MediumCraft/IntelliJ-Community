@@ -11,6 +11,7 @@ import com.intellij.ui.ComponentUtil;
 import com.intellij.util.containers.Stack;
 import com.intellij.util.containers.WeakList;
 import com.intellij.util.ui.StartupUiUtil;
+import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -21,6 +22,7 @@ import java.awt.event.*;
 import java.util.Collection;
 import java.util.stream.Stream;
 
+@ApiStatus.Internal
 public final class StackingPopupDispatcherImpl extends StackingPopupDispatcher implements AWTEventListener, KeyEventDispatcher {
 
   private final Stack<JBPopup> myStack = new Stack<>();
@@ -107,7 +109,7 @@ public final class StackingPopupDispatcherImpl extends StackingPopupDispatcher i
           return false;
         }
         final Component content = popup.getContent();
-        if (!content.isShowing()) {
+        if (!UIUtil.isShowing(content)) {
           popup.cancel();
           return false;
         }

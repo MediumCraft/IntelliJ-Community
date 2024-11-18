@@ -1,4 +1,4 @@
-// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.idea.searching.usages
 
@@ -8,16 +8,20 @@ import com.intellij.psi.PsiReference
 import com.intellij.psi.search.SearchScope
 import com.intellij.psi.search.searches.ClassInheritorsSearch
 import com.intellij.util.Processor
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
-import org.jetbrains.kotlin.analysis.api.calls.*
+import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
+import org.jetbrains.kotlin.analysis.api.KaSession
+import org.jetbrains.kotlin.analysis.api.analyze
 import org.jetbrains.kotlin.analysis.api.renderer.base.annotations.KaRendererAnnotationsFilter
-import org.jetbrains.kotlin.analysis.api.renderer.declarations.KtDeclarationRenderer
-import org.jetbrains.kotlin.analysis.api.renderer.declarations.impl.KtDeclarationRendererForSource
-import org.jetbrains.kotlin.analysis.api.symbols.KtCallableSymbol
-import org.jetbrains.kotlin.analysis.api.symbols.KtClassLikeSymbol
-import org.jetbrains.kotlin.analysis.api.symbols.KtConstructorSymbol
-import org.jetbrains.kotlin.analysis.api.symbols.KtDeclarationSymbol
-import org.jetbrains.kotlin.asJava.unwrapped
+import org.jetbrains.kotlin.analysis.api.renderer.declarations.KaDeclarationRenderer
+import org.jetbrains.kotlin.analysis.api.renderer.declarations.impl.KaDeclarationRendererForSource
+import org.jetbrains.kotlin.analysis.api.resolution.KaCall
+import org.jetbrains.kotlin.analysis.api.resolution.KaCallableMemberCall
+import org.jetbrains.kotlin.analysis.api.resolution.KaFunctionCall
+import org.jetbrains.kotlin.analysis.api.resolution.symbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaCallableSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaClassLikeSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaConstructorSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaDeclarationSymbol
 import org.jetbrains.kotlin.idea.base.analysis.api.utils.analyzeInModalWindow
 import org.jetbrains.kotlin.idea.base.analysis.api.utils.getImplicitReceivers
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
@@ -60,35 +64,39 @@ internal class KotlinK2FindUsagesSupport : KotlinFindUsagesSupport {
         })
     }
 
-    context(KtAnalysisSession)
-    private fun callReceiverRefersToCompanionObject(call: KtCall, companionObject: KtObjectDeclaration): Boolean {
-        if (call !is KtCallableMemberCall<*, *>) return false
+    context(KaSession)
+    private fun callReceiverRefersToCompanionObject(call: KaCall, companionObject: KtObjectDeclaration): Boolean {
+        if (call !is KaCallableMemberCall<*, *>) return false
         val implicitReceivers = call.getImplicitReceivers()
-        val companionObjectSymbol = companionObject.getSymbol()
+        val companionObjectSymbol = companionObject.symbol
         return companionObjectSymbol in implicitReceivers.map { it.symbol }
     }
 
+    @OptIn(KaExperimentalApi::class)
     override fun tryRenderDeclarationCompactStyle(declaration: KtDeclaration): String {
         return KotlinPsiDeclarationRenderer.render(declaration) ?: analyzeInModalWindow(declaration, KotlinBundle.message(
           "find.usages.prepare.dialog.progress")) {
-            declaration.getSymbol().render(noAnnotationsShortNameRenderer())
+            declaration.symbol.render(noAnnotationsShortNameRenderer())
         }
     }
 
-    private fun noAnnotationsShortNameRenderer(): KtDeclarationRenderer {
-        return KtDeclarationRendererForSource.WITH_SHORT_NAMES.with {
+    @KaExperimentalApi
+    private fun noAnnotationsShortNameRenderer(): KaDeclarationRenderer {
+        return KaDeclarationRendererForSource.WITH_SHORT_NAMES.with {
             annotationRenderer = annotationRenderer.with {
                 annotationFilter = KaRendererAnnotationsFilter.NONE
             }
         }
     }
 
+    @OptIn(KaExperimentalApi::class)
     override fun renderDeclaration(method: KtDeclaration): String {
         return KotlinPsiDeclarationRenderer.render(method) ?: analyzeInModalWindow(method, KotlinBundle.message("find.usages.prepare.dialog.progress")) {
-            method.getSymbol().render(noAnnotationsShortNameRenderer())
+            method.symbol.render(noAnnotationsShortNameRenderer())
         }
     }
 
+    @OptIn(KaExperimentalApi::class)
     override fun isKotlinConstructorUsage(psiReference: PsiReference, ktClassOrObject: KtClassOrObject): Boolean {
         val element = psiReference.element
         if (element !is KtElement) return false
@@ -101,30 +109,34 @@ internal class KotlinK2FindUsagesSupport : KotlinFindUsagesSupport {
         }
 
         val psiToResolve = adaptSuperCall(element) ?: element
+        return analyze(psiToResolve) {
+            // The element cannot refer classes from unrelated sessions
+            if (!ktClassOrObject.canBeAnalysed()) return false
 
-        return withResolvedCall(psiToResolve) { call ->
-            when (call) {
-                is KtFunctionCall<*> -> {
-                    val constructorSymbol = call.symbol as? KtConstructorSymbol ?: return@withResolvedCall false
-                    val constructedClassSymbol =
-                        constructorSymbol.getContainingSymbol() as? KtClassLikeSymbol ?: return@withResolvedCall false
-                    val classOrObjectSymbol = ktClassOrObject.getClassOrObjectSymbol()
+            withResolvedCall(psiToResolve) { call ->
+                when (call) {
+                    is KaFunctionCall<*> -> {
+                        val constructorSymbol = call.symbol as? KaConstructorSymbol ?: return@withResolvedCall false
+                        val constructedClassSymbol =
+                            constructorSymbol.containingDeclaration as? KaClassLikeSymbol ?: return@withResolvedCall false
+                        val classOrObjectSymbol = ktClassOrObject.classSymbol
 
-                    fun KtClassLikeSymbol.getExpectsOrSelf(): List<KtDeclarationSymbol> = (listOf(this).takeIf { isExpect } ?: getExpectsForActual())
+                        fun KaClassLikeSymbol.getExpectsOrSelf(): List<KaDeclarationSymbol> = (listOf(this).takeIf { isExpect } ?: getExpectsForActual())
 
-                    constructedClassSymbol == classOrObjectSymbol ||
-                            constructedClassSymbol.getExpectsOrSelf() == classOrObjectSymbol?.getExpectsOrSelf()
+                        constructedClassSymbol == classOrObjectSymbol ||
+                                constructedClassSymbol.getExpectsOrSelf() == classOrObjectSymbol?.getExpectsOrSelf()
+                    }
+
+                    else -> false
                 }
-
-                else -> false
-            }
-        } ?: false
+            } == true
+        }
     }
 
     override fun getSuperMethods(declaration: KtDeclaration, ignore: Collection<PsiElement>?): List<PsiElement> {
         if (!declaration.hasModifier(KtTokens.OVERRIDE_KEYWORD)) return emptyList()
         return analyzeInModalWindow(declaration, KotlinBundle.message("find.usages.progress.text.declaration.superMethods")) {
-            (declaration.getSymbol() as? KtCallableSymbol)?.getAllOverriddenSymbols()?.mapNotNull { it.psi }?.toList().orEmpty()
+            (declaration.symbol as? KaCallableSymbol)?.allOverriddenSymbols?.mapNotNull { it.psi }?.toList().orEmpty()
         }
     }
 

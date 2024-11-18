@@ -58,7 +58,7 @@ sealed class KotlinNameReferencePositionContext : KotlinRawPositionContext() {
     abstract val nameExpression: KtElement
     abstract val explicitReceiver: KtElement?
 
-    abstract fun getName(): Name
+    abstract val name: Name
 }
 
 sealed class KotlinSimpleNameReferencePositionContext : KotlinNameReferencePositionContext() {
@@ -66,7 +66,8 @@ sealed class KotlinSimpleNameReferencePositionContext : KotlinNameReferencePosit
     abstract override val nameExpression: KtSimpleNameExpression
     abstract override val explicitReceiver: KtExpression?
 
-    override fun getName(): Name = nameExpression.getReferencedNameAsName()
+    override val name: Name
+        get() = nameExpression.getReferencedNameAsName()
 }
 
 class KotlinImportDirectivePositionContext(
@@ -132,8 +133,7 @@ class KotlinSuperReceiverNameReferencePositionContext(
     override val position: PsiElement,
     override val reference: KtSimpleNameReference,
     override val nameExpression: KtSimpleNameExpression,
-    override val explicitReceiver: KtExpression?,
-    val superExpression: KtSuperExpression,
+    override val explicitReceiver: KtSuperExpression,
 ) : KotlinSimpleNameReferencePositionContext()
 
 class KotlinExpressionNameReferencePositionContext(
@@ -168,6 +168,21 @@ class KotlinCallableReferencePositionContext(
 ) : KotlinSimpleNameReferencePositionContext()
 
 /**
+ * Position in label reference expression, e.g.:
+ * * `break@r<caret>ef`
+ * * `continue@r<caret>ef`
+ * * `this@r<caret>ef`
+ * * `super@r<caret>ef`
+ * * `return@r<caret>ef`
+ */
+class KotlinLabelReferencePositionContext(
+    override val position: PsiElement,
+    override val reference: KtSimpleNameReference,
+    override val nameExpression: KtLabelReferenceExpression,
+    override val explicitReceiver: KtExpression?,
+) : KotlinSimpleNameReferencePositionContext()
+
+/**
  * Position in class body, on which member declaration or class initializer is expected
  *
  * Examples
@@ -191,7 +206,8 @@ sealed class KDocNameReferencePositionContext : KotlinNameReferencePositionConte
     abstract override val nameExpression: KDocName
     abstract override val explicitReceiver: KDocName?
 
-    override fun getName(): Name = nameExpression.getQualifiedNameAsFqName().shortName()
+    override val name: Name
+        get() = nameExpression.getQualifiedNameAsFqName().shortName()
 }
 
 class KDocParameterNamePositionContext(
@@ -247,8 +263,7 @@ object KotlinPositionContextDetector {
     private fun detectForPositionWithSimpleNameReference(position: PsiElement): KotlinRawPositionContext? {
         val reference = (position.parent as? KtSimpleNameExpression)?.mainReference
             ?: return null
-        val nameExpression = reference.expression.takeIf { it !is KtLabelReferenceExpression }
-            ?: return null
+        val nameExpression = reference.expression
         val explicitReceiver = nameExpression.getReceiverExpression()
         val parent = nameExpression.parent
         val subjectExpressionForWhenCondition = (parent as? KtWhenCondition)?.getSubjectExpression()
@@ -305,12 +320,15 @@ object KotlinPositionContextDetector {
             }
 
             explicitReceiver is KtSuperExpression -> KotlinSuperReceiverNameReferencePositionContext(
-                position,
-                reference,
-                nameExpression,
-                explicitReceiver,
-                explicitReceiver
+                position = position,
+                reference = reference,
+                nameExpression = nameExpression,
+                explicitReceiver = explicitReceiver,
             )
+
+            nameExpression is KtLabelReferenceExpression -> {
+                KotlinLabelReferencePositionContext(position, reference, nameExpression, explicitReceiver)
+            }
 
             else -> {
                 KotlinExpressionNameReferencePositionContext(position, reference, nameExpression, explicitReceiver)

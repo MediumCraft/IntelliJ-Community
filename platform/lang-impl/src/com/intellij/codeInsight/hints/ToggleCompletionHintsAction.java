@@ -9,15 +9,11 @@ import com.intellij.openapi.actionSystem.ToggleAction;
 import com.intellij.openapi.actionSystem.remoting.ActionRemoteBehavior;
 import com.intellij.openapi.actionSystem.remoting.ActionRemoteBehaviorSpecification;
 import com.intellij.psi.PsiFile;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 
-public final class ToggleCompletionHintsAction extends ToggleAction implements ActionRemoteBehaviorSpecification {
-
-  @NotNull
-  @Override
-  public ActionRemoteBehavior getBehavior() {
-    return ActionRemoteBehavior.BackendOnly;
-  }
+@ApiStatus.Internal
+public final class ToggleCompletionHintsAction extends ToggleAction implements ActionRemoteBehaviorSpecification.BackendOnly {
 
   @Override
   public @NotNull ActionUpdateThread getActionUpdateThread() {

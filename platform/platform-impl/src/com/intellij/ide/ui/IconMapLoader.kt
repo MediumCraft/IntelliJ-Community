@@ -10,20 +10,21 @@ import com.intellij.diagnostic.PluginException
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.extensions.LazyExtension
-import com.intellij.openapi.util.text.StringUtil
 import com.intellij.util.ResourceUtil
 import com.intellij.util.containers.CollectionFactory
 import kotlinx.coroutines.*
+import org.jetbrains.annotations.ApiStatus
 import java.util.*
 import java.util.concurrent.atomic.AtomicReference
 import java.util.function.BiFunction
 
+@ApiStatus.Internal
 @Service(Service.Level.APP)
 class IconMapLoader {
   private val cachedResult = AtomicReference<Map<ClassLoader, Map<String, String>>>()
 
-  internal suspend fun preloadIconMapping() {
-    if (!IconMapperBean.EP_NAME.hasAnyExtensions() && !IconMapperBean.EP_NAME_REVERSE.hasAnyExtensions()) {
+  suspend fun preloadIconMapping() {
+    if (!IconMapperBean.EP_NAME.hasAnyExtensions()) {
       cachedResult.compareAndSet(null, emptyMap())
       return
     }
@@ -41,15 +42,6 @@ class IconMapLoader {
   @OptIn(ExperimentalCoroutinesApi::class)
   suspend fun doLoadIconMapping(): MutableMap<ClassLoader, MutableMap<String, String>> {
     val list = coroutineScope {
-      val reverseIterator = IconMapperBean.EP_NAME_REVERSE.filterableLazySequence().iterator()
-      if (reverseIterator.hasNext()) {
-        return@coroutineScope listOf(async {
-          loadFromExtension(reverseIterator.next()) { data, result ->
-            StringUtil.splitByLines(String(data)).forEach { result[it] = it }
-          }
-        })
-      }
-
       val jsonFactory = JsonFactory()
       IconMapperBean.EP_NAME.filterableLazySequence().map { extension ->
         async {

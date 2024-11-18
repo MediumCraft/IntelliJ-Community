@@ -125,11 +125,9 @@ class EditorFactoryImpl(coroutineScope: CoroutineScope?) : EditorFactory() {
   }
 
   override fun refreshAllEditors() {
-    for (clientEditorManager in ClientEditorManager.getAllInstances()) {
-      for (editor in clientEditorManager.editors) {
-        if (isEditorLoaded(editor)) {
-          (editor as EditorEx).reinitSettings()
-        }
+    for (editor in ClientEditorManager.getCurrentInstance().editors) {
+      if (isEditorLoaded(editor)) {
+        (editor as EditorEx).reinitSettings()
       }
     }
   }
@@ -158,19 +156,19 @@ class EditorFactoryImpl(coroutineScope: CoroutineScope?) : EditorFactory() {
     return createEditor(document = document, isViewer = true, project = project, kind = kind)
   }
 
-  override fun createEditor(document: Document, project: Project, fileType: FileType, isViewer: Boolean): Editor {
+  override fun createEditor(document: Document, project: Project?, fileType: FileType, isViewer: Boolean): Editor {
     val editor = createEditor(document = document, isViewer = isViewer, project = project, kind = EditorKind.UNTYPED)
     editor.highlighter = EditorHighlighterFactory.getInstance().createEditorHighlighter(project, fileType)
     return editor
   }
 
-  override fun createEditor(document: Document, project: Project, file: VirtualFile, isViewer: Boolean): Editor {
+  override fun createEditor(document: Document, project: Project?, file: VirtualFile, isViewer: Boolean): Editor {
     val editor = createEditor(document = document, isViewer = isViewer, project = project, kind = EditorKind.UNTYPED)
     editor.highlighter = EditorHighlighterFactory.getInstance().createEditorHighlighter(project, file)
     return editor
   }
 
-  override fun createEditor(document: Document, project: Project, file: VirtualFile, isViewer: Boolean, kind: EditorKind): Editor {
+  override fun createEditor(document: Document, project: Project?, file: VirtualFile, isViewer: Boolean, kind: EditorKind): Editor {
     val editor = createEditor(document = document, isViewer = isViewer, project = project, kind = kind)
     editor.highlighter = EditorHighlighterFactory.getInstance().createEditorHighlighter(project, file)
     return editor
@@ -182,9 +180,23 @@ class EditorFactoryImpl(coroutineScope: CoroutineScope?) : EditorFactory() {
   }
 
   @ApiStatus.Internal
-  fun createMainEditor(document: Document, project: Project, file: VirtualFile, highlighter: EditorHighlighter?, afterCreation: ((EditorImpl) -> Unit)?): EditorImpl {
+  fun createMainEditor(
+    document: Document,
+    project: Project,
+    file: VirtualFile,
+    highlighter: EditorHighlighter?,
+    afterCreation: ((EditorImpl) -> Unit)?,
+  ): EditorImpl {
     assert(document !is DocumentWindow)
-    return doCreateEditor(project = project, document = document, isViewer = false, kind = EditorKind.MAIN_EDITOR, file = file, highlighter = highlighter, afterCreation = afterCreation)
+    return doCreateEditor(
+      project = project,
+      document = document,
+      isViewer = false,
+      kind = EditorKind.MAIN_EDITOR,
+      file = file,
+      highlighter = highlighter,
+      afterCreation = afterCreation,
+    )
   }
 
   private fun doCreateEditor(
@@ -197,6 +209,7 @@ class EditorFactoryImpl(coroutineScope: CoroutineScope?) : EditorFactory() {
     afterCreation: ((EditorImpl) -> Unit)?,
   ): EditorImpl {
     val editor = EditorImpl(document, isViewer, project, kind, file, highlighter)
+    editor.putEditorId()
     // must be _before_ event firing
     afterCreation?.invoke(editor)
 

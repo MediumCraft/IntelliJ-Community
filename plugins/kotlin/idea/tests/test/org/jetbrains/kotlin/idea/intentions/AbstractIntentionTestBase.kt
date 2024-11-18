@@ -1,4 +1,4 @@
-// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.idea.intentions
 
@@ -12,21 +12,23 @@ import com.intellij.modcommand.ModCommandExecutor
 import com.intellij.openapi.application.runReadAction
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.util.SystemInfo
 import com.intellij.openapi.util.ThrowableComputable
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.util.text.StringUtil
+import com.intellij.platform.testFramework.core.FileComparisonFailedError
 import com.intellij.psi.PsiFile
 import com.intellij.refactoring.BaseRefactoringProcessor
 import com.intellij.refactoring.util.CommonRefactoringUtil
-import com.intellij.rt.execution.junit.FileComparisonData
 import com.intellij.testFramework.PsiTestUtil
 import com.intellij.util.ThrowableRunnable
+import com.intellij.util.ui.UIUtil
 import junit.framework.TestCase
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.kotlin.formatter.FormatSettingsUtil
 import org.jetbrains.kotlin.idea.KotlinLanguage
+import org.jetbrains.kotlin.idea.base.test.IgnoreTests
 import org.jetbrains.kotlin.idea.base.test.InTextDirectivesUtils
+import org.jetbrains.kotlin.idea.base.test.KotlinTestHelpers
 import org.jetbrains.kotlin.idea.codeInsight.hints.KotlinAbstractHintsProvider
 import org.jetbrains.kotlin.idea.core.script.ScriptConfigurationManager
 import org.jetbrains.kotlin.idea.test.*
@@ -138,7 +140,7 @@ abstract class AbstractIntentionTestBase : KotlinLightCodeInsightFixtureTestCase
                         TestCase.assertTrue("\"<caret>\" is missing in file \"$mainFile\"", fileText.contains("<caret>"))
 
                         InTextDirectivesUtils.findStringWithPrefixes(fileText, "// MIN_JAVA_VERSION: ")?.let { minJavaVersion ->
-                            if (!SystemInfo.isJavaVersionAtLeast(minJavaVersion)) return@configureRegistryAndRun
+                            if (Runtime.version().feature() < minJavaVersion.toInt()) return@configureRegistryAndRun
                         }
 
                         checkForErrorsBefore(fileText)
@@ -159,9 +161,11 @@ abstract class AbstractIntentionTestBase : KotlinLightCodeInsightFixtureTestCase
     protected open fun checkForErrorsAfter(fileText: String) {
         val file = this.file
 
+        val disableTestDirective = IgnoreTests.DIRECTIVES.of(pluginMode)
         if (file is KtFile &&
             isApplicableDirective(fileText) &&
-            !InTextDirectivesUtils.isDirectiveDefined(fileText, "// SKIP_ERRORS_AFTER")
+            !InTextDirectivesUtils.isDirectiveDefined(fileText, "// SKIP_ERRORS_AFTER") &&
+            !InTextDirectivesUtils.isDirectiveDefined(fileText, disableTestDirective)
         ) {
             if (!InTextDirectivesUtils.isDirectiveDefined(fileText, "// SKIP_WARNINGS_AFTER")) {
                 DirectiveBasedActionUtils.checkForUnexpectedWarnings(
@@ -178,7 +182,11 @@ abstract class AbstractIntentionTestBase : KotlinLightCodeInsightFixtureTestCase
     protected open fun checkForErrorsBefore(fileText: String) {
         val file = this.file
 
-        if (file is KtFile && !InTextDirectivesUtils.isDirectiveDefined(fileText, "// SKIP_ERRORS_BEFORE")) {
+        val disableTestDirective = IgnoreTests.DIRECTIVES.of(pluginMode)
+        if (file is KtFile &&
+            !InTextDirectivesUtils.isDirectiveDefined(fileText, "// SKIP_ERRORS_BEFORE") &&
+            !InTextDirectivesUtils.isDirectiveDefined(fileText, disableTestDirective)
+        ) {
             DirectiveBasedActionUtils.checkForUnexpectedErrors(file)
         }
     }
@@ -205,6 +213,8 @@ abstract class AbstractIntentionTestBase : KotlinLightCodeInsightFixtureTestCase
             )
         }
 
+        DirectiveBasedActionUtils.checkPriority(fileText, intentionAction)
+
         val intentionTextString = InTextDirectivesUtils.findStringWithPrefixes(fileText, "// " + intentionTextDirectiveName() + ": ")
 
         if (intentionTextString != null) {
@@ -215,6 +225,8 @@ abstract class AbstractIntentionTestBase : KotlinLightCodeInsightFixtureTestCase
 
         try {
             if (isApplicableExpected) {
+                KotlinTestHelpers.registerChooserInterceptor(myFixture.testRootDisposable) { options -> options.last() }
+
                 val action = { intentionAction.invoke(project, editor, file) }
                 if (intentionAction.startInWriteAction()) {
                     project.executeWriteCommand(intentionAction.text, action)
@@ -233,6 +245,7 @@ abstract class AbstractIntentionTestBase : KotlinLightCodeInsightFixtureTestCase
                         }
                     }
                 }
+                UIUtil.dispatchAllInvocationEvents()
 
                 // Don't bother checking if it should have failed.
                 if (shouldFailString.isEmpty()) {
@@ -242,8 +255,7 @@ abstract class AbstractIntentionTestBase : KotlinLightCodeInsightFixtureTestCase
                         if (filePath == mainFilePath) {
                             try {
                                 myFixture.checkResultByFile(canonicalPathToExpectedFile)
-                            } catch (e: AssertionError) {
-                                if (e !is FileComparisonData) throw e
+                            } catch (_: FileComparisonFailedError) {
                                 KotlinTestUtils.assertEqualsToFile(afterFile, editor.document.text)
                             }
                         } else {

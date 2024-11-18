@@ -278,7 +278,7 @@ public final class VcsSelectionHistoryDialog extends FrameWrapper implements Dat
       IntPair range = getSelectedRevisionsRange(data);
       List<VcsFileRevision> oldSelection = data.getRevisions().subList(range.first, range.second);
 
-      myListModel.setItems(newItems);
+      myListModel.setItems(new ArrayList<>(newItems));
 
       myList.setSelection(oldSelection);
       if (myList.getSelectedRowCount() == 0) {
@@ -610,11 +610,7 @@ public final class VcsSelectionHistoryDialog extends FrameWrapper implements Dat
     @NotNull
     private String loadContents(@NotNull VcsFileRevision revision) throws VcsException {
       try {
-        byte[] bytes = revision.loadContent();
-        if (bytes == null) {
-          throw new VcsException(VcsBundle.message("history.failed.to.load.content.for.revision.0",
-                                                   revision.getRevisionNumber().asString()));
-        }
+        byte[] bytes = VcsHistoryUtil.loadRevisionContent(revision);
         return new String(bytes, myFile.getCharset());
       }
       catch (IOException e) {

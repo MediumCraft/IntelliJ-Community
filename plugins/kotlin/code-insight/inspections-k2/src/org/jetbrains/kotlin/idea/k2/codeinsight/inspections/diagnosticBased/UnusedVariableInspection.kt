@@ -3,11 +3,12 @@
 package org.jetbrains.kotlin.idea.k2.codeinsight.inspections.diagnosticBased
 
 import com.intellij.codeInspection.ProblemsHolder
+import com.intellij.lang.injection.InjectedLanguageManager
 import com.intellij.modcommand.ModPsiUpdater
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.TextRange
 import com.intellij.psi.createSmartPointer
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
+import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.fir.diagnostics.KaFirDiagnostic
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.codeinsight.api.applicable.asUnit
@@ -26,10 +27,16 @@ internal class UnusedVariableInspection :
     override fun buildVisitor(
         holder: ProblemsHolder,
         isOnTheFly: Boolean,
-    ) = object : KtVisitorVoid() {
-
-        override fun visitNamedDeclaration(declaration: KtNamedDeclaration) {
-            visitTargetElement(declaration, holder, isOnTheFly)
+    ): KtVisitorVoid {
+        val file = holder.file
+        return if (file !is KtFile || InjectedLanguageManager.getInstance(holder.project).isInjectedViewProvider(file.viewProvider)) {
+            KtVisitorVoid()
+        } else {
+            object : KtVisitorVoid() {
+                override fun visitNamedDeclaration(declaration: KtNamedDeclaration) {
+                    visitTargetElement(declaration, holder, isOnTheFly)
+                }
+            }
         }
     }
 
@@ -44,7 +51,7 @@ internal class UnusedVariableInspection :
     override fun getApplicableRanges(element: KtNamedDeclaration): List<TextRange> =
         ApplicabilityRanges.declarationName(element)
 
-    context(KtAnalysisSession)
+    context(KaSession)
     override fun prepareContextByDiagnostic(
         element: KtNamedDeclaration,
         diagnostic: KaFirDiagnostic.UnusedVariable,

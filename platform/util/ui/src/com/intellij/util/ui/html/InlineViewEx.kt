@@ -7,6 +7,7 @@ import java.awt.Insets
 import java.awt.Rectangle
 import java.awt.Shape
 import javax.swing.text.Element
+import javax.swing.text.Position
 import javax.swing.text.TabExpander
 import javax.swing.text.View
 import javax.swing.text.html.HTML
@@ -45,6 +46,25 @@ internal class InlineViewEx(elem: Element) : InlineView(elem) {
   @Suppress("ProtectedInFinal")
   @JvmField
   protected var endView: Boolean = false
+
+  private var paintingInTextBounds = false
+
+  override fun viewToModel(x: Float, y: Float, a: Shape, biasReturn: Array<out Position.Bias>): Int {
+    return super.viewToModel(x, y, applyInsets(a), biasReturn)
+  }
+
+  override fun modelToView(pos: Int, a: Shape, b: Position.Bias): Shape {
+    val shape = super.modelToView(pos, a, b)
+    if (paintingInTextBounds) {
+      return shape
+    }
+    // When a caret is painted, we get a shape which was not shrunk to text.
+    // Add insets to paint the caret in the right position:
+    val rect = shape.bounds
+    rect.x += insets.left
+    rect.y += insets.top
+    return rect
+  }
 
   override fun setPropertiesFromAttributes() {
     super.setPropertiesFromAttributes()
@@ -99,13 +119,15 @@ internal class InlineViewEx(elem: Element) : InlineView(elem) {
       noBorderOnTheLeft = !startView,
     )
 
-    // Shrink by padding and margin
-    a.setBounds(a.x + insets.left, a.y + insets.top,
-                a.width - insets.width,
-                a.height - insets.height)
-    background = null
-    super.paint(g, a)
-    background = bg
+    try {
+      background = null
+      paintingInTextBounds = true
+      super.paint(g, applyInsets(a))
+    }
+    finally {
+      paintingInTextBounds = false
+      background = bg
+    }
   }
 
   override fun getAlignment(axis: Int): Float {
@@ -133,6 +155,16 @@ internal class InlineViewEx(elem: Element) : InlineView(elem) {
       ?.takeIf { it.isNotEmpty() }
     ?: super.getToolTipText(x, y, allocation)
 
+  private fun applyInsets(shape: Shape): Rectangle {
+    // Shrink by padding and margin
+    val result = shape.bounds
+    result.x += insets.left
+    result.y += insets.top
+    result.width -= insets.width
+    result.height -= insets.height
+    return result
+  }
+
   private fun getSibling(parentView: View, curIndex: Int, direction: Int): View? {
     var siblingIndex = curIndex + direction
     val viewCount = parentView.viewCount
@@ -147,18 +179,26 @@ internal class InlineViewEx(elem: Element) : InlineView(elem) {
 
   private fun updatePaddingsAndMargins(force: Boolean) {
     val parentView = parent
-    val index = (0..<parentView.viewCount).firstOrNull { parentView.getView(it) === this } ?: -1
-
-    // Heuristics to determine whether we are within the same inline (e.g. <span>) element with paddings.
-    // Nested inline element insets are not supported, because hierarchy of inline elements is not preserved.
-    val prevSibling = getSibling(parentView, index, -1)
-    val nextSibling = getSibling(parentView, index, 1)
 
     val cssPadding = this.cssPadding
     val cssMargin = this.cssMargin
 
-    val startView = prevSibling?.cssPadding != cssPadding || prevSibling.cssMargin != cssMargin
-    val endView = nextSibling?.cssPadding != cssPadding || nextSibling.cssMargin != cssMargin
+    val startView: Boolean
+    val endView: Boolean
+    if (parentView == null) {
+      startView = true
+      endView = true
+    } else {
+      val index = (0..<parentView.viewCount).firstOrNull { parentView.getView(it) === this } ?: -1
+
+      // Heuristics to determine whether we are within the same inline (e.g. <span>) element with paddings.
+      // Nested inline element insets are not supported, because hierarchy of inline elements is not preserved.
+      val prevSibling = getSibling(parentView, index, -1)
+      val nextSibling = getSibling(parentView, index, 1)
+
+      startView = prevSibling?.cssPadding != cssPadding || prevSibling.cssMargin != cssMargin
+      endView = nextSibling?.cssPadding != cssPadding || nextSibling.cssMargin != cssMargin
+    }
 
     if (!force && startView == this.startView && endView == this.endView) {
       return
@@ -187,5 +227,7 @@ internal class InlineViewEx(elem: Element) : InlineView(elem) {
       padding.right + margin.right,
     )
   }
+
+
 
 }

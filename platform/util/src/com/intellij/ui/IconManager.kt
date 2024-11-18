@@ -60,8 +60,11 @@ interface IconManager {
   /**
    * Path must be specified without a leading slash, in a format for [ClassLoader.getResourceAsStream]
    */
-  @ApiStatus.Internal
+  @Internal
   fun loadRasterizedIcon(path: String, classLoader: ClassLoader, cacheKey: Int, flags: Int): Icon
+
+  @Internal
+  fun loadRasterizedIcon(path: String, expUIPath: String?, classLoader: ClassLoader, cacheKey: Int, flags: Int): Icon
 
   fun createEmptyIcon(icon: Icon): Icon = icon
 
@@ -98,12 +101,15 @@ interface IconManager {
   @ApiStatus.Experimental
   fun colorizedIcon(baseIcon: Icon, colorProvider: () -> Color): Icon = baseIcon
 
-  @ApiStatus.Internal
+  @Internal
   fun hashClass(aClass: Class<*>): Long = aClass.hashCode().toLong()
 
   fun getPluginAndModuleId(classLoader: ClassLoader): Pair<String, String?> = "com.intellij" to null
 
   fun getClassLoader(pluginId: String, moduleId: String?): ClassLoader? = IconManager::class.java.classLoader
+
+  @Internal
+  fun getClassLoaderByClassName(className: String): ClassLoader? = IconManager::class.java.classLoader
 }
 
 private object DummyIconManager : IconManager {
@@ -115,6 +121,9 @@ private object DummyIconManager : IconManager {
   override fun getIcon(path: String, classLoader: ClassLoader): Icon = DummyIconImpl(path)
 
   override fun loadRasterizedIcon(path: String, classLoader: ClassLoader, cacheKey: Int, flags: Int): Icon = DummyIconImpl(path)
+
+  override fun loadRasterizedIcon(path: String, expUIPath: String?, classLoader: ClassLoader, cacheKey: Int, flags: Int): Icon
+    = DummyIconImpl(path, expUIPath)
 
   override fun createLayeredIcon(instance: Iconable, icon: Icon, flags: Int): RowIcon {
     val icons = arrayOfNulls<Icon>(2)
@@ -192,21 +201,23 @@ private class DummyRowIcon : DummyIconImpl, RowIcon {
   override fun replaceBy(replacer: IconReplacer): Icon = this
 }
 
-private open class DummyIconImpl(private val path: String) : ScalableIcon, DummyIcon {
+private open class DummyIconImpl(override val originalPath: String, override val expUIPath: String? = null) : ScalableIcon, DummyIcon {
   override fun paintIcon(c: Component?, g: Graphics, x: Int, y: Int) {
   }
+
+  constructor(path: String) : this(path, null)
 
   override fun getIconWidth(): Int = 16
 
   override fun getIconHeight(): Int = 16
 
-  override fun hashCode(): Int = path.hashCode()
+  override fun hashCode(): Int = originalPath.hashCode()
 
   override fun equals(other: Any?): Boolean {
-    return this === other || other is DummyIconImpl && other.path == path
+    return this === other || other is DummyIconImpl && other.originalPath == originalPath
   }
 
-  override fun toString(): String = path
+  override fun toString(): String = originalPath
 
   override fun getScale(): Float = 1f
 

@@ -695,6 +695,11 @@ public abstract class PerformanceTypingIndentationTestGenerated extends Abstract
                 runTest("../idea/tests/testData/editor/enterHandler/controlFlowConstructions/WhenEntryArrow.after.kt");
             }
 
+            @TestMetadata("WhenEntryArrowNoIndentBeforeArrow.after.kt")
+            public void testWhenEntryArrowNoIndentBeforeArrow() throws Exception {
+                runTest("../idea/tests/testData/editor/enterHandler/controlFlowConstructions/WhenEntryArrowNoIndentBeforeArrow.after.kt");
+            }
+
             @TestMetadata("WhenWithCondition.after.kt")
             public void testWhenWithCondition() throws Exception {
                 runTest("../idea/tests/testData/editor/enterHandler/controlFlowConstructions/WhenWithCondition.after.kt");
@@ -2323,6 +2328,11 @@ public abstract class PerformanceTypingIndentationTestGenerated extends Abstract
             @TestMetadata("SplitStringByEnterExistingParentheses.after.kt")
             public void testSplitStringByEnterExistingParentheses() throws Exception {
                 runTest("../idea/tests/testData/editor/enterHandler/SplitStringByEnterExistingParentheses.after.kt");
+            }
+
+            @TestMetadata("SplitStringByEnterMultiCaret.after.kt")
+            public void testSplitStringByEnterMultiCaret() throws Exception {
+                runTest("../idea/tests/testData/editor/enterHandler/SplitStringByEnterMultiCaret.after.kt");
             }
         }
     }

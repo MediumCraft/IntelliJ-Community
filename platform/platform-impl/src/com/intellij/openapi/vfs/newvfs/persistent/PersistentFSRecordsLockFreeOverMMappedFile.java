@@ -1,12 +1,12 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.vfs.newvfs.persistent;
 
-import com.intellij.util.io.CorruptedException;
-import com.intellij.util.io.IOUtil;
-import com.intellij.util.io.Unmappable;
 import com.intellij.platform.util.io.storages.mmapped.MMappedFileStorage;
 import com.intellij.platform.util.io.storages.mmapped.MMappedFileStorage.Page;
 import com.intellij.serviceContainer.AlreadyDisposedException;
+import com.intellij.util.io.CorruptedException;
+import com.intellij.util.io.IOUtil;
+import com.intellij.util.io.Unmappable;
 import org.intellij.lang.annotations.MagicConstant;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
@@ -177,32 +177,24 @@ public final class PersistentFSRecordsLockFreeOverMMappedFile implements Persist
     wasClosedProperly = (ownerProcessId == NULL_OWNER_PID);
 
 
-    //MAYBE RC: make checkUnAllocatedRegionIsZeroed() public, and instead of ctor -- call it explicitly in NotClosedProperlyRecoverer,
-    //          or even during quick self-check?
-    //          The issue is: we want to check _some_ records even if wasClosedProperly=true, but NotClosedProperlyRecoverer
-    //          is not triggered in this case.
-    //          If wasClosedProperly=false, we want not only to check, but maybe even to 'fix' -- i.e. invalidate all fileIds
-    //          that are found to be allocated beyond maxAllocatedID -- this is there NotClosedProperlyRecoverer comes handy.
-    //          I postpone the decision: right now I think the reason for the non-zero records in >maxAllocateID region is OS
-    //          crash. If that is true (will be checked by EA reports in a few months) => better to avoid trying to recover
-    //          after these cases since:
-    //          a) these cases are too rare
-    //          b) too risky to recover: too many invariants are not guaranteed to hold after OS crash
-    if (wasClosedProperly) {
-      if (UNALLOCATED_RECORDS_TO_CHECK_ZEROED_REGULAR > 0) {
-        checkUnAllocatedRegionIsZeroed(UNALLOCATED_RECORDS_TO_CHECK_ZEROED_REGULAR);
-      }
-    }
-    else {
-      if (UNALLOCATED_RECORDS_TO_CHECK_ZEROED_CRASHED > 0) {
-        checkUnAllocatedRegionIsZeroed(UNALLOCATED_RECORDS_TO_CHECK_ZEROED_CRASHED);
-      }
+    //MAYBE RC: We may try to 'fix' this error, i.e. invalidate all the fileIds that are found to be allocated beyond
+    //          maxAllocatedID, and fill the region > maxAllocatedID with zeroes. But right now I believe the reason
+    //          for the non-zero records in >maxAllocateID region is OS crash (IJPL-1016).
+    //          If this is true, better to avoid trying to recover after such crashes since an attempt to recover is
+    //          too risky: too many invariants are not guaranteed to hold after OS crash, and it is easy to leave VFS
+    //          in an inconsistent state, while being sure everything is successfully recovered.
+    //          Also, OS crashes are rare, so they are not worth the (significant) effort to recover from.
+    int unAllocatedRecordsToCheck = wasClosedProperly ?
+                                    UNALLOCATED_RECORDS_TO_CHECK_ZEROED_REGULAR :
+                                    UNALLOCATED_RECORDS_TO_CHECK_ZEROED_CRASHED;
+    if (unAllocatedRecordsToCheck > 0) {
+      checkUnAllocatedRegionIsZeroed(unAllocatedRecordsToCheck);
     }
   }
 
   @Override
-  public <R, E extends Throwable> R readRecord(int recordId,
-                                               @NotNull RecordReader<R, E> reader) throws E, IOException {
+  public <R> R readRecord(int recordId,
+                          @NotNull RecordReader<R> reader) throws IOException {
     long recordOffsetInFile = recordOffsetInFile(recordId);
     int recordOffsetOnPage = storage.toOffsetInPage(recordOffsetInFile);
     Page page = storage.pageByOffset(recordOffsetInFile);
@@ -211,8 +203,8 @@ public final class PersistentFSRecordsLockFreeOverMMappedFile implements Persist
   }
 
   @Override
-  public <E extends Throwable> int updateRecord(int recordId,
-                                                @NotNull RecordUpdater<E> updater) throws E, IOException {
+  public int updateRecord(int recordId,
+                          @NotNull RecordUpdater updater) throws IOException {
     int trueRecordId = (recordId <= NULL_ID) ?
                        allocateRecord() :
                        recordId;
@@ -229,12 +221,12 @@ public final class PersistentFSRecordsLockFreeOverMMappedFile implements Persist
   }
 
   @Override
-  public <R, E extends Throwable> R readHeader(@NotNull HeaderReader<R, E> reader) throws E, IOException {
+  public <R> R readHeader(@NotNull HeaderReader<R> reader) throws IOException {
     return reader.readHeader(headerAccessor);
   }
 
   @Override
-  public <E extends Throwable> void updateHeader(@NotNull HeaderUpdater<E> updater) throws E, IOException {
+  public void updateHeader(@NotNull HeaderUpdater updater) throws IOException {
     if (updater.updateHeader(headerAccessor)) {
       incrementGlobalModCount();
     }
@@ -410,13 +402,20 @@ public final class PersistentFSRecordsLockFreeOverMMappedFile implements Persist
 
 
   @Override
-  public int allocateRecord() {
+  public int allocateRecord() throws IOException {
     Page headerPage = headerPage();
     ByteBuffer headerPageBuffer = headerPage.rawPageBuffer();
     while (true) {// CAS loop:
       int allocatedRecords = (int)INT_HANDLE.getVolatile(headerPageBuffer, FileHeader.RECORDS_ALLOCATED_OFFSET);
       int newAllocatedRecords = allocatedRecords + 1;
       if (INT_HANDLE.compareAndSet(headerPageBuffer, FileHeader.RECORDS_ALLOCATED_OFFSET, allocatedRecords, newAllocatedRecords)) {
+
+        long recordOffsetInFile = recordOffsetInFile(newAllocatedRecords);
+        int recordOffsetOnPage = storage.toOffsetInPage(recordOffsetInFile);
+        Page page = storage.pageByOffset(recordOffsetInFile);
+        ByteBuffer pageBuffer = page.rawPageBuffer();
+        incrementRecordVersion(pageBuffer, recordOffsetOnPage);
+
         return newAllocatedRecords;
       }
     }
@@ -539,33 +538,6 @@ public final class PersistentFSRecordsLockFreeOverMMappedFile implements Persist
   }
 
   @Override
-  public void fillRecord(int recordId,
-                         long timestamp,
-                         long length,
-                         int flags,
-                         int nameId,
-                         int parentId,
-                         boolean cleanAttributeRef) throws IOException {
-    checkParentIdIsValid(parentId);
-
-    long recordOffsetInFile = recordOffsetInFile(recordId);
-    int recordOffsetOnPage = storage.toOffsetInPage(recordOffsetInFile);
-    Page page = storage.pageByOffset(recordOffsetInFile);
-    ByteBuffer pageBuffer = page.rawPageBuffer();
-    setIntVolatile(pageBuffer, recordOffsetOnPage + RecordLayout.PARENT_REF_OFFSET, parentId);
-    setIntVolatile(pageBuffer, recordOffsetOnPage + RecordLayout.NAME_REF_OFFSET, nameId);
-    setIntVolatile(pageBuffer, recordOffsetOnPage + RecordLayout.FLAGS_OFFSET, flags);
-    if (cleanAttributeRef) {
-      setIntVolatile(pageBuffer, recordOffsetOnPage + RecordLayout.ATTR_REF_OFFSET, 0);
-    }
-    //TODO RC: why not set contentId?
-    setLongVolatile(pageBuffer, recordOffsetOnPage + RecordLayout.TIMESTAMP_OFFSET, timestamp);
-    setLongVolatile(pageBuffer, recordOffsetOnPage + RecordLayout.LENGTH_OFFSET, length);
-
-    incrementRecordVersion(pageBuffer, recordOffsetOnPage);
-  }
-
-  @Override
   public void markRecordAsModified(int recordId) throws IOException {
     long recordOffsetInFile = recordOffsetInFile(recordId);
     int recordOffsetOnPage = storage.toOffsetInPage(recordOffsetInFile);
@@ -591,6 +563,10 @@ public final class PersistentFSRecordsLockFreeOverMMappedFile implements Persist
       int offsetOfWord = recordOffsetOnPage + wordNo * Integer.BYTES;
       setIntVolatile(pageBuffer, offsetOfWord, 0);
     }
+
+    //make storage .dirty: usually it is done automatically, since we inc _global_ modCount while updating _record_ modCount,
+    // but here we don't update record modCount, so must increment global one explicitly
+    incrementGlobalModCount();
   }
 
 
@@ -645,7 +621,7 @@ public final class PersistentFSRecordsLockFreeOverMMappedFile implements Persist
    */
   public @NotNull OwnershipInfo tryAcquireExclusiveAccess(int acquiringProcessId,
                                                           long acquiringTimestampMs,
-                                                          boolean forcibly) {
+                                                          boolean forcibly) throws IOException {
     if (acquiringProcessId == NULL_OWNER_PID) {
       throw new IllegalArgumentException("acquiringPid(=" + acquiringProcessId + ") must be !=0");
     }
@@ -666,6 +642,7 @@ public final class PersistentFSRecordsLockFreeOverMMappedFile implements Persist
       if (INT_HANDLE.compareAndSet(headerPageBuffer, FileHeader.OWNER_PROCESS_ID_OFFSET, currentOwnerProcessId, acquiringProcessId)) {
         owningProcessId = acquiringProcessId;
         LONG_HANDLE.setVolatile(headerPageBuffer, FileHeader.OWNERSHIP_ACQUIRED_TIMESTAMP_OFFSET, acquiringTimestampMs);
+        storage.fsync();//ensure status is persisted
         return new OwnershipInfo(acquiringProcessId, acquiringTimestampMs);
       }
     }
@@ -807,8 +784,8 @@ public final class PersistentFSRecordsLockFreeOverMMappedFile implements Persist
       headerPage = null;
 
       if (currentOwnerPid != NULL_OWNER_PID) {
-        throw new IOException(
-          "Storage is exclusively owned by another process[pid: " + currentOwnerPid + ", our pid: " + ourPid + "]");
+        //important to NOT throw an exception here -- close must be successful regardless of success of ownership acquiring
+        FSRecords.LOG.warn("Storage is exclusively owned by another process[pid: " + currentOwnerPid + ", our pid: " + ourPid + "]");
       }
     }
   }

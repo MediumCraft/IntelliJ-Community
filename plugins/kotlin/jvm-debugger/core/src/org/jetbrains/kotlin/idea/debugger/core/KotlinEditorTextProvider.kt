@@ -11,14 +11,14 @@ import com.intellij.psi.PsiElement
 import com.intellij.psi.util.parents
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.TestOnly
-import org.jetbrains.kotlin.analysis.api.analyze
-import org.jetbrains.kotlin.analysis.api.calls.*
+import org.jetbrains.kotlin.analysis.api.resolution.*
 import org.jetbrains.kotlin.analysis.api.symbols.*
 import org.jetbrains.kotlin.config.LanguageFeature
 import org.jetbrains.kotlin.idea.KotlinFileType
 import org.jetbrains.kotlin.idea.KotlinLanguage
 import org.jetbrains.kotlin.idea.base.projectStructure.languageVersionSettings
 import org.jetbrains.kotlin.idea.base.util.registryFlag
+import org.jetbrains.kotlin.idea.debugger.base.util.runDumbAnalyze
 import org.jetbrains.kotlin.idea.references.mainReference
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.psi.*
@@ -142,25 +142,25 @@ private object AnalysisApiBasedKotlinEditorTextProvider : KotlinEditorTextProvid
         }
     }
 
-    private fun isReferenceAllowed(reference: KtReferenceExpression, allowMethodCalls: Boolean): Boolean = analyze(reference) {
+    private fun isReferenceAllowed(reference: KtReferenceExpression, allowMethodCalls: Boolean): Boolean = runDumbAnalyze(reference, fallback = false) f@ {
         when {
-            reference is KtBinaryExpressionWithTypeRHS -> return true
-            reference is KtOperationReferenceExpression && reference.operationSignTokenType == KtTokens.ELVIS -> return true
-            reference is KtCollectionLiteralExpression -> return false
+            reference is KtBinaryExpressionWithTypeRHS -> return@f true
+            reference is KtOperationReferenceExpression && reference.operationSignTokenType == KtTokens.ELVIS -> return@f true
+            reference is KtCollectionLiteralExpression -> return@f false
             reference is KtCallExpression -> {
-                val callInfo = reference.resolveCall() as? KtSuccessCallInfo ?: return false
+                val callInfo = reference.resolveToCall() as? KaSuccessCallInfo ?: return@f false
 
-                return when (val call = callInfo.call) {
-                    is KtAnnotationCall -> {
+                return@f when (val call = callInfo.call) {
+                    is KaAnnotationCall -> {
                         val languageVersionSettings = reference.languageVersionSettings
                         languageVersionSettings.supportsFeature(LanguageFeature.InstantiationOfAnnotationClasses)
                     }
-                    is KtFunctionCall<*> -> {
+                    is KaFunctionCall<*> -> {
                         val functionSymbol = call.partiallyAppliedSymbol.symbol
                         isSymbolAllowed(functionSymbol, allowMethodCalls)
                     }
-                    is KtCompoundVariableAccessCall -> {
-                        val functionSymbol = call.compoundAccess.operationPartiallyAppliedSymbol.symbol
+                    is KaCompoundVariableAccessCall -> {
+                        val functionSymbol = call.compoundOperation.operationPartiallyAppliedSymbol.symbol
                         isSymbolAllowed(functionSymbol, allowMethodCalls)
                     }
                     else -> false
@@ -168,16 +168,16 @@ private object AnalysisApiBasedKotlinEditorTextProvider : KotlinEditorTextProvid
             }
             else -> {
                 val symbol = reference.mainReference.resolveToSymbol()
-                return symbol == null || isSymbolAllowed(symbol, allowMethodCalls)
+                return@f symbol == null || isSymbolAllowed(symbol, allowMethodCalls)
             }
         }
     }
 
-    private fun isSymbolAllowed(symbol: KtSymbol, allowMethodCalls: Boolean): Boolean {
+    private fun isSymbolAllowed(symbol: KaSymbol, allowMethodCalls: Boolean): Boolean {
         return when (symbol) {
-            is KtClassOrObjectSymbol -> symbol.classKind.isObject
-            is KtFunctionLikeSymbol -> allowMethodCalls
-            is KtVariableSymbol, is KtValueParameterSymbol, is KtEnumEntrySymbol -> true
+            is KaClassSymbol -> symbol.classKind.isObject
+            is KaFunctionSymbol -> allowMethodCalls
+            is KaPropertySymbol, is KaJavaFieldSymbol, is KaLocalVariableSymbol, is KaValueParameterSymbol, is KaEnumEntrySymbol -> true
             else -> false
         }
     }

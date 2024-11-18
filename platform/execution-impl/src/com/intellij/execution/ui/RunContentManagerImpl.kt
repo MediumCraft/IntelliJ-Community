@@ -19,7 +19,7 @@ import com.intellij.execution.ui.layout.impl.DockableGridContainerFactory
 import com.intellij.ide.plugins.DynamicPluginListener
 import com.intellij.ide.plugins.IdeaPluginDescriptor
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.actionSystem.DataProvider
+import com.intellij.openapi.actionSystem.EdtNoGetDataProvider
 import com.intellij.openapi.actionSystem.PlatformCoreDataKeys
 import com.intellij.openapi.application.AppUIExecutor
 import com.intellij.openapi.application.ApplicationManager
@@ -162,13 +162,8 @@ class RunContentManagerImpl(private val project: Project) : RunContentManager {
       toolWindow.component.putClientProperty(ToolWindowContentUi.ALLOW_DND_FOR_TABS, true)
     }
     val contentManager = toolWindow.contentManager
-    contentManager.addDataProvider(object : DataProvider {
-      override fun getData(dataId: String): Any? {
-        if (PlatformCoreDataKeys.HELP_ID.`is`(dataId)) {
-          return executor.helpId
-        }
-        return null
-      }
+    contentManager.addDataProvider(EdtNoGetDataProvider { sink ->
+      sink[PlatformCoreDataKeys.HELP_ID] = executor.helpId
     })
     initToolWindow(executor, toolWindowId, executor.toolWindowIcon, contentManager)
     return contentManager
@@ -435,13 +430,13 @@ class RunContentManagerImpl(private val project: Project) : RunContentManager {
   }
 
   private fun getOrCreateContentManagerForToolWindow(id: String, executor: Executor): ContentManager {
+    val dashboardManager = RunDashboardManager.getInstance(project) // initialize RunDashboardManager before getting content manger
     val contentManager = getContentManagerByToolWindowId(id)
     if (contentManager != null) {
       updateToolWindowDecoration(id, executor)
       return contentManager
     }
 
-    val dashboardManager = RunDashboardManager.getInstance(project)
     if (dashboardManager.toolWindowId == id) {
       initToolWindow(null, dashboardManager.toolWindowId, dashboardManager.toolWindowIcon, dashboardManager.dashboardContentManager)
       return dashboardManager.dashboardContentManager

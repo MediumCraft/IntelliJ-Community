@@ -2,6 +2,7 @@
 package com.intellij.util.indexing
 
 import com.intellij.ide.plugins.PluginManagerCore
+import com.intellij.openapi.application.writeAction
 import com.intellij.openapi.components.service
 import com.intellij.openapi.fileTypes.ExtensionFileNameMatcher
 import com.intellij.openapi.fileTypes.FileType
@@ -9,6 +10,7 @@ import com.intellij.openapi.fileTypes.FileTypeManager
 import com.intellij.openapi.fileTypes.impl.FileTypeManagerImpl
 import com.intellij.openapi.progress.EmptyProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
+import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.ContentIterator
 import com.intellij.openapi.util.CheckedDisposable
@@ -21,19 +23,24 @@ import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.testFramework.*
 import com.intellij.testFramework.assertions.Assertions.assertThat
 import com.intellij.util.application
+import com.intellij.util.indexing.PerProjectIndexingQueue.QueuedFiles
 import com.intellij.util.indexing.diagnostic.ProjectScanningHistory
 import com.intellij.util.indexing.diagnostic.ScanningType
 import com.intellij.util.indexing.diagnostic.dto.JsonScanningStatistics
+import com.intellij.util.indexing.events.FileIndexingRequest
 import com.intellij.util.indexing.mocks.*
 import com.intellij.util.indexing.roots.IndexableFilesIterator
 import com.intellij.util.indexing.roots.kind.IndexableSetOrigin
-import it.unimi.dsi.fastutil.longs.LongSet
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.runBlocking
 import org.junit.*
 import org.junit.Assert.assertEquals
 import org.junit.runner.RunWith
 import org.junit.runners.JUnit4
 import java.nio.file.Files
 import java.nio.file.Paths
+import java.util.concurrent.CountDownLatch
 
 @RunWith(JUnit4::class)
 class UnindexedFilesScannerTest {
@@ -76,6 +83,42 @@ class UnindexedFilesScannerTest {
 
 
   private fun getTestDataPath() = Paths.get(PlatformTestUtil.getCommunityPath(), "platform/lang-impl/testData/indexing")
+
+  @Test
+  fun `test scanning scheduled immediately when writeAccessAllowed=true`() {
+    runInEdtAndWait {
+      assertThat(application.isWriteIntentLockAcquired).isTrue
+      application.runWriteAction {
+        // WA is to avoid race: UnindexedFilesScannerExecutorImpl needs WA to change running
+        assertThat(UnindexedFilesScannerExecutorImpl.getInstance(project).isRunning.value).isFalse
+        UnindexedFilesScanner(project).queue()
+        assertThat(UnindexedFilesScannerExecutorImpl.getInstance(project).isRunning.value).isTrue
+      }
+    }
+  }
+
+  @Test
+  fun `test scanning scheduled asynchronously when writeAccessAllowed=false`() {
+    runBlocking {
+      assertThat(application.isWriteIntentLockAcquired).isFalse
+
+      val latch = CountDownLatch(1)
+      async {
+        writeAction {
+          latch.await()
+        }
+      }
+
+      try {
+        assertThat(UnindexedFilesScannerExecutorImpl.getInstance(project).isRunning.value).isFalse
+        UnindexedFilesScanner(project).queue()
+        assertThat(UnindexedFilesScannerExecutorImpl.getInstance(project).isRunning.value).isFalse
+      }
+      finally {
+        latch.countDown()
+      }
+    }
+  }
 
   @Test
   fun `test new files scheduled for indexing`() {
@@ -242,6 +285,23 @@ class UnindexedFilesScannerTest {
     captureIndexingResults(indexers).assertNoIndexerIndexedFiles()
   }
 
+  @Test
+  fun `test scanning increases mod count of DumbService even if dumb mode was not triggered`() {
+    val dir = tempDir.createDir()
+    val oneDirIterator = SingleRootIndexableFilesIterator(dir.toUri().toString())
+
+    val dumbService = DumbService.getInstance(project)
+    val dumbModCount1 = dumbService.modificationTracker.modificationCount
+
+    val (scanningStat, dirtyFiles) = scanFiles(oneDirIterator)
+    assertThat(dirtyFiles).isEmpty()
+    assertEquals(0, scanningStat.numberOfFilesForIndexing)
+    IndexingTestUtil.waitUntilIndexesAreReady(project) // wait until flows in UnindexedFilesScannerExecutorImpl are updated
+
+    val dumbModCount2 = dumbService.modificationTracker.modificationCount
+    assertEquals(dumbModCount1 + 1, dumbModCount2)
+  }
+
   private fun registerFiletype(filetype: FakeFileType) {
     runInEdtAndWait {
       (FileTypeManager.getInstance() as FileTypeManagerImpl).registerFileType(
@@ -317,7 +377,8 @@ class UnindexedFilesScannerTest {
   }
 
   private fun indexFiles(provider: SingleRootIndexableFilesIterator, dirtyFiles: Collection<VirtualFile>) {
-    val indexingTask = UnindexedFilesIndexer(project, HashSet(dirtyFiles), "Test", LongSet.of())
+    val files = QueuedFiles.fromFilesCollection(dirtyFiles, emptyList())
+    val indexingTask = UnindexedFilesIndexer(project, files, "Test")
     val indicator = EmptyProgressIndicator()
     ProgressManager.getInstance().runProcess({ indexingTask.perform(indicator) }, indicator)
   }
@@ -334,12 +395,13 @@ class UnindexedFilesScannerTest {
     assertEquals(1, history.scanningStatistics.size)
     val scanningStat = history.scanningStatistics[0]
 
-    return Pair(scanningStat, dirtyFiles)
+    return Pair(scanningStat, dirtyFiles.map(FileIndexingRequest::file))
   }
 
-  private fun scanFiles(filesAndDirs: IndexableFilesIterator): Pair<ProjectScanningHistory, Collection<VirtualFile>> {
+  private fun scanFiles(filesAndDirs: IndexableFilesIterator): Pair<ProjectScanningHistory, Collection<FileIndexingRequest>> {
     return project.service<PerProjectIndexingQueue>().getFilesSubmittedDuring {
-      val scanningTask = UnindexedFilesScanner(project, false, false, listOf(filesAndDirs), null, "Test", ScanningType.PARTIAL, null)
+      val parameters = CompletableDeferred(ScanningIterators("Test", listOf(filesAndDirs), null, ScanningType.PARTIAL))
+      val scanningTask = UnindexedFilesScanner(project, false, false, null, scanningParameters = parameters)
       return@getFilesSubmittedDuring scanningTask.queue().get()
     }
   }

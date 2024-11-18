@@ -45,8 +45,6 @@
 
         <multipleRunLocationsProvider implementation="org.jetbrains.kotlin.idea.run.multiplatform.KotlinMultiplatformRunLocationsProvider"/>
 
-        <editorNotificationProvider implementation="org.jetbrains.kotlin.idea.configuration.KotlinSetupEnvironmentNotificationProvider"/>
-
         <compilableFileTypesProvider implementation="org.jetbrains.kotlin.idea.compiler.KotlinCompilableFileTypesProvider" />
 
         <consoleFilterProvider implementation="org.jetbrains.kotlin.idea.run.KotlinConsoleFilterProvider"/>
@@ -84,15 +82,6 @@
                    description="Whether to use Psi Source type checking optimization"
                    defaultValue="true"
                    restartRequired="true"/>
-
-      <registryKey key="kotlin.jps.instrument.bytecode"
-                   description="Enable bytecode instrumentation for Kotlin classes"
-                   defaultValue="false"
-                   restartRequired="false"/>
-
-      <registryKey key="kotlin.not.configured.show.notification"
-                   defaultValue="true"
-                   description="Show notification about Kotlin missing configuration"/>
     </extensions>
 
     <extensions defaultExtensionNs="org.jetbrains.uast">
@@ -116,7 +105,6 @@
         <ultraLightClassModifierExtension implementation="org.jetbrains.kotlin.idea.compilerPlugin.allopen.AllOpenUltraLightClassModifierExtension"/>
 
         <storageComponentContainerContributor implementation="org.jetbrains.kotlin.idea.compilerPlugin.noarg.IdeNoArgComponentContainerContributor"/>
-        <expressionCodegenExtension implementation="org.jetbrains.kotlin.idea.compilerPlugin.noarg.IdeNoArgExpressionCodegenExtension"/>
         <ultraLightClassModifierExtension implementation="org.jetbrains.kotlin.idea.compilerPlugin.noarg.NoArgUltraLightClassModifierExtension"/>
         <defaultErrorMessages implementation="org.jetbrains.kotlin.noarg.diagnostic.DefaultErrorMessagesNoArg"/>
 

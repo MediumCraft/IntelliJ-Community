@@ -58,8 +58,7 @@ import java.util.*;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
-import static com.intellij.openapi.vcs.changes.ui.ChangesGroupingSupport.DIRECTORY_GROUPING;
-import static com.intellij.openapi.vcs.changes.ui.ChangesGroupingSupport.MODULE_GROUPING;
+import static com.intellij.openapi.vcs.changes.ui.ChangesGroupingSupport.*;
 import static com.intellij.openapi.vcs.changes.ui.VcsTreeModelData.*;
 import static com.intellij.ui.tree.TreePathUtil.toTreePathArray;
 import static com.intellij.util.ui.ThreeStateCheckBox.State;
@@ -67,7 +66,7 @@ import static com.intellij.util.ui.ThreeStateCheckBox.State;
 /**
  * Consider implementing {@link AsyncChangesTree} instead.
  */
-public abstract class ChangesTree extends Tree implements DataProvider {
+public abstract class ChangesTree extends Tree implements UiCompatibleDataProvider {
   private static final Logger LOG = Logger.getInstance(ChangesTree.class);
 
   @ApiStatus.Internal @NonNls public static final String LOG_COMMIT_SESSION_EVENTS = "LogCommitSessionEvents";
@@ -101,7 +100,7 @@ public abstract class ChangesTree extends Tree implements DataProvider {
   @Deprecated @NonNls private final static String FLATTEN_OPTION_KEY = "ChangesBrowser.SHOW_FLATTEN";
   @NonNls protected static final String GROUPING_KEYS = "ChangesTree.GroupingKeys";
 
-  public static final List<String> DEFAULT_GROUPING_KEYS = List.of(DIRECTORY_GROUPING, MODULE_GROUPING);
+  public static final List<String> DEFAULT_GROUPING_KEYS = List.of(DIRECTORY_GROUPING, MODULE_GROUPING, REPOSITORY_GROUPING);
 
   @NonNls public static final String GROUP_BY_ACTION_GROUP = "ChangesView.GroupBy";
 
@@ -807,22 +806,12 @@ public abstract class ChangesTree extends Tree implements DataProvider {
     myScrollToSelection = scrollToSelection;
   }
 
-  @Nullable
   @Override
-  public Object getData(@NotNull String dataId) {
-    if (CommonDataKeys.PROJECT.is(dataId)) {
-      return myProject;
-    }
-    if (PlatformDataKeys.COPY_PROVIDER.is(dataId)) {
-      return myTreeCopyProvider;
-    }
-    if (ChangesGroupingSupport.KEY.is(dataId)) {
-      return myGroupingSupport;
-    }
-    if (PlatformDataKeys.TREE_EXPANDER.is(dataId)) {
-      return myTreeExpander;
-    }
-    return null;
+  public void uiDataSnapshot(@NotNull DataSink sink) {
+    sink.set(CommonDataKeys.PROJECT, myProject);
+    sink.set(PlatformDataKeys.COPY_PROVIDER, myTreeCopyProvider);
+    sink.set(ChangesGroupingSupport.KEY, myGroupingSupport);
+    sink.set(PlatformDataKeys.TREE_EXPANDER, myTreeExpander);
   }
 
   @Override

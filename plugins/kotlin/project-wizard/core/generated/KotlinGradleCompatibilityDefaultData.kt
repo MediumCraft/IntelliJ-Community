@@ -10,6 +10,10 @@ import org.jetbrains.kotlin.tools.projectWizard.compatibility.KotlinGradleCompat
  */
 internal val DEFAULT_KOTLIN_GRADLE_COMPATIBILITY_DATA = KotlinGradleCompatibilityState(
     kotlinVersions = listOf(
+        "2.0.21",
+        "2.0.20",
+        "2.0.10",
+        "2.0.0",
         "1.9.24",
         "1.9.23",
         "1.9.22",
@@ -40,13 +44,18 @@ internal val DEFAULT_KOTLIN_GRADLE_COMPATIBILITY_DATA = KotlinGradleCompatibilit
     ),
     compatibility = listOf(
         KotlinGradleVersionMapping(
+            kotlin = "2.0.0-2.0.30",
+            gradle = "6.8.3-8.11",
+            maxJvmTarget = 21,
+        ),
+        KotlinGradleVersionMapping(
             kotlin = "1.9.20-1.9.30",
-            gradle = "6.8.3-8.8",
+            gradle = "6.8.3-8.11",
             maxJvmTarget = 21,
         ),
         KotlinGradleVersionMapping(
             kotlin = "1.9.0-1.9.20",
-            gradle = "6.8.3-8.8",
+            gradle = "6.8.3-8.11",
             maxJvmTarget = 20,
         ),
         KotlinGradleVersionMapping(

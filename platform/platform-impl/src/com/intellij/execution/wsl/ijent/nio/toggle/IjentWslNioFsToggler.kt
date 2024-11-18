@@ -2,24 +2,31 @@
 package com.intellij.execution.wsl.ijent.nio.toggle
 
 import com.intellij.diagnostic.VMOptions
+import com.intellij.execution.eel.EelApiWithPathsMapping
 import com.intellij.execution.wsl.WSLDistribution
 import com.intellij.execution.wsl.WslIjentAvailabilityService
-import com.intellij.idea.AppMode
-import com.intellij.openapi.application.*
+import com.intellij.execution.wsl.WslIjentManager
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.components.serviceAsync
+import com.intellij.openapi.diagnostic.Attachment
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.util.SystemInfo
-import com.intellij.platform.core.nio.fs.CoreBootstrapSecurityManager
 import com.intellij.platform.core.nio.fs.MultiRoutingFileSystemProvider
-import com.intellij.platform.ijent.IjentId
-import kotlinx.coroutines.*
+import com.intellij.platform.eel.EelApi
+import com.intellij.platform.eel.provider.EelApiKey
+import com.intellij.platform.eel.provider.EelProvider
+import kotlinx.coroutines.CoroutineScope
 import org.jetbrains.annotations.ApiStatus.Internal
+import org.jetbrains.annotations.TestOnly
 import org.jetbrains.annotations.VisibleForTesting
-import java.io.IOException
+import java.io.BufferedReader
 import java.nio.file.FileSystems
+import java.nio.file.Path
+import kotlin.io.path.bufferedReader
+import kotlin.io.path.isSameFileAs
 
 /**
  * This service, along with listeners inside it, enables and disables access to WSL drives through IJent.
@@ -27,94 +34,100 @@ import java.nio.file.FileSystems
 @Internal
 @Service
 @VisibleForTesting
-class IjentWslNioFsToggler(@VisibleForTesting val coroutineScope: CoroutineScope) { // TODO Try to hide coroutineScope
+class IjentWslNioFsToggler(private val coroutineScope: CoroutineScope) {
   companion object {
     suspend fun instanceAsync(): IjentWslNioFsToggler = serviceAsync()
     fun instance(): IjentWslNioFsToggler = service()
   }
 
-  init {
+  val isAvailable: Boolean get() = strategy != null
+
+  suspend fun enableForAllWslDistributions() {
+    logErrorIfNotWindows()
+    strategy?.enableForAllWslDistributions()
+  }
+
+  @TestOnly
+  suspend fun switchToIjentFs(distro: WSLDistribution) {
+    logErrorIfNotWindows()
+    strategy ?: error("Not available")
+    strategy.switchToIjentFs(distro)
+  }
+
+  @TestOnly
+  fun switchToTracingWsl9pFs(distro: WSLDistribution) {
+    logErrorIfNotWindows()
+    strategy ?: error("Not available")
+    strategy.switchToTracingWsl9pFs(distro)
+  }
+
+  @TestOnly
+  fun unregisterAll() {
+    logErrorIfNotWindows()
+    strategy ?: error("Not available")
+    strategy.unregisterAll()
+  }
+
+  private fun logErrorIfNotWindows() {
     if (!SystemInfo.isWindows) {
       thisLogger().error("${javaClass.name} should be requested only on Windows")
     }
   }
 
-  fun ensureInVmOptions(): List<Pair<String, String?>> {
-    val options: List<Triple<String, String, String?>> = listOf(
-      Triple(
-        "-Djava.nio.file.spi.DefaultFileSystemProvider=",
-        MultiRoutingFileSystemProvider::class.java.name,
-        null,
-      ),
-      Triple(
-        "-Xbootclasspath/a:out/classes/production/intellij.platform.core.nio.fs",
-        "",
-        null,
-      ),
-      Triple(
-        "-Djava.security.manager=",
-        CoreBootstrapSecurityManager::class.java.name,
-        null,
-      ),
-      Triple(
-        "-Didea.io.use.nio2=",
-        "true",
-        null,
-      ),
-    )
+  // TODO Move to ijent.impl?
+  internal class WslEelProvider : EelProvider {
+    override suspend fun getEelApi(path: Path): EelApi? {
+      val enabledDistros = serviceAsync<IjentWslNioFsToggler>().strategy?.enabledInDistros
 
-    val changedOptions = mutableListOf<Pair<String, String?>>()
-    val isEnabled = WslIjentAvailabilityService.Companion.getInstance().useIjentForWslNioFileSystem()
-
-    for ((name, valueForEnabled, valueForDisabled) in options) {
-      val value = if (isEnabled) valueForEnabled else valueForDisabled
-      // TODO Explain why there's a difference in Dev Mode.
-      if (VMOptions.readOption(name, AppMode.isDevServer() || ApplicationManager.getApplication().isUnitTestMode) != value) {
-        changedOptions += name to value
-        try {
-          VMOptions.setOption(name, value)
-        }
-        catch (err: IOException) {
-          if (!ApplicationManager.getApplication().isUnitTestMode) {
-            throw err
-          }
-        }
+      return enabledDistros?.firstOrNull { distro -> distro.getUNCRootPath().isSameFileAs(path.root) }?.let { distro ->
+        EelApiWithPathsMapping(
+          ephemeralRoot = path.root,
+          original = WslIjentManager.getInstance().getIjentApi(distro, null, rootUser = false)
+        )
       }
     }
 
-    return changedOptions
-  }
+    override fun getEelApiKey(path: Path): EelApiKey? =
+      service<IjentWslNioFsToggler>().strategy?.enabledInDistros
+        ?.find { distro -> distro.getUNCRootPath().isSameFileAs(path.root) }
+        ?.let { WslEelKey(it.id) }
 
-  fun enable(distro: WSLDistribution, ijentId: IjentId) {
-    strategy.enable(distro, ijentId)
-  }
-
-  // TODO Disable when IJent exits.
-  fun disable(distro: WSLDistribution) {
-    strategy.disable(distro)
+    private data class WslEelKey(val key: String) : EelApiKey()
   }
 
   private val strategy = run {
     val defaultProvider = FileSystems.getDefault().provider()
     when {
-      !WslIjentAvailabilityService.Companion.getInstance().useIjentForWslNioFileSystem() -> FallbackIjentWslNioFsToggleStrategy
+      !WslIjentAvailabilityService.getInstance().useIjentForWslNioFileSystem() -> null
 
       defaultProvider.javaClass.name == MultiRoutingFileSystemProvider::class.java.name -> {
-        DefaultIjentWslNioFsToggleStrategy(defaultProvider, coroutineScope)
+        IjentWslNioFsToggleStrategy(defaultProvider, coroutineScope)
       }
 
       else -> {
-        logger<IjentWslNioFsToggler>().warn(
-          "The default filesystem ${FileSystems.getDefault()} is not ${MultiRoutingFileSystemProvider::class.java}"
-        )
-        FallbackIjentWslNioFsToggleStrategy
+        val vmOptions = runCatching {
+          VMOptions.getUserOptionsFile()?.bufferedReader()?.use<BufferedReader, String> { it.readText() }
+          ?: "<null>"
+        }.getOrElse<String, String> { err -> err.stackTraceToString() }
+
+        val systemProperties = runCatching {
+          System.getProperties().entries.joinToString("\n") { (k, v) -> "$k=$v" }
+        }.getOrElse<String, String> { err -> err.stackTraceToString() }
+
+        val message = "The default filesystem ${FileSystems.getDefault()} is not ${MultiRoutingFileSystemProvider::class.java}"
+
+        if (ApplicationManager.getApplication().isUnitTestMode) {
+          logger<IjentWslNioFsToggler>().warn("$message\nVM Options:\n$vmOptions\nSystem properties:\n$systemProperties")
+        }
+        else {
+          logger<IjentWslNioFsToggler>().error(
+            message,
+            Attachment("user vmOptions.txt", vmOptions),
+            Attachment("system properties.txt", systemProperties),
+          )
+        }
+        null
       }
     }
   }
-
-  init {
-    strategy.initialize()
-  }
-
-  val isInitialized: Boolean get() = strategy.isInitialized
 }

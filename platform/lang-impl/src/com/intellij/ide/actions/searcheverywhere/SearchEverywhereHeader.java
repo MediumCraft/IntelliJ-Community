@@ -4,6 +4,7 @@ package com.intellij.ide.actions.searcheverywhere;
 import com.intellij.ide.IdeBundle;
 import com.intellij.ide.actions.searcheverywhere.statistics.SearchEverywhereUsageTriggerCollector;
 import com.intellij.ide.util.gotoByName.SearchEverywhereConfiguration;
+import com.intellij.ide.util.scopeChooser.ScopeDescriptor;
 import com.intellij.internal.statistic.eventLog.events.EventFields;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.actionSystem.ex.AnActionListener;
@@ -19,10 +20,7 @@ import com.intellij.ui.IdeUICustomization;
 import com.intellij.ui.scale.JBUIScale;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.JBUI;
-import org.jetbrains.annotations.Nls;
-import org.jetbrains.annotations.NonNls;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.*;
 
 import javax.swing.*;
 import javax.swing.event.ChangeEvent;
@@ -32,12 +30,15 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.List;
 import java.util.*;
+import java.util.function.BiFunction;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static com.intellij.ide.actions.searcheverywhere.SearchEverywhereFiltersStatisticsCollector.ContributorFilterCollector;
 import static com.intellij.ide.actions.searcheverywhere.statistics.SearchEverywhereUsageTriggerCollector.getReportableContributorID;
 
+@ApiStatus.Internal
 public final class SearchEverywhereHeader {
   private final @NotNull Runnable myScopeChangedCallback;
   private final Function<? super String, String> myShortcutSupplier;
@@ -89,6 +90,21 @@ public final class SearchEverywhereHeader {
     mySelectedTab.everywhereAction.setEverywhere(
       !mySelectedTab.everywhereAction.isEverywhere());
     myToolbar.updateActionsImmediately();
+  }
+
+  @ApiStatus.Internal
+  public void changeScope(@NotNull BiFunction<? super ScopeDescriptor, ? super List<ScopeDescriptor>, @Nullable ScopeDescriptor> processor) {
+    if (mySelectedTab.everywhereAction == null) return;
+    if (mySelectedTab.everywhereAction instanceof ScopeChooserAction sca) {
+      List<ScopeDescriptor> scopes = new ArrayList<>();
+      sca.processScopes(scopes::add);
+      ScopeDescriptor currentScope = sca.getSelectedScope();
+      ScopeDescriptor newScope = processor.apply(currentScope, scopes);
+      if (newScope != null && newScope != currentScope) {
+        sca.onScopeSelected(newScope);
+        myToolbar.updateActionsImmediately();
+      }
+    }
   }
 
   private @NotNull ActionToolbar createToolbar(@Nullable AnAction showInFindToolWindowAction) {
@@ -295,6 +311,15 @@ public final class SearchEverywhereHeader {
   private @NotNull SETab createAllTab(List<? extends SearchEverywhereContributor<?>> contributors, @NotNull Runnable onChanged) {
     String actionText = IdeUICustomization.getInstance().projectMessage("checkbox.include.non.project.items");
     PersistentSearchEverywhereContributorFilter<String> filter = createContributorsFilter(contributors);
+    var contributorToEverywhereAction = new IdentityHashMap<SearchEverywhereContributor<?>, SearchEverywhereToggleAction>();
+    for (SearchEverywhereContributor<?> c : contributors) {
+      var everywhereAction = ContainerUtil.getFirstItem(
+        ContainerUtil.filterIsInstance(c.getActions(onChanged), SearchEverywhereToggleAction.class));
+      if (everywhereAction != null) {
+        contributorToEverywhereAction.put(c, everywhereAction);
+      }
+    }
+
     List<AnAction> actions = List.of(new CheckBoxSearchEverywhereToggleAction(actionText) {
       final SearchEverywhereManagerImpl seManager = (SearchEverywhereManagerImpl)SearchEverywhereManager.getInstance(myProject);
 
@@ -308,6 +333,16 @@ public final class SearchEverywhereHeader {
         if (isEverywhere() == state) return;
         seManager.setEverywhere(state);
 
+        var separateTabsContributors = myTabs.stream()
+          .filter(t -> !t.id.equals(SearchEverywhereManagerImpl.ALL_CONTRIBUTORS_GROUP_ID)) // filter other tabs
+          .flatMap(t -> t.contributors.stream()).toList();
+        // Set everywhere flag in the contributors that only appear in the 'All' tab
+        for (var entry : contributorToEverywhereAction.entrySet()) {
+          if (!separateTabsContributors.contains(entry.getKey())) {
+            entry.getValue().setEverywhere(state);
+          }
+        }
+
         myTabs.forEach(tab -> {
           if (tab.everywhereAction != null) tab.everywhereAction.setEverywhere(state);
         });
@@ -317,6 +352,12 @@ public final class SearchEverywhereHeader {
     return new SETab(SearchEverywhereManagerImpl.ALL_CONTRIBUTORS_GROUP_ID,
                      IdeBundle.message("searcheverywhere.allelements.tab.name"),
                      contributors, actions, filter);
+  }
+
+  public void setResultsNotifyCallback(@NotNull Consumer<@NotNull @Nls String> notifyCallback) {
+    for (SETab tab : myTabs) {
+      tab.setResultsNotifyCallback(notifyCallback);
+    }
   }
 
   public static final class SETab {
@@ -362,10 +403,21 @@ public final class SearchEverywhereHeader {
       return name;
     }
 
-    public String getReportableID() {
+    String getReportableID() {
       if (!isSingleContributor()) return getID();
 
       return getReportableContributorID(contributors.get(0));
+    }
+
+    public void setResultsNotifyCallback(@NotNull Consumer<@NotNull @Nls String> notifyCallback) {
+      for (SearchEverywhereContributor<?> contributor : contributors) {
+        var effectiveContributor = (contributor instanceof SearchEverywhereContributorWrapper wrapper)
+                                   ? wrapper.getEffectiveContributor() : contributor;
+
+        if (effectiveContributor instanceof SearchEverywhereResultsNotifier notifierContributor) {
+          notifierContributor.setNotifyCallback(notifyCallback);
+        }
+      }
     }
 
     public boolean isSingleContributor() {

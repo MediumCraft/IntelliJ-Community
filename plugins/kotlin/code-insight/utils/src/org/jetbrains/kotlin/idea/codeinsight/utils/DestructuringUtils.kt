@@ -3,39 +3,28 @@
 
 package org.jetbrains.kotlin.idea.codeinsight.utils
 
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
+import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.analyze
-import org.jetbrains.kotlin.analysis.api.symbols.KtNamedClassOrObjectSymbol
-import org.jetbrains.kotlin.analysis.api.types.KtFlexibleType
-import org.jetbrains.kotlin.analysis.api.types.KtNonErrorClassType
-import org.jetbrains.kotlin.analysis.api.types.KtType
-import org.jetbrains.kotlin.analysis.api.types.KtTypeNullability
+import org.jetbrains.kotlin.analysis.api.symbols.KaNamedClassSymbol
+import org.jetbrains.kotlin.analysis.api.types.KaClassType
+import org.jetbrains.kotlin.analysis.api.types.KaTypeNullability
 import org.jetbrains.kotlin.psi.KtDestructuringDeclaration
-import org.jetbrains.kotlin.psi.KtExpression
 import org.jetbrains.kotlin.psi.KtParameter
 
-fun getParameterNames(declaration: KtDestructuringDeclaration): List<String>? {
+fun extractParameterNames(declaration: KtDestructuringDeclaration): List<String>? {
     return analyze(declaration) {
         val type = getClassType(declaration) ?: return null
-        getParameterNames(type)
+        extractDataClassParameterNames(type)
     }
 }
 
-fun getParameterNames(expression: KtExpression): List<String>? {
-    return analyze(expression) {
-        val type = toNonErrorClassType(expression.getKtType()) ?: return null
-        getParameterNames(type)
-    }
-}
+fun KaSession.extractDataClassParameterNames(type: KaClassType): List<String>? {
+    if (type.nullability != KaTypeNullability.NON_NULLABLE) return null
+    val classSymbol = type.expandedSymbol
 
-context(KtAnalysisSession)
-private fun getParameterNames(type: KtNonErrorClassType): List<String>? {
-    if (type.nullability != KtTypeNullability.NON_NULLABLE) return null
-    val classSymbol = type.expandedClassSymbol
-
-    return if (classSymbol is KtNamedClassOrObjectSymbol && classSymbol.isData) {
-        val constructorSymbol = classSymbol.getDeclaredMemberScope()
-            .getConstructors()
+    return if (classSymbol is KaNamedClassSymbol && classSymbol.isData) {
+        val constructorSymbol = classSymbol.declaredMemberScope
+            .constructors
             .find { it.isPrimary }
             ?: return null
 
@@ -43,22 +32,14 @@ private fun getParameterNames(type: KtNonErrorClassType): List<String>? {
     } else null
 }
 
-context(KtAnalysisSession)
-private fun getClassType(declaration: KtDestructuringDeclaration): KtNonErrorClassType? {
+context(KaSession)
+private fun getClassType(declaration: KtDestructuringDeclaration): KaClassType? {
     val initializer = declaration.initializer
     val type = if (initializer != null) {
-        initializer.getKtType()
+        initializer.expressionType
     } else {
         val parentAsParameter = declaration.parent as? KtParameter
-        parentAsParameter?.getParameterSymbol()?.returnType
-    }
-    return toNonErrorClassType(type)
-}
-
-private fun toNonErrorClassType(type: KtType?): KtNonErrorClassType? {
-    return when (type) {
-        is KtNonErrorClassType -> type
-        is KtFlexibleType -> type.lowerBound as? KtNonErrorClassType
-        else -> null
-    }
+        parentAsParameter?.symbol?.returnType
+    } ?: return null
+    return type.lowerBoundIfFlexible() as? KaClassType
 }

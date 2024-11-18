@@ -4,7 +4,10 @@ package com.intellij.openapi.components;
 import com.intellij.diagnostic.ActivityCategory;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.client.ClientKind;
-import com.intellij.openapi.extensions.*;
+import com.intellij.openapi.extensions.AreaInstance;
+import com.intellij.openapi.extensions.ExtensionsArea;
+import com.intellij.openapi.extensions.PluginDescriptor;
+import com.intellij.openapi.extensions.PluginId;
 import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.UserDataHolder;
 import com.intellij.util.messages.MessageBus;
@@ -68,7 +71,7 @@ public interface ComponentManager extends UserDataHolder, Disposable, AreaInstan
    * or is about to be disposed (e.g. the {@link com.intellij.openapi.project.impl.ProjectExImpl#dispose()} was called but not completed yet)
    * <br>
    * The result is only valid inside read action because the application/project/module can be disposed at any moment.
-   * (see <a href="https://plugins.jetbrains.com/docs/intellij/general-threading-rules.html">more details on read actions</a>)
+   * (see <a href="https://plugins.jetbrains.com/docs/intellij/threading-model.html">more details on read actions</a>)
    */
   boolean isDisposed();
 
@@ -85,6 +88,7 @@ public interface ComponentManager extends UserDataHolder, Disposable, AreaInstan
    * Collects all services registered with matching client="..." attribute in xml.
    * Take a look at {@link com.intellij.openapi.client.ClientSession}
    */
+  @ApiStatus.Internal
   @ApiStatus.Experimental
   default @NotNull <T> List<T> getServices(@NotNull Class<T> serviceClass, ClientKind client) {
     T service = getService(serviceClass);
@@ -127,10 +131,6 @@ public interface ComponentManager extends UserDataHolder, Disposable, AreaInstan
   @ApiStatus.Internal
   @NotNull <T> T instantiateClass(@NotNull String className, @NotNull PluginDescriptor pluginDescriptor);
 
-  @NotNull ActivityCategory getActivityCategory(boolean isExtension);
-
   @ApiStatus.Internal
-  default boolean isSuitableForOs(@NotNull ExtensionDescriptor.Os os) {
-    return true;
-  }
+  @NotNull ActivityCategory getActivityCategory(boolean isExtension);
 }

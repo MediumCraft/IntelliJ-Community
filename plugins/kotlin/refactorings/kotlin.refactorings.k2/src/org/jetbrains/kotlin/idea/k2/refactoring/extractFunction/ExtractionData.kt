@@ -55,12 +55,12 @@ data class ExtractionData(
 
     init {
         analyze(commonParent) {
-            encodeReferences(true, { expr -> expr.getSmartCastInfo() != null }) { physicalRef ->
+            encodeReferences(true, { expr -> expr.smartCastInfo != null }) { physicalRef ->
                 val resolve = if (physicalRef is KtLabelReferenceExpression) null else physicalRef.mainReference.resolve()
                 val declaration =
                     resolve as? KtNamedDeclaration ?: resolve as? PsiMember
-                    //if this resolves to the receiver, then retrieve corresponding class
-                    ?: ((resolve as? KtTypeReference)?.typeElement as? KtUserType)?.referenceExpression?.mainReference?.resolve()
+                    //if this resolves to the receiver, then retrieve corresponding callable
+                    ?: ((resolve as? KtTypeReference)?.parent as? KtCallableDeclaration)?.takeIf { it.receiverTypeReference == resolve }
                 declaration?.putCopyableUserData(targetKey, physicalRef)
                 declaration?.let { ResolveResult<PsiElement, KtReferenceExpression>(physicalRef, declaration, declaration, physicalRef) }
             }

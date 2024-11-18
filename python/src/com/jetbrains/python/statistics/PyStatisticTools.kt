@@ -16,11 +16,11 @@ import com.jetbrains.python.PythonLanguage
 import com.jetbrains.python.extensions.getSdk
 import com.jetbrains.python.psi.LanguageLevel
 import com.jetbrains.python.remote.PyRemoteSdkAdditionalDataBase
+import com.jetbrains.python.sdk.PySdkUtil
 import com.jetbrains.python.sdk.PythonSdkAdditionalData
-import com.jetbrains.python.sdk.PythonSdkType
 import com.jetbrains.python.sdk.PythonSdkUtil
 import com.jetbrains.python.sdk.flavors.PythonSdkFlavor
-import com.jetbrains.python.sdk.flavors.VirtualEnvReader
+import com.jetbrains.python.sdk.VirtualEnvReader
 import com.jetbrains.python.sdk.flavors.conda.CondaEnvSdkFlavor
 import com.jetbrains.python.sdk.pipenv.isPipEnv
 import com.jetbrains.python.sdk.poetry.isPoetry
@@ -50,6 +50,19 @@ fun getPythonSpecificInfo(sdk: Sdk): List<EventPair<*>> {
   data.add(EXECUTION_TYPE.with(sdk.executionType.value))
   data.add(INTERPRETER_TYPE.with(sdk.interpreterType.value))
   return data
+}
+
+fun normalizePackageName(packageName: String): String {
+  var name = packageName
+  if (!name.startsWith("_")) {
+    // for cases such as __future__, etc
+    name = name.replace('_', '-')
+  }
+
+  return name
+    .replace(".", "-")
+    .replace("\"", "")
+    .lowercase()
 }
 
 @Deprecated("""
@@ -92,16 +105,16 @@ enum class InterpreterTarget(val value: String) {
 }
 
 val EXECUTION_TYPE = EventFields.String("executionType", listOf(
-    LOCAL.value,
-    REMOTE_DOCKER.value,
-    REMOTE_DOCKER_COMPOSE.value,
-    REMOTE_WSL.value,
-    REMOTE_NULL.value,
-    THIRD_PARTY.value,
-    REMOTE_SSH_CREDENTIALS.value,
-    REMOTE_VAGRANT.value,
-    REMOTE_WEB_DEPLOYMENT.value,
-    REMOTE_UNKNOWN.value))
+  LOCAL.value,
+  REMOTE_DOCKER.value,
+  REMOTE_DOCKER_COMPOSE.value,
+  REMOTE_WSL.value,
+  REMOTE_NULL.value,
+  THIRD_PARTY.value,
+  REMOTE_SSH_CREDENTIALS.value,
+  REMOTE_VAGRANT.value,
+  REMOTE_WEB_DEPLOYMENT.value,
+  REMOTE_UNKNOWN.value))
 
 enum class InterpreterType(val value: String) {
   PIPENV("pipenv"),
@@ -111,6 +124,7 @@ enum class InterpreterType(val value: String) {
   REGULAR("regular"),
   POETRY("poetry"),
   PYENV("pyenv"),
+  UV("uv"),
 }
 
 enum class InterpreterCreationMode(val value: String) {
@@ -120,19 +134,19 @@ enum class InterpreterCreationMode(val value: String) {
 }
 
 val INTERPRETER_TYPE = EventFields.String("interpreterType", listOf(PIPENV.value,
-                                                                          CONDAVENV.value,
-                                                                          VIRTUALENV.value,
-                                                                          REGULAR.value,
-                                                                          POETRY.value,
-                                                                          PYENV.value))
+                                                                    CONDAVENV.value,
+                                                                    VIRTUALENV.value,
+                                                                    REGULAR.value,
+                                                                    POETRY.value,
+                                                                    PYENV.value))
 
 val INTERPRETER_CREATION_MODE = EventFields.String("interpreter_creation_mode", listOf(SIMPLE.value,
-                                                                                     CUSTOM.value,
-                                                                                     NA.value))
+                                                                                       CUSTOM.value,
+                                                                                       NA.value))
 
 
 private val Sdk.pythonImplementation: String get() = PythonSdkFlavor.getFlavor(this)?.name ?: "Python"
-val Sdk?.version: LanguageLevel get() = PythonSdkType.getLanguageLevelForSdk(this)
+val Sdk?.version: LanguageLevel get() = PySdkUtil.getLanguageLevelForSdk(this)
 val Sdk.executionType: InterpreterTarget
   get() =
     when (val additionalData = sdkAdditionalData) {

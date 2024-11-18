@@ -1,11 +1,15 @@
 package com.jetbrains.performancePlugin.commands
 
+import com.intellij.codeInsight.lookup.LookupManager
+import com.intellij.ide.DataManager
+import com.intellij.ide.impl.ProjectUtil
 import com.intellij.internal.performance.LatencyRecord
 import com.intellij.openapi.actionSystem.CommonDataKeys
-import com.intellij.openapi.actionSystem.DataProvider
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.EDT
+import com.intellij.openapi.application.writeIntentReadAction
 import com.intellij.openapi.editor.actionSystem.LatencyListener
+import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.impl.NonProjectFileWritingAccessProvider
 import com.intellij.openapi.ui.playback.PlaybackContext
 import com.intellij.openapi.ui.playback.commands.PlaybackCommandCoroutineAdapter
@@ -14,12 +18,15 @@ import com.intellij.platform.diagnostic.telemetry.helpers.useWithScope
 import com.jetbrains.performancePlugin.PerformanceTestSpan
 import com.jetbrains.performancePlugin.utils.DaemonCodeAnalyzerListener
 import com.jetbrains.performancePlugin.utils.DaemonCodeAnalyzerResult
+import com.jetbrains.performancePlugin.utils.HighlightingTestUtil
 import com.jetbrains.performancePlugin.utils.findTypingTarget
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.context.Context
 import kotlinx.coroutines.*
 import java.awt.KeyboardFocusManager
+import javax.swing.JComponent
 import kotlin.time.Duration.Companion.seconds
+import com.intellij.openapi.util.Pair
 
 /**
  * Command types text with some delay between typing.
@@ -47,6 +54,10 @@ class DelayTypeCommand(text: String, line: Int) : PlaybackCommandCoroutineAdapte
       latencyRecorder.update(latencyMs.toInt())
     })
 
+    withContext(Dispatchers.EDT) {
+      ProjectUtil.focusProjectWindow(context.project, true)
+    }
+
     runBlocking {
       withTimeout(10.seconds) {
         while (findTypingTarget(context.project) == null) {
@@ -71,21 +82,39 @@ class DelayTypeCommand(text: String, line: Int) : PlaybackCommandCoroutineAdapte
                                 (KeyboardFocusManager.getCurrentKeyboardFocusManager().focusOwner?.javaClass ?: "null"))
               }
               if (disableWriteProtection) {
-                val editor = (typingTarget as? DataProvider)?.let { CommonDataKeys.EDITOR.getData(it) }
+                val editor = DataManager.getInstance().getDataContext(typingTarget as? JComponent).getData(CommonDataKeys.EDITOR)
                 if (editor == null) {
                   throw Exception("Cannot find Editor")
                 }
                 NonProjectFileWritingAccessProvider.allowWriting(listOf(editor.virtualFile))
               }
               span.addEvent("Typing ${text[i]}")
-              typingTarget.type(text[i].toString())
+              writeIntentReadAction {
+                typingTarget.type(text[i].toString())
+              }
             }
           }
         }
+
+        val editor = FileEditorManager.getInstance(context.project).selectedTextEditor
+        HighlightingTestUtil.storeProcessFinishedTime(
+          scopeName = "delayTyping",
+          spanName = "typing_target_${editor?.virtualFile?.name}",
+          additionalAttributes = arrayOf(Pair("typed_text", text)))
       }
       if (calculateAnalyzesTime) {
         val spanRef = Ref<Span>(PerformanceTestSpan.TRACER.spanBuilder(CODE_ANALYSIS_SPAN_NAME).setParent(Context.current().with(span)).startSpan())
         job.set(DaemonCodeAnalyzerListener.listen(projectConnection, spanRef, 0, null))
+        launch {
+          while (!job.get().isDone()) {
+            FileEditorManager.getInstance(context.getProject()).getSelectedTextEditor().let { editor ->
+              withContext(Dispatchers.EDT) {
+                LookupManager.getActiveLookup(editor)?.hideLookup(true)
+              }
+            }
+            delay(1.seconds)
+          }
+        }
       }
 
       if (!latencyRecorder.samples.isEmpty) {

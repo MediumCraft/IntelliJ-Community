@@ -222,7 +222,7 @@ class RenameKotlinPropertyProcessor : RenameKotlinPsiProcessor() {
             }
         }
 
-        val originalName = (element as PsiNamedElement).name
+        val originalName = (element as PsiNamedElement).name ?: return
         for (propertyMethod in propertyMethods) {
             val mangledPropertyName = if (propertyMethod is KtLightMethod && propertyMethod.isMangled) {
                 val suffix = renameRefactoringSupport.getModuleNameSuffixForMangledName(propertyMethod.name)
@@ -247,7 +247,18 @@ class RenameKotlinPropertyProcessor : RenameKotlinPsiProcessor() {
             addRenameElements(propertyMethod, originalName, adjustedPropertyName, allRenames, scope)
         }
 
-        renameRefactoringSupport.prepareForeignUsagesRenaming(element, newName, allRenames, scope)
+        val baseName = originalName
+        val newBaseName = if (renameRefactoringSupport.demangleInternalName(baseName) == originalName) {
+            renameRefactoringSupport.mangleInternalName(
+                newName,
+                renameRefactoringSupport.getModuleNameSuffixForMangledName(baseName)!!
+            )
+        } else newName
+        val safeNewName = newName.quoteIfNeeded()
+
+        prepareOverrideRenaming(element, baseName, newBaseName.quoteIfNeeded(), safeNewName, allRenames)
+
+        ForeignUsagesRenameProcessor.prepareRenaming(element, newName, allRenames, scope)
     }
 
   protected enum class UsageKind {
@@ -374,6 +385,8 @@ class RenameKotlinPropertyProcessor : RenameKotlinPsiProcessor() {
       }
     }
 
+      val wasRequiredOverride = (element.unwrapped as? KtNamedFunction)?.let { renameRefactoringSupport.overridesNothing(it) } != true
+
       val (adjustedUsages, refKindUsages) = @OptIn(KaAllowAnalysisFromWriteAction::class) allowAnalysisFromWriteAction {
           val adjustedUsages = if (element is KtParameter) {
               usages.filterNot {
@@ -426,11 +439,13 @@ class RenameKotlinPropertyProcessor : RenameKotlinPsiProcessor() {
       null,
     )
 
-    usages.forEach { (it as? KtResolvableCollisionUsageInfo)?.apply() }
+      usages.forEach { (it as? KtResolvableCollisionUsageInfo)?.apply() }
 
-    renameRefactoringSupport.dropOverrideKeywordIfNecessary(element)
+      if (wasRequiredOverride) {
+          renameRefactoringSupport.dropOverrideKeywordIfNecessary(element)
+      }
 
-    listener?.elementRenamed(element)
+      listener?.elementRenamed(element)
   }
 
 }

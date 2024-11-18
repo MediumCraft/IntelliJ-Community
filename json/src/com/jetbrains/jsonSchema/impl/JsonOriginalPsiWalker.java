@@ -9,8 +9,10 @@ import com.intellij.json.psi.*;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.psi.PsiComment;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiWhiteSpace;
 import com.intellij.psi.impl.source.tree.LeafPsiElement;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.IncorrectOperationException;
@@ -151,7 +153,7 @@ public class JsonOriginalPsiWalker implements JsonLikePsiWalker {
 
   @Override
   public Set<String> getPropertyNamesOfParentObject(@NotNull PsiElement originalPosition, PsiElement computedPosition) {
-    final JsonObject object = PsiTreeUtil.getParentOfType(originalPosition, JsonObject.class);
+    final JsonObject object = PsiTreeUtil.getParentOfType(computedPosition, JsonObject.class, false);
     if (object != null) {
       return object.getPropertyList().stream()
         .filter(p -> !requiresNameQuotes() || p.getNameElement() instanceof JsonStringLiteral)
@@ -174,6 +176,10 @@ public class JsonOriginalPsiWalker implements JsonLikePsiWalker {
 
   @Override
   public @Nullable JsonValueAdapter createValueAdapter(@NotNull PsiElement element) {
+    if (element instanceof JsonProperty) {
+      JsonPropertyAdapter parentPropertyAdapter = getParentPropertyAdapter(element);
+      return parentPropertyAdapter == null ? null : parentPropertyAdapter.getNameValueAdapter();
+    }
     return element instanceof JsonValue ? JsonJsonPropertyAdapter.createAdapterByType((JsonValue)element) : null;
   }
 
@@ -221,6 +227,38 @@ public class JsonOriginalPsiWalker implements JsonLikePsiWalker {
       return new JsonElementGenerator(project).createEmptyArray();
     }
 
+    @Nullable
+    private static PsiElement skipWsBackward(@Nullable PsiElement item) {
+      while (item instanceof PsiWhiteSpace || item instanceof PsiComment) {
+        item = PsiTreeUtil.prevLeaf(item);
+      }
+      return item;
+    }
+
+    @Nullable
+    private static PsiElement skipWsForward(@Nullable PsiElement item) {
+      while (item instanceof PsiWhiteSpace || item instanceof PsiComment) {
+        item = PsiTreeUtil.nextLeaf(item);
+      }
+      return item;
+    }
+
+
+    @Override
+    public void removeArrayItem(@NotNull PsiElement item) {
+      PsiElement parent = item.getParent();
+      if (!(parent instanceof JsonArray)) throw new IllegalArgumentException("Cannot remove item from a non-array element");
+      PsiElement prev = skipWsBackward(PsiTreeUtil.prevLeaf(item));
+      PsiElement next = skipWsForward(PsiTreeUtil.nextLeaf(item));
+      if (prev instanceof LeafPsiElement && ((LeafPsiElement)prev).getElementType() == JsonElementTypes.COMMA) {
+        prev.delete();
+      }
+      else if (next instanceof LeafPsiElement && ((LeafPsiElement)next).getElementType() == JsonElementTypes.COMMA) {
+        next.delete();
+      }
+      item.delete();
+    }
+
     @Override
     public @NotNull PsiElement addArrayItem(@NotNull PsiElement array, @NotNull String itemValue) {
       if (!(array instanceof JsonArray)) throw new IllegalArgumentException("Cannot add item to a non-array element");
@@ -246,8 +284,14 @@ public class JsonOriginalPsiWalker implements JsonLikePsiWalker {
 
     @Override
     public void removeIfComma(PsiElement forward) {
-      if (forward instanceof LeafPsiElement && ((LeafPsiElement)forward).getElementType() == JsonElementTypes.COMMA) {
-        forward.delete();
+      if (forward instanceof LeafPsiElement leaf) {
+        if (leaf.getElementType() == JsonElementTypes.COMMA) {
+          forward.delete();
+        }
+        if (leaf.getElementType() == JsonElementTypes.R_CURLY && PsiTreeUtil.skipWhitespacesBackward(leaf) instanceof LeafPsiElement prev &&
+            prev.getElementType() == JsonElementTypes.COMMA) {
+          prev.delete();
+        }
       }
     }
 

@@ -1,25 +1,41 @@
-// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.idea.core.script
 
-import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer
 import com.intellij.openapi.application.Application
-import com.intellij.openapi.application.readAction
-import com.intellij.openapi.application.writeAction
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.extensions.ProjectExtensionPointName
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Key
-import com.intellij.openapi.util.registry.Registry
 import com.intellij.openapi.vfs.VirtualFile
-import org.jetbrains.kotlin.analysis.providers.analysisMessageBus
-import org.jetbrains.kotlin.analysis.providers.topics.KotlinTopics
 import org.jetbrains.kotlin.idea.base.plugin.KotlinPluginModeProvider
 import org.jetbrains.kotlin.idea.core.script.configuration.cache.ScriptConfigurationSnapshot
-import org.jetbrains.kotlin.idea.core.util.toPsiFile
+import org.jetbrains.kotlin.idea.core.script.k2.K2ScriptDefinitionProvider
+import org.jetbrains.kotlin.idea.core.script.k2.ScriptConfigurationsSource
 import org.jetbrains.kotlin.psi.KtFile
 import org.jetbrains.kotlin.psi.NotNullableUserDataProperty
 import org.jetbrains.kotlin.scripting.definitions.ScriptDefinition
+import org.jetbrains.kotlin.scripting.definitions.ScriptDefinitionsSource
+import org.jetbrains.kotlin.utils.addToStdlib.safeAs
 import kotlin.script.experimental.api.ScriptDiagnostic
+
+inline fun <reified T : ScriptConfigurationsSource<*>> Project.scriptConfigurationsSourceOfType(): T? =
+    SCRIPT_CONFIGURATIONS_SOURCES.getExtensions(this)
+        .filterIsInstance<T>()
+        .firstOrNull()
+        .safeAs<T>()
+
+inline fun <reified T : ScriptDefinitionsSource> Project.scriptDefinitionsSourceOfType(): T? =
+    SCRIPT_DEFINITIONS_SOURCES.getExtensions(this)
+        .filterIsInstance<T>()
+        .firstOrNull()
+        .safeAs<T>()
+
+val SCRIPT_DEFINITIONS_SOURCES: ProjectExtensionPointName<ScriptDefinitionsSource> =
+    ProjectExtensionPointName("org.jetbrains.kotlin.scriptDefinitionsSource")
+
+val SCRIPT_CONFIGURATIONS_SOURCES: ProjectExtensionPointName<ScriptConfigurationsSource<*>> =
+    ProjectExtensionPointName("org.jetbrains.kotlin.scriptConfigurationsSource")
 
 @set: org.jetbrains.annotations.TestOnly
 var Application.isScriptChangesNotifierDisabled by NotNullableUserDataProperty(
@@ -66,39 +82,9 @@ fun logScriptingConfigurationErrors(file: VirtualFile, snapshot: ScriptConfigura
     }
 }
 
-fun scriptConfigurationMissingForK2(file: KtFile): Boolean = file.isScript()
-        && KotlinPluginModeProvider.isK2Mode()
-        && K2ScriptDependenciesProvider.getInstanceIfCreated(file.project)?.getConfiguration(file.virtualFile) == null
-
 fun getAllDefinitions(project: Project): List<ScriptDefinition> =
     if (KotlinPluginModeProvider.isK2Mode()) {
-        K2ScriptDefinitionProvider.getInstanceIfCreated(project)?.currentDefinitions?.toList() ?: emptyList()
+        K2ScriptDefinitionProvider.getInstance(project).getAllDefinitions().toList()
     } else {
         ScriptDefinitionsManager.getInstance(project).allDefinitions
     }
-
-suspend fun configureGradleScriptsK2(
-    javaHome: String?,
-    project: Project,
-    scripts: Set<ScriptModel>,
-    definitions: List<ScriptDefinition>,
-) {
-    K2ScriptDefinitionProvider.getInstance(project).updateDefinitions(definitions)
-    K2ScriptDependenciesProvider.getInstance(project).reloadConfigurations(scripts, javaHome)
-    project.createScriptModules(scripts)
-
-    for (script in scripts) {
-        if (project.isOpen && !project.isDisposed) {
-            readAction {
-                val ktFile = script.virtualFile.toPsiFile(project) as? KtFile ?: error("Cannot convert to PSI file: ${script.virtualFile}")
-                DaemonCodeAnalyzer.getInstance(project).restart(ktFile)
-            }
-        }
-    }
-
-    writeAction {
-        project.analysisMessageBus.syncPublisher(KotlinTopics.GLOBAL_MODULE_STATE_MODIFICATION).onModification()
-    }
-}
-
-val scriptingEnabled = Registry.`is`("kotlin.k2.scripting.enabled", false)

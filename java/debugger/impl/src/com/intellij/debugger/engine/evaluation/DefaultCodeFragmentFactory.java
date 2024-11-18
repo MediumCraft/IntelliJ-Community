@@ -6,6 +6,8 @@ import com.intellij.codeInsight.completion.JavaCompletionUtil;
 import com.intellij.debugger.DebuggerManagerEx;
 import com.intellij.debugger.JavaDebuggerBundle;
 import com.intellij.debugger.codeinsight.RuntimeTypeEvaluator;
+import com.intellij.debugger.engine.DebuggerManagerThreadImpl;
+import com.intellij.debugger.engine.JavaDebuggerCodeFragmentFactory;
 import com.intellij.debugger.engine.evaluation.expression.EvaluatorBuilder;
 import com.intellij.debugger.engine.evaluation.expression.EvaluatorBuilderImpl;
 import com.intellij.debugger.impl.DebuggerContextImpl;
@@ -27,7 +29,7 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * @author Eugene Zhuravlev
  */
-public class DefaultCodeFragmentFactory extends CodeFragmentFactory {
+public class DefaultCodeFragmentFactory extends JavaDebuggerCodeFragmentFactory {
   private static final class SingletonHolder {
     public static final DefaultCodeFragmentFactory ourInstance = new DefaultCodeFragmentFactory();
   }
@@ -37,12 +39,14 @@ public class DefaultCodeFragmentFactory extends CodeFragmentFactory {
   }
 
   @Override
-  public JavaCodeFragment createPresentationCodeFragment(final TextWithImports item, final PsiElement context, final Project project) {
-    return createCodeFragment(item, context, project);
+  protected JavaCodeFragment createPresentationPsiCodeFragmentImpl(final @NotNull TextWithImports item,
+                                                                   final PsiElement context,
+                                                                   final @NotNull Project project) {
+    return createPsiCodeFragment(item, context, project);
   }
 
   @Override
-  public JavaCodeFragment createCodeFragment(TextWithImports item, PsiElement context, final Project project) {
+  public JavaCodeFragment createPsiCodeFragmentImpl(TextWithImports item, PsiElement context, final @NotNull Project project) {
     final JavaCodeFragmentFactory factory = JavaCodeFragmentFactory.getInstance(project);
     final String text = item.getText();
 
@@ -79,8 +83,8 @@ public class DefaultCodeFragmentFactory extends CodeFragmentFactory {
       }
 
       final DebuggerContextImpl debuggerContext = DebuggerManagerEx.getInstanceEx(project).getContext();
-      DebuggerSession debuggerSession = debuggerContext.getDebuggerSession();
-      if (debuggerSession != null && debuggerContext.getSuspendContext() != null) {
+      DebuggerManagerThreadImpl managerThread = debuggerContext.getManagerThread();
+      if (managerThread != null) {
         final Semaphore semaphore = new Semaphore();
         semaphore.down();
         final AtomicReference<PsiType> nameRef = new AtomicReference<>();
@@ -92,7 +96,7 @@ public class DefaultCodeFragmentFactory extends CodeFragmentFactory {
               semaphore.up();
             }
           };
-        debuggerSession.getProcess().getManagerThread().invoke(worker);
+        managerThread.invoke(worker);
         for (int i = 0; i < 50; i++) {
           ProgressManager.checkCanceled();
           if (semaphore.waitFor(20)) break;
@@ -119,6 +123,11 @@ public class DefaultCodeFragmentFactory extends CodeFragmentFactory {
   @Override
   public EvaluatorBuilder getEvaluatorBuilder() {
     return EvaluatorBuilderImpl.getInstance();
+  }
+
+  @Override
+  public EvaluationContextWrapper createEvaluationContextWrapper() {
+    return new JavaEvaluationContextWrapper();
   }
 
   public static final Key<String> KEY = Key.create("DefaultCodeFragmentFactory.KEY");

@@ -3,8 +3,8 @@ package org.jetbrains.kotlin.idea.codeInsight.postfix
 
 import com.intellij.codeInsight.template.postfix.templates.StringBasedPostfixTemplate
 import com.intellij.psi.PsiElement
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
-import org.jetbrains.kotlin.analysis.api.types.KtType
+import org.jetbrains.kotlin.analysis.api.KaSession
+import org.jetbrains.kotlin.analysis.api.types.KaType
 import org.jetbrains.kotlin.psi.*
 
 internal class KotlinWithPostfixTemplate : StringBasedPostfixTemplate {
@@ -38,7 +38,7 @@ private object WhenTargetFilter : (KtExpression) -> Boolean {
     }
 }
 
-context(KtAnalysisSession)
-private fun isWithTargetType(type: KtType): Boolean {
-    return !type.isUnit && !type.isMarkedNullable && !type.isPrimitive
+context(KaSession)
+private fun isWithTargetType(type: KaType): Boolean {
+    return !type.isUnitType && !type.isMarkedNullable && !type.isPrimitive
 }

@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.daemon.impl;
 
 import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer;
@@ -15,9 +15,9 @@ import com.intellij.openapi.fileEditor.TextEditor;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.PsiFile;
 import com.intellij.util.Processor;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -27,8 +27,11 @@ public abstract class DaemonCodeAnalyzerEx extends DaemonCodeAnalyzer {
   private static final Logger LOG = Logger.getInstance(DaemonCodeAnalyzerEx.class);
 
   public static DaemonCodeAnalyzerEx getInstanceEx(Project project) {
-    return (DaemonCodeAnalyzerEx)DaemonCodeAnalyzer.getInstance(project);
+    return (DaemonCodeAnalyzerEx)getInstance(project);
   }
+
+  @ApiStatus.Internal
+  public abstract void restart(@NotNull Object reason);
 
   public static boolean processHighlights(@NotNull Document document,
                                           @NotNull Project project,
@@ -73,6 +76,7 @@ public abstract class DaemonCodeAnalyzerEx extends DaemonCodeAnalyzer {
 
   public abstract boolean hasVisibleLightBulbOrPopup();
 
+  @ApiStatus.Internal
   public abstract @NotNull List<HighlightInfo> runMainPasses(@NotNull PsiFile psiFile,
                                                              @NotNull Document document,
                                                              @NotNull ProgressIndicator progress);
@@ -81,13 +85,33 @@ public abstract class DaemonCodeAnalyzerEx extends DaemonCodeAnalyzer {
 
   public abstract @NotNull FileStatusMap getFileStatusMap();
 
+  /**
+   * Do not use because manual management of highlights is dangerous and may lead to unexpected flicking/disappearing/stuck highlighters.
+   * Instead, generate file-level infos in your inspection/annotator, and they will be removed automatically when outdated
+   */
+  @ApiStatus.Internal
   public abstract void cleanFileLevelHighlights(int group, @NotNull PsiFile psiFile);
 
+  @ApiStatus.Internal
   public abstract boolean hasFileLevelHighlights(int group, @NotNull PsiFile psiFile);
+
+  /**
+   * Do not use because manual management of highlights is dangerous and may lead to unexpected flicking/disappearing/stuck highlighters.
+   * Instead, generate file-level infos in your inspection/annotator, and they will be removed automatically when outdated
+   */
+  @ApiStatus.Internal
   public abstract void addFileLevelHighlight(int group, @NotNull HighlightInfo info, @NotNull PsiFile psiFile, @Nullable RangeHighlighter toReuse);
+  @ApiStatus.Internal
+  public abstract void replaceFileLevelHighlight(@NotNull HighlightInfo oldInfo, @NotNull HighlightInfo newInfo, @NotNull PsiFile psiFile, @Nullable RangeHighlighter toReuse);
+  /**
+   * Do not use because manual management of highlights is dangerous and may lead to unexpected flicking/disappearing/stuck highlighters.
+   * Instead, generate file-level infos in your inspection/annotator, and they will be removed automatically when outdated
+   */
+  @ApiStatus.Internal
   abstract void removeFileLevelHighlight(@NotNull PsiFile psiFile, @NotNull HighlightInfo info);
+
   public void markDocumentDirty(@NotNull Document document, @NotNull Object reason) {
-    getFileStatusMap().markFileScopeDirty(document, new TextRange(0, document.getTextLength()), document.getTextLength(), reason);
+    getFileStatusMap().markWholeFileScopeDirty(document, reason);
   }
 
   public static boolean isHighlightingCompleted(@NotNull FileEditor fileEditor, @NotNull Project project) {
@@ -96,7 +120,10 @@ public abstract class DaemonCodeAnalyzerEx extends DaemonCodeAnalyzer {
   }
 
   abstract boolean cutOperationJustHappened();
+
   abstract boolean isEscapeJustPressed();
 
   abstract protected void progressIsAdvanced(@NotNull HighlightingSession session, Editor editor, double progress);
+  static final int ANY_GROUP = -409423948;
+  static final int FILE_LEVEL_FAKE_LAYER = -4094; // the layer the (fake) RangeHighlighter is created for file-level HighlightInfo in
 }

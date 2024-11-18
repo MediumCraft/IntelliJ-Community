@@ -4,19 +4,23 @@ package org.jetbrains.idea.maven.project
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 import org.jetbrains.idea.maven.model.MavenModel
+import org.jetbrains.idea.maven.server.MavenServerConnector
 import org.jetbrains.idea.maven.server.MavenServerManager
 import java.nio.file.Path
 
-class MavenProjectModelServerModelReadHelper(private val myProject: Project) : MavenProjectModelReadHelper {
+open class MavenProjectModelServerModelReadHelper(protected val myProject: Project) : MavenProjectModelReadHelper {
   override suspend fun interpolate(basedir: Path,
-                                   file: VirtualFile,
+                                   mavenModuleFile: VirtualFile,
                                    model: MavenModel): MavenModel {
-    val pomDir = file.parent.toNioPath()
-    return MavenServerManager.getInstance().getConnector(myProject, basedir.toString()).interpolateAndAlignModel(model, basedir, pomDir)
+    val pomDir = mavenModuleFile.parent.toNioPath()
+    return MavenServerConnector.interpolateAndAlignModel(myProject,model, basedir, pomDir )
   }
 
-  override suspend fun assembleInheritance(projectPomDir: Path, parent: MavenModel, model: MavenModel): MavenModel {
-    return MavenServerManager.getInstance().getConnector(myProject, projectPomDir.toAbsolutePath().toString())
-      .assembleInheritance(model, parent)
+  override suspend fun assembleInheritance(projectPomDir: Path, parent: MavenModel, model: MavenModel, mavenModuleFile: VirtualFile): MavenModel {
+    return MavenServerConnector.assembleInheritance(myProject, projectPomDir, model, parent)
+  }
+
+  override fun filterModules(modules: List<String>, mavenModuleFile: VirtualFile): List<String> {
+    return modules;
   }
 }

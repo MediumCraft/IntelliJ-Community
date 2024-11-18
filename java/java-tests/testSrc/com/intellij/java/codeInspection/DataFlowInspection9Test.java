@@ -3,7 +3,6 @@ package com.intellij.java.codeInspection;
 
 import com.intellij.JavaTestUtil;
 import com.intellij.testFramework.LightProjectDescriptor;
-import org.intellij.lang.annotations.Language;
 import org.jetbrains.annotations.NotNull;
 
 public class DataFlowInspection9Test extends DataFlowInspectionTestCase {
@@ -18,29 +17,33 @@ public class DataFlowInspection9Test extends DataFlowInspectionTestCase {
     return JavaTestUtil.getJavaTestDataPath() + "/inspection/dataFlow/fixture/";
   }
 
-  public void testNullabilityJdk9() { doTest();}
   public void testMutabilityJdk9() { doTest();}
   public void testMutabilityInferred() { doTest(); }
   public void testObjectsRequireNonNullElse() { doTest(); }
   public void testNewCollectionAliasing() { doTest(); }
 
   public void testOptionalStreamInlining() { doTest(); }
-  
+
   public void testNullabilityAnnotationOnModule() {
-    @Language("JAVA") String nullMarked =
-      """
-        package org.jspecify.annotations;
-        import java.lang.annotation.*;
-        @Target(ElementType.MODULE)
-        public @interface NullMarked {}""";
-    myFixture.addClass(nullMarked);
+    addJSpecifyNullMarked(myFixture);
     myFixture.addFileToProject("module-info.java", """
       import org.jspecify.annotations.NullMarked;
-            
+
       @NullMarked
       module jspecifysample {
       	requires org.jspecify;
       }""");
+    doTest();
+  }
+
+  public void testJSpecifyNullMarkedLocals() {
+    addJSpecifyNullMarked(myFixture);
+    doTest();
+  }
+
+  public void testJSpecifyUpperBound() {
+    addJSpecifyNullMarked(myFixture);
+    setupTypeUseAnnotations("org.jspecify.annotations", myFixture);
     doTest();
   }
 }

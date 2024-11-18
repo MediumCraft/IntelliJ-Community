@@ -47,6 +47,7 @@ import com.intellij.util.Consumer;
 import com.intellij.util.ObjectUtils;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.Interner;
+import one.util.streamex.EntryStream;
 import org.jdom.Element;
 import org.jetbrains.annotations.Async;
 import org.jetbrains.annotations.NotNull;
@@ -56,13 +57,14 @@ import java.io.File;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Function;
 import java.util.stream.Stream;
 
 public class RefManagerImpl extends RefManager {
   public static final ExtensionPointName<RefGraphAnnotator> EP_NAME = ExtensionPointName.create("com.intellij.refGraphAnnotator");
   private static final Logger LOG = Logger.getInstance(RefManager.class);
 
-  private long myLastUsedMask = 0b1000_00000000_00000000_00000000; // guarded by this
+  private long myLastUsedMask = 0b1000_00000000_00000000_00000000; // 28th bit, guarded by this
 
   private final @NotNull Project myProject;
   private AnalysisScope myScope;
@@ -279,6 +281,7 @@ public class RefManagerImpl extends RefManager {
     }
     else if (refEntity instanceof RefElement refElement) {
       final SmartPsiElementPointer<?> pointer = refElement.getPointer();
+      if (pointer == null) return null;
       PsiFile psiFile = pointer.getContainingFile();
       if (psiFile == null) return null;
 
@@ -538,18 +541,23 @@ public class RefManagerImpl extends RefManager {
     if (answer != null) return answer;
 
     answer = getElements();
-    List<RefElement> list = answer;
-    ReadAction.run(() -> ContainerUtil.quickSort(list, (o1, o2) -> {
-      VirtualFile v1 = ((RefElementImpl)o1).getVirtualFile();
-      VirtualFile v2 = ((RefElementImpl)o2).getVirtualFile();
-      int v21 = VfsUtilCore.compareByPath(v1, v2);
-      if (v21 != 0) {
-        return v21;
+    Map<VirtualFile, List<RefElement>> map = new HashMap<>();
+    for (RefElement ref : answer) {
+      VirtualFile file = ((RefElementImpl)ref).getVirtualFile();
+      map.computeIfAbsent(file, k -> new ArrayList<>()).add(ref);
+    }
+    for (List<RefElement> elementsInFile : map.values()) {
+      if (elementsInFile.size() > 1) {
+        ReadAction.run(() -> {
+          elementsInFile.sort(
+            Comparator.comparing(o -> ObjectUtils.notNull(o.getPointer().getRange(), TextRange.EMPTY_RANGE),
+                                 Segment.BY_START_OFFSET_THEN_END_OFFSET));
+        });
       }
-      Segment r1 = ObjectUtils.notNull(o1.getPointer().getRange(), TextRange.EMPTY_RANGE);
-      Segment r2 = ObjectUtils.notNull(o2.getPointer().getRange(), TextRange.EMPTY_RANGE);
-      return Segment.BY_START_OFFSET_THEN_END_OFFSET.compare(r1, r2);
-    }));
+    }
+    answer = EntryStream.of(map)
+      .sorted((e1, e2) -> VfsUtilCore.compareByPath(e1.getKey(), e2.getKey()))
+      .values().toFlatList(Function.identity());
     myCachedSortedRefs = answer = Collections.unmodifiableList(answer);
     return answer;
   }
@@ -649,8 +657,8 @@ public class RefManagerImpl extends RefManager {
                 }
 
                 if (refWhat != null) {
-                  ((RefElementImpl)refWhat).addInReference(refFile);
-                  ((RefElementImpl)refFile).addOutReference(refWhat);
+                  ((WritableRefElement)refWhat).addInReference(refFile);
+                  ((WritableRefElement)refFile).addOutReference(refWhat);
                 }
               }
             }
@@ -679,32 +687,32 @@ public class RefManagerImpl extends RefManager {
 
     @Override
     public void visitFile(@NotNull PsiFile file) {
-      if (file instanceof PsiBinaryFile || file.getFileType().isBinary()) {
-        return;
-      }
-      final FileViewProvider viewProvider = file.getViewProvider();
-      final Set<Language> relevantLanguages = viewProvider.getLanguages();
-      for (Language language : relevantLanguages) {
-        try {
-          visitElement(viewProvider.getPsi(language));
-        }
-        catch (ProcessCanceledException | IndexNotReadyException e) {
-          throw e;
-        }
-        catch (Throwable e) {
-          if (ApplicationManager.getApplication().isHeadlessEnvironment()) {
-            LOG.error(file.getName(), e);
+      if (!(file instanceof PsiBinaryFile) && !file.getFileType().isBinary()) {
+        final FileViewProvider viewProvider = file.getViewProvider();
+        final Set<Language> relevantLanguages = viewProvider.getLanguages();
+        for (Language language : relevantLanguages) {
+          try {
+            visitElement(viewProvider.getPsi(language));
           }
-          else {
-            LOG.error(new RuntimeExceptionWithAttachments(e, new Attachment("diagnostics.txt", file.getName())));
+          catch (ProcessCanceledException | IndexNotReadyException e) {
+            throw e;
+          }
+          catch (Throwable e) {
+            if (ApplicationManager.getApplication().isHeadlessEnvironment()) {
+              LOG.error(file.getName(), e);
+            }
+            else {
+              LOG.error(new RuntimeExceptionWithAttachments(e, new Attachment("diagnostics.txt", file.getName())));
+            }
           }
         }
+        myPsiManager.dropResolveCaches();
       }
-      myPsiManager.dropResolveCaches();
       final VirtualFile virtualFile = file.getVirtualFile();
       if (virtualFile != null) {
         executeTask(() -> {
-          String relative = ProjectUtilCore.displayUrlRelativeToProject(virtualFile, virtualFile.getPresentableUrl(), myProject, true, false);
+          String relative =
+            ProjectUtilCore.displayUrlRelativeToProject(virtualFile, virtualFile.getPresentableUrl(), myProject, true, false);
           myContext.incrementJobDoneAmount(myContext.getStdJobDescriptors().BUILD_GRAPH, relative);
         });
       }

@@ -1,18 +1,18 @@
 // Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.plugins.github.pullrequest.data
 
-import com.intellij.collaboration.async.classAsCoroutineName
 import com.intellij.collaboration.ui.html.AsyncHtmlImageLoader
 import com.intellij.collaboration.ui.icon.AsyncImageIconsProvider
 import com.intellij.collaboration.ui.icon.CachingIconsProvider
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.logger
-import com.intellij.openapi.progress.*
+import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.project.Project
 import com.intellij.platform.util.coroutines.childScope
 import com.intellij.util.IconUtil
 import com.intellij.util.ui.ImageUtil
+import com.intellij.util.ui.JBImageToolkit
 import git4idea.remote.GitRemoteUrlCoordinates
 import icons.CollaborationToolsIcons
 import kotlinx.coroutines.*
@@ -23,26 +23,27 @@ import org.jetbrains.plugins.github.api.data.GHUser
 import org.jetbrains.plugins.github.api.util.SimpleGHGQLPagesLoader
 import org.jetbrains.plugins.github.authentication.accounts.GHCachingAccountInformationProvider
 import org.jetbrains.plugins.github.authentication.accounts.GithubAccount
-import org.jetbrains.plugins.github.pullrequest.GHPRDiffRequestModelImpl
 import org.jetbrains.plugins.github.pullrequest.data.service.*
 import org.jetbrains.plugins.github.util.CachingGHUserAvatarLoader
 import org.jetbrains.plugins.github.util.GithubSharedProjectSettings
 import java.awt.Image
-import java.awt.Toolkit
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import javax.swing.Icon
+import kotlin.Throws
 
 @Service(Service.Level.PROJECT)
 internal class GHPRDataContextRepository(private val project: Project, parentCs: CoroutineScope) {
 
-  private val cs = parentCs.childScope()
+  private val cs = parentCs.childScope(javaClass.name)
 
   private val cache = ConcurrentHashMap<GHRepositoryCoordinates, GHPRDataContext>()
   private val cacheGuard = Mutex()
 
-  suspend fun getContext(repository: GHRepositoryCoordinates, remote: GitRemoteUrlCoordinates,
-                         account: GithubAccount, requestExecutor: GithubApiRequestExecutor): GHPRDataContext =
+  suspend fun getContext(
+    repository: GHRepositoryCoordinates, remote: GitRemoteUrlCoordinates,
+    account: GithubAccount, requestExecutor: GithubApiRequestExecutor,
+  ): GHPRDataContext =
     withContext(cs.coroutineContext) {
       cacheGuard.withLock {
         val existing = cache[repository]
@@ -69,10 +70,12 @@ internal class GHPRDataContextRepository(private val project: Project, parentCs:
   }
 
   @Throws(IOException::class)
-  private fun CoroutineScope.getContextAsync(account: GithubAccount,
-                                             requestExecutor: GithubApiRequestExecutor,
-                                             parsedRepositoryCoordinates: GHRepositoryCoordinates,
-                                             remoteCoordinates: GitRemoteUrlCoordinates)
+  private fun CoroutineScope.getContextAsync(
+    account: GithubAccount,
+    requestExecutor: GithubApiRequestExecutor,
+    parsedRepositoryCoordinates: GHRepositoryCoordinates,
+    remoteCoordinates: GitRemoteUrlCoordinates,
+  )
     : Deferred<GHPRDataContext> {
     val cs = this
     return async {
@@ -95,7 +98,7 @@ internal class GHPRDataContextRepository(private val project: Project, parentCs:
       val imageLoader = AsyncHtmlImageLoader { _, src ->
         withContext(cs.coroutineContext + IMAGES_DISPATCHER) {
           val bytes = requestExecutor.executeSuspend(GithubApiRequests.getBytes(src))
-          Toolkit.getDefaultToolkit().createImage(bytes)
+          JBImageToolkit.createImage(bytes)
         }
       }
       val avatarIconsProvider = CachingIconsProvider(AsyncImageIconsProvider(iconsScope, AvatarLoader(requestExecutor)))
@@ -115,7 +118,7 @@ internal class GHPRDataContextRepository(private val project: Project, parentCs:
                                                     ghostUserDetails,
                                                     account, currentUser,
                                                     repositoryInfo)
-      val detailsService = GHPRDetailsServiceImpl(ProgressManager.getInstance(), project, securityService,
+      val detailsService = GHPRDetailsServiceImpl(project, securityService,
                                                   requestExecutor, apiRepositoryCoordinates)
       val commentService = GHPRCommentServiceImpl(requestExecutor, apiRepositoryCoordinates)
       val changesService = GHPRChangesServiceImpl(cs, project, requestExecutor,
@@ -127,8 +130,8 @@ internal class GHPRDataContextRepository(private val project: Project, parentCs:
       val listLoader = GHPRListLoader(ProgressManager.getInstance(), requestExecutor, apiRepositoryCoordinates)
       val listUpdatesChecker = GHPRListETagUpdateChecker(ProgressManager.getInstance(), requestExecutor, account.server, apiRepositoryPath)
 
-      val dataProviderRepository = GHPRDataProviderRepositoryImpl(project,
-                                                                  cs,
+      val dataProviderRepository = GHPRDataProviderRepositoryImpl(cs,
+                                                                  repoDataService,
                                                                   detailsService,
                                                                   reviewService,
                                                                   filesService,
@@ -145,13 +148,12 @@ internal class GHPRDataContextRepository(private val project: Project, parentCs:
       val filesManager = GHPRFilesManagerImpl(project, apiRepositoryCoordinates)
       val interactionState = project.service<GHPRPersistentInteractionState>()
 
-      val creationService = GHPRCreationServiceImpl(ProgressManager.getInstance(), requestExecutor, repoDataService)
+      val creationService = GHPRCreationServiceImpl(requestExecutor, repoDataService)
       ensureActive()
       GHPRDataContext(cs, listLoader, listUpdatesChecker, dataProviderRepository,
-                      securityService, repoDataService, creationService, detailsService, changesService, reactionsService,
+                      securityService, repoDataService, creationService, detailsService, reactionsService,
                       imageLoader, avatarIconsProvider, reactionIconsProvider,
-                      filesManager, interactionState,
-                      GHPRDiffRequestModelImpl())
+                      filesManager, interactionState)
     }
   }
 

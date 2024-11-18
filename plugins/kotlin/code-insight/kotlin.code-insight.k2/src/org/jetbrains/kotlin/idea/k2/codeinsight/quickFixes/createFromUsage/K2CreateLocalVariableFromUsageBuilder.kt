@@ -12,9 +12,10 @@ import com.intellij.psi.SmartPointerManager
 import com.intellij.psi.SmartPsiElementPointer
 import com.intellij.psi.util.PsiUtil
 import com.intellij.psi.util.findParentOfType
+import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
 import org.jetbrains.kotlin.analysis.api.analyze
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
-import org.jetbrains.kotlin.idea.k2.codeinsight.quickFixes.createFromUsage.K2CreateFromUsageUtil.getExpectedKotlinType
+import org.jetbrains.kotlin.idea.k2.codeinsight.quickFixes.createFromUsage.K2CreateFunctionFromUsageUtil.getExpectedKotlinType
 import org.jetbrains.kotlin.idea.quickfix.createFromUsage.CreateFromUsageUtil
 import org.jetbrains.kotlin.idea.quickfix.createFromUsage.CreateLocalVariableUtil
 import org.jetbrains.kotlin.psi.*
@@ -47,12 +48,15 @@ object K2CreateLocalVariableFromUsageBuilder {
         }
     }
 
-
-    internal class CreateLocalFromUsageAction(refExpr: KtNameReferenceExpression, private val propertyName: String = refExpr.getReferencedName()) : IntentionAction {
+    internal class CreateLocalFromUsageAction(
+        refExpr: KtNameReferenceExpression,
+        private val propertyName: String = refExpr.getReferencedName()
+    ) : IntentionAction {
         val pointer: SmartPsiElementPointer<KtNameReferenceExpression> = SmartPointerManager.createPointer(refExpr)
         override fun getText(): String = KotlinBundle.message("fix.create.from.usage.local.variable", propertyName)
-        private var declarationText:String = computeDeclarationText()
+        private var declarationText: String = computeDeclarationText()
 
+        @OptIn(KaExperimentalApi::class)
         private fun computeDeclarationText(): String {
             val refExpr = pointer.element ?: return ""
             val assignment = refExpr.getAssignmentByLHS()
@@ -103,9 +107,7 @@ object K2CreateLocalVariableFromUsageBuilder {
         }
 
         override fun startInWriteAction(): Boolean = false
-        override fun isAvailable(project: Project, editor: Editor?, file: PsiFile?): Boolean {
-            return pointer.element != null
-        }
+        override fun isAvailable(project: Project, editor: Editor?, file: PsiFile?): Boolean = pointer.element != null
         override fun getFamilyName(): String = KotlinBundle.message("fix.create.from.usage.family")
     }
 

@@ -11,16 +11,19 @@ import com.intellij.openapi.application.ApplicationNamesInfo;
 import com.intellij.openapi.project.DumbAware;
 import com.intellij.platform.ide.customization.ExternalProductResourceUrls;
 import com.intellij.util.Url;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 
-public final class JetBrainsTvAction extends HelpActionBase implements DumbAware, ActionRemoteBehaviorSpecification.Frontend {
+@ApiStatus.Internal
+public final class JetBrainsTvAction extends AnAction implements DumbAware, ActionRemoteBehaviorSpecification.Frontend {
   public JetBrainsTvAction() {
     getTemplatePresentation().setText(() -> ActionsBundle.message("action.Help.JetBrainsTV.templateText", ApplicationNamesInfo.getInstance().getFullProductName()));
   }
 
   @Override
-  public boolean isAvailable() {
-    return ExternalProductResourceUrls.getInstance().getYouTubeChannelUrl() != null;
+  public void update(@NotNull AnActionEvent e) {
+    Url url = ExternalProductResourceUrls.getInstance().getYouTubeChannelUrl();
+    e.getPresentation().setEnabledAndVisible(url != null);
   }
 
   @Override

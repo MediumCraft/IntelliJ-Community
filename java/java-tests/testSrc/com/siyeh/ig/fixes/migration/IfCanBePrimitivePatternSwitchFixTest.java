@@ -20,7 +20,7 @@ public class IfCanBePrimitivePatternSwitchFixTest extends IGQuickFixesTestCase {
     myFixture.enableInspections(inspection);
     myRelativePath = "migration/if_can_be_switch";
     myDefaultHint = CommonQuickFixBundle.message("fix.replace.x.with.y", PsiKeyword.IF, PsiKeyword.SWITCH);
-    ModuleRootModificationUtil.updateModel(getModule(), DefaultLightProjectDescriptor::addJetBrainsAnnotations);
+    ModuleRootModificationUtil.updateModel(getModule(), DefaultLightProjectDescriptor::addJetBrainsAnnotationsWithTypeUse);
   }
 
   @Override
@@ -58,8 +58,10 @@ public class IfCanBePrimitivePatternSwitchFixTest extends IGQuickFixesTestCase {
   public void testComparisonWithPrimitives1() { doTest(); }
   public void testComparisonWithPrimitives2() { doTest(); }
   public void testComparisonWithPrimitives3() { doTest(); }
+  public void testComparisonWithPrimitivesUsedTwice() { doTest(); }
 
   public void testComparisonNonPrimitive() { assertQuickfixNotAvailable(); }
   public void testDoubleComparison() { assertQuickfixNotAvailable(); }
   public void testPrimitiveDominates() { assertQuickfixNotAvailable(); }
+  public void testVariableAssigned() { assertQuickfixNotAvailable(); }
 }

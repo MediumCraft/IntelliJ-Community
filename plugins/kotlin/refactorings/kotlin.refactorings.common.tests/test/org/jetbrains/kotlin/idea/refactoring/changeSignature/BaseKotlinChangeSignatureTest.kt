@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.kotlin.idea.refactoring.changeSignature
 
 import com.intellij.application.options.CodeStyle
@@ -8,6 +8,7 @@ import com.intellij.codeInsight.TargetElementUtil.REFERENCED_ELEMENT_ACCEPTED
 import com.intellij.lang.LanguageRefactoringSupport
 import com.intellij.openapi.actionSystem.ex.ActionUtil
 import com.intellij.openapi.util.text.StringUtil
+import com.intellij.platform.testFramework.core.FileComparisonFailedError
 import com.intellij.psi.*
 import com.intellij.psi.impl.java.stubs.index.JavaFullClassNameIndex
 import com.intellij.psi.search.searches.MethodReferencesSearch
@@ -19,7 +20,6 @@ import com.intellij.refactoring.changeSignature.ChangeSignatureProcessor
 import com.intellij.refactoring.changeSignature.ParameterInfoImpl
 import com.intellij.refactoring.util.CanonicalTypes
 import com.intellij.refactoring.util.CommonRefactoringUtil
-import com.intellij.rt.execution.junit.FileComparisonData
 import com.intellij.testFramework.LightProjectDescriptor
 import com.intellij.util.VisibilityUtil
 import org.jetbrains.kotlin.asJava.getRepresentativeLightMethod
@@ -149,7 +149,7 @@ public @interface NotNull {
     }
 
     protected fun findTargetElement(): PsiElement? {
-        val provider = LanguageRefactoringSupport.INSTANCE.forContext(file)
+        val provider = LanguageRefactoringSupport.getInstance().forContext(file)
         return provider!!.changeSignatureHandler!!.findTargetMember(file, editor)
     }
 
@@ -242,8 +242,7 @@ public @interface NotNull {
             val afterFilePath: String = getAfterFilePath(file)
             try {
                 myFixture.checkResultByFile(file, afterFilePath, true)
-            } catch (e: AssertionError) {
-                if (e !is FileComparisonData) throw e
+            } catch (e: FileComparisonFailedError) {
                 KotlinTestUtils.assertEqualsToFile(File(testDataDirectory, afterFilePath), psiFile.text)
             }
 
@@ -976,6 +975,7 @@ public @interface NotNull {
     fun testConvertParameterToReceiverAddParents() = doTest { receiverParameterInfo = newParameters[0] }
 
     fun testThisReplacement() = doTest { receiverParameterInfo = null }
+    fun testThisReplacement1() = doTest { receiverParameterInfo = null }
 
     fun testImplicitThisToParameterWithChangedType() = doTest {
         receiverParameterInfo!!.setType("Older")

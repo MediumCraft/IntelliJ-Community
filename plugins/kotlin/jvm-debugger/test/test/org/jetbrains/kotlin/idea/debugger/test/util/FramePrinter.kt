@@ -21,7 +21,7 @@ import com.intellij.xdebugger.XTestValueNode
 import com.intellij.xdebugger.frame.*
 import com.intellij.xdebugger.impl.ui.XDebuggerUIConstants
 import com.sun.jdi.ArrayType
-import org.jetbrains.kotlin.idea.debugger.core.GetterDescriptor
+import org.jetbrains.kotlin.idea.debugger.core.render.GetterDescriptor
 import org.jetbrains.kotlin.idea.debugger.core.invokeInManagerThread
 import org.jetbrains.kotlin.idea.debugger.core.stackFrame.DelegateDescriptor
 import org.jetbrains.kotlin.idea.debugger.coroutine.data.ContinuationVariableValueDescriptorImpl
@@ -128,7 +128,7 @@ class FramePrinter(private val suspendContext: SuspendContextImpl) {
             semaphore.up()
         }
 
-        suspendContext.debugProcess.managerThread.schedule(object : SuspendContextCommandImpl(suspendContext) {
+        suspendContext.managerThread.schedule(object : SuspendContextCommandImpl(suspendContext) {
             override fun contextAction(suspendContext: SuspendContextImpl) {
                 val evaluationContext = EvaluationContextImpl(suspendContext, suspendContext.frameProxy)
                 valueDescriptor.setContext(evaluationContext)

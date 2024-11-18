@@ -16,6 +16,9 @@ object BlockTerminalColors {
   @JvmField val SELECTED_BLOCK_BACKGROUND: ColorKey = ColorKey.createColorKey("BLOCK_TERMINAL_SELECTED_BLOCK_BACKGROUND")
   @JvmField val SELECTED_BLOCK_STROKE_COLOR: ColorKey = ColorKey.createColorKey("BLOCK_TERMINAL_SELECTED_BLOCK_STROKE_COLOR")
 
+  @JvmField val HOVERED_BLOCK_BACKGROUND_START: ColorKey = ColorKey.createColorKey("BLOCK_TERMINAL_HOVERED_BLOCK_BACKGROUND_START")
+  @JvmField val HOVERED_BLOCK_BACKGROUND_END: ColorKey = ColorKey.createColorKey("BLOCK_TERMINAL_HOVERED_BLOCK_BACKGROUND_END")
+
   @JvmField val INACTIVE_SELECTED_BLOCK_BACKGROUND: ColorKey = ColorKey.createColorKey("BLOCK_TERMINAL_INACTIVE_SELECTED_BLOCK_BACKGROUND")
   @JvmField val INACTIVE_SELECTED_BLOCK_STROKE_COLOR: ColorKey = ColorKey.createColorKey("BLOCK_TERMINAL_INACTIVE_SELECTED_BLOCK_STROKE_COLOR")
 
@@ -27,6 +30,10 @@ object BlockTerminalColors {
 
   @JvmField val SEARCH_ENTRY: TextAttributesKey = textAttributesKey("BLOCK_TERMINAL_SEARCH_ENTRY")
   @JvmField val CURRENT_SEARCH_ENTRY: TextAttributesKey = textAttributesKey("BLOCK_TERMINAL_CURRENT_SEARCH_ENTRY")
+
+  @JvmField val GENERATE_COMMAND_PLACEHOLDER_FOREGROUND: ColorKey = ColorKey.createColorKey("BLOCK_TERMINAL_GENERATE_COMMAND_PLACEHOLDER_FOREGROUND")
+  @JvmField val GENERATE_COMMAND_CARET_COLOR: ColorKey = ColorKey.createColorKey("BLOCK_TERMINAL_GENERATE_COMMAND_CARET_COLOR")
+  @JvmField val GENERATE_COMMAND_PROMPT_TEXT: TextAttributesKey = TextAttributesKey.createTextAttributesKey("BLOCK_TERMINAL_GENERATE_COMMAND_PROMPT_TEXT")
 
   @JvmField val BLACK: TextAttributesKey = textAttributesKey("BLOCK_TERMINAL_BLACK")
   @JvmField val RED: TextAttributesKey = textAttributesKey("BLOCK_TERMINAL_RED")

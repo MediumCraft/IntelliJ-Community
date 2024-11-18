@@ -10,9 +10,11 @@ import com.intellij.openapi.project.PossiblyDumbAware;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Key;
+import com.intellij.ui.ClientProperty;
 import com.intellij.ui.ComponentUtil;
 import com.intellij.util.SmartFMap;
 import com.intellij.util.SmartList;
+import com.intellij.util.concurrency.annotations.RequiresReadLock;
 import org.intellij.lang.annotations.JdkConstants;
 import org.jetbrains.annotations.*;
 
@@ -27,18 +29,23 @@ import static com.intellij.openapi.util.NlsActions.ActionDescription;
 import static com.intellij.openapi.util.NlsActions.ActionText;
 
 /**
- * An action has a state, a presentation and can be performed.
+ * An action has a state, a number of presentations and can be performed.
  * <p>
- * For an action to be useful, implement {@link AnAction#actionPerformed}.
+ * For an action to be useful, implement {@link #actionPerformed(AnActionEvent)}.
+ * To alter how the action is presented in UI, implement {@link #update(AnActionEvent)}.
  * <p>
- * The same action can have various presentations.
- * To dynamically change the action's presentation depending on the place, override {@link AnAction#update}.
- * For more information on places, see {@link ActionPlaces}.
+ * Actions have dedicated presentations wherever they are presented to the user.
+ * A single action can be present in different toolbars, popups and menus on the screen at the same time.
+ * The default presentation for each place is a copy of {@link #getTemplatePresentation()}.
+ * <p>
+ * {@link AnActionEvent#getPlace()} is a non-unique, free form, human-readable name of a place.
+ * Some standard platform place names are listed in {@link ActionPlaces}.
  * <pre>
  * public void update(AnActionEvent e) {
- *   if (e.getPlace().equals(ActionPlaces.MAIN_MENU)) {
+ *   if (ActionPlaces.MAIN_MENU.equals(e.getPlace())) {
  *     e.getPresentation().setText("My Menu item name");
- *   } else if (e.getPlace().equals(ActionPlaces.MAIN_TOOLBAR)) {
+ *   }
+ *   else if (ActionPlaces.MAIN_TOOLBAR.equals(e.getPlace())) {
  *     e.getPresentation().setText("My Toolbar item name");
  *   }
  * }
@@ -46,19 +53,21 @@ import static com.intellij.openapi.util.NlsActions.ActionText;
  *
  * @see <a href="https://plugins.jetbrains.com/docs/intellij/basic-action-system.html">Actions (IntelliJ Platform Docs)</a>
  * @see AnActionEvent
- * @see Presentation
  * @see ActionPlaces
+ * @see Presentation
+ * @see DataContext
  * @see com.intellij.openapi.project.DumbAwareAction
  */
 public abstract class AnAction implements PossiblyDumbAware, ActionUpdateThreadAware {
   private static final Logger LOG = Logger.getInstance(AnAction.class);
 
+  @ApiStatus.Internal
+  public static final Key<Integer> ACTIONS_MOD_COUNT = Key.create("AnAction.ACTIONS_MOD_COUNT");
   public static final Key<List<AnAction>> ACTIONS_KEY = Key.create("AnAction.shortcutSet");
   public static final AnAction[] EMPTY_ARRAY = new AnAction[0];
 
-  private Presentation templatePresentation;
+  private Presentation myTemplatePresentation;
   private @NotNull ShortcutSet myShortcutSet = CustomShortcutSet.EMPTY;
-  private boolean myEnabledInModalContext;
 
   private boolean myIsDefaultIcon = true;
   private SmartFMap<String, Supplier<String>> myActionTextOverrides = SmartFMap.emptyMap();
@@ -177,6 +186,9 @@ public abstract class AnAction implements PossiblyDumbAware, ActionUpdateThreadA
     }
   }
 
+  /**
+   * Do not override, but prefer extending from {@link DumbAwareAction} instead.
+   */
   @Override
   public boolean isDumbAware() {
     if (PossiblyDumbAware.super.isDumbAware()) {
@@ -185,6 +197,16 @@ public abstract class AnAction implements PossiblyDumbAware, ActionUpdateThreadA
     return ActionClassMetaData.isDefaultUpdate(this);
   }
 
+  /**
+   * Specifies the thread and the way {@link AnAction#update(AnActionEvent)},
+   * {@link ActionGroup#getChildren(AnActionEvent)} or other update-like methods shall be called.
+   * <p>
+   * The preferred value is {@link ActionUpdateThread#BGT}.
+   * <p>
+   * The default value is {@link ActionUpdateThread#EDT}.
+   *
+   * @see ActionUpdateThread
+   */
   @Override
   public @NotNull ActionUpdateThread getActionUpdateThread() {
     if (this instanceof UpdateInBackground && ((UpdateInBackground)this).isUpdateInBackground()) {
@@ -193,7 +215,7 @@ public abstract class AnAction implements PossiblyDumbAware, ActionUpdateThreadA
     if (ActionClassMetaData.isDefaultUpdate(this)) {
       return ActionUpdateThread.BGT;
     }
-    return ActionUpdateThreadAware.super.getActionUpdateThread();
+    return ActionUpdateThread.EDT;
   }
 
   /** Returns the set of shortcuts associated with this action. */
@@ -233,6 +255,7 @@ public abstract class AnAction implements PossiblyDumbAware, ActionUpdateThreadA
     }
     if (!actionList.contains(this)) {
       actionList.add(this);
+      updateCustomActionsModCount(component);
     }
 
     if (parentDisposable != null) {
@@ -243,8 +266,19 @@ public abstract class AnAction implements PossiblyDumbAware, ActionUpdateThreadA
   public final void unregisterCustomShortcutSet(@NotNull JComponent component) {
     List<AnAction> actionList = ComponentUtil.getClientProperty(component, ACTIONS_KEY);
     if (actionList != null) {
-      actionList.remove(this);
+      if (actionList.remove(this)) {
+        updateCustomActionsModCount(component);
+      }
     }
+  }
+
+  /**
+   * Update component's "actions mod count" on actions' update.
+   * Allows subscribing on addition/removing of custom shortcut actions.
+   */
+  private static void updateCustomActionsModCount(@NotNull JComponent component) {
+    int oldCounter = Objects.requireNonNullElse(ClientProperty.get(component, ACTIONS_MOD_COUNT), 0);
+    ClientProperty.put(component, ACTIONS_MOD_COUNT, oldCounter + 1);
   }
 
   /**
@@ -264,18 +298,19 @@ public abstract class AnAction implements PossiblyDumbAware, ActionUpdateThreadA
   }
 
   public final boolean isEnabledInModalContext() {
-    return myEnabledInModalContext;
+    return getTemplatePresentation().isEnabledInModalContext();
   }
 
   protected final void setEnabledInModalContext(boolean enabledInModalContext) {
-    myEnabledInModalContext = enabledInModalContext;
+    getTemplatePresentation().setEnabledInModalContext(enabledInModalContext);
   }
 
   /**
    * Return {@code true} if the action has to display its text along with the icon when placed in the toolbar.
    * <p>
-   * TODO Move to template presentation client properties and drop the method.
+   * @deprecated Use {@link com.intellij.openapi.actionSystem.ex.ActionUtil#SHOW_TEXT_IN_TOOLBAR} presentation property instead.
    */
+  @Deprecated(forRemoval = true)
   public boolean displayTextInToolbar() {
     return false;
   }
@@ -283,28 +318,32 @@ public abstract class AnAction implements PossiblyDumbAware, ActionUpdateThreadA
   /**
    * Return {@code true} if the action displays text in a smaller font (same as toolbar combobox font) when placed in the toolbar.
    * <p>
-   * TODO Move to template presentation client properties and drop the method.
+   * @deprecated Use {@link com.intellij.openapi.actionSystem.ex.ActionUtil#USE_SMALL_FONT_IN_TOOLBAR} presentation property instead.
    */
+  @Deprecated(forRemoval = true)
   public boolean useSmallerFontForTextInToolbar() {
     return false;
   }
 
   /**
-   * Updates the presentation of the action.
+   * Updates the presentation of the action to show a menu, a popup item, a toolbar button,
+   * and when the action is invoked via a shortcut.
    * The default implementation does nothing.
+   * The Platform tries its best to invoke this method and act upon the updated presentation flags
+   * a little before the action is called.
    * <p>
    * Override this method to dynamically change the action's state or presentation depending on the context.
    * For example, when your action state depends on the selection,
    * you can check for the selection and change the state accordingly.
    * <p>
-   * This method can be called frequently and on the UI thread.
-   * This means that this method is supposed to work really fast,
-   * no real work should be done at this phase.
-   * For example, checking the selection in a tree or a list is considered valid,
-   * but working with a file system or PSI (especially resolve) is not.
-   * If you cannot determine the state of the action fast enough,
-   * you should do it in the {@link #actionPerformed(AnActionEvent)} method
-   * and notify the user that the action cannot be executed if it's the case.
+   * This method can be called frequently.
+   * It shall be fast.
+   * It must not change UI or any state, except populating some caches.
+   * <p>
+   * {@link #getActionUpdateThread()} controls whether the method is called on EDT or BGT.
+   * BGT actions can rely on slow PSI, VFS, etc. but that can lead to slow menus and popups.
+   * To speed them up, you can move slow checks to {@link #actionPerformed(AnActionEvent)} method
+   * and notify the user that the action cannot be executed when it is so.
    * <p>
    * If the action is added to a toolbar, its {@code update} method can be called twice a second,
    * but only if there was any user activity or a focus transfer.
@@ -312,21 +351,24 @@ public abstract class AnAction implements PossiblyDumbAware, ActionUpdateThreadA
    * call {@code ActivityTracker.getInstance().inc()}
    * to notify the action subsystem to update all toolbar actions
    * when your subsystem's determines that its actions' visibility might be affected.
+   * <br/>
+   * This method is always called under the {@link com.intellij.openapi.application.ReadAction}.
    *
    * @see #getActionUpdateThread()
    */
   @ApiStatus.OverrideOnly
+  @RequiresReadLock(generateAssertion = false)
   public void update(@NotNull AnActionEvent e) {
   }
 
   /**
-   * Updates the presentation of the action just before the {@link #actionPerformed(AnActionEvent)} method is called.
-   * The default implementation simply delegates to the {@link #update(AnActionEvent)} method.
-   * <p/>
-   * It is called on the UI thread with all data in the provided {@link DataContext} instance.
+   * Though the platform components (toolbars, menus, etc.) do their best to call update sometime before calling actionPerformed,
+   * implementations MUST NOT rely on it.
+   * Instead, they MUST always check whether the data context is suitable in {@link #actionPerformed(AnActionEvent)} and do nothing if it is not.
    *
-   * @see #actionPerformed(AnActionEvent)
+   * @deprecated Move any code to {@link #actionPerformed(AnActionEvent)}
    */
+  @Deprecated(forRemoval = true)
   @ApiStatus.OverrideOnly
   public void beforeActionPerformedUpdate(@NotNull AnActionEvent e) {
     update(e);
@@ -337,24 +379,31 @@ public abstract class AnAction implements PossiblyDumbAware, ActionUpdateThreadA
    * a new presentation of the action is needed.
    */
   public final @NotNull Presentation getTemplatePresentation() {
-    Presentation presentation = templatePresentation;
+    Presentation presentation = myTemplatePresentation;
     if (presentation == null) {
       presentation = createTemplatePresentation();
       LOG.assertTrue(presentation.isTemplate(), "Not a template presentation");
-      templatePresentation = presentation;
+      myTemplatePresentation = presentation;
     }
     return presentation;
   }
 
   @NotNull
   Presentation createTemplatePresentation() {
-    return Presentation.newTemplatePresentation();
+    Presentation presentation = Presentation.newTemplatePresentation();
+    if (displayTextInToolbar()) {
+      presentation.putClientProperty("SHOW_TEXT_IN_TOOLBAR", true);
+      if (useSmallerFontForTextInToolbar()) {
+        presentation.putClientProperty("USE_SMALL_FONT_IN_TOOLBAR", true);
+      }
+    }
+    return presentation;
   }
 
   /**
    * A shortcut for {@code getTemplatePresentation().getText()}.
    */
-  public final String getTemplateText() {
+  public final @ActionText String getTemplateText() {
     return getTemplatePresentation().getText();
   }
 
@@ -362,9 +411,21 @@ public abstract class AnAction implements PossiblyDumbAware, ActionUpdateThreadA
    * Performs the action logic.
    * <p>
    * It is called on the UI thread with all data in the provided {@link DataContext} instance.
+   * <p>
+   * The data context of {@link AnActionEvent#getData(DataKey)} MAY occasionally NOT HAVE the necessary data.
+   * <p>
+   * The implementors should not assume that {@link #update(AnActionEvent)}
+   * or {@link #beforeActionPerformedUpdate(AnActionEvent)} have been called before,
+   * and MUST to re-check that context is suitable, and do nothing if it is not.
+   * <p>
+   * The method must not be called directly.
+   * Use {@link com.intellij.openapi.actionSystem.ex.ActionUtil#performActionDumbAwareWithCallbacks} or
+   * (when delegating) {@link ActionWrapperUtil#actionPerformed}
    *
-   * @see #beforeActionPerformedUpdate(AnActionEvent)
+   * @see com.intellij.openapi.actionSystem.ex.ActionUtil#performActionDumbAwareWithCallbacks
+   * @see ActionWrapperUtil#actionPerformed
    */
+  @ApiStatus.OverrideOnly
   public abstract void actionPerformed(@NotNull AnActionEvent e);
 
   @ApiStatus.Internal
@@ -393,6 +454,7 @@ public abstract class AnAction implements PossiblyDumbAware, ActionUpdateThreadA
    * <p>
    * TODO Move to template presentation client properties and drop the method.
    */
+  @ApiStatus.Internal
   public void setDefaultIcon(boolean isDefaultIconSet) {
     myIsDefaultIcon = isDefaultIconSet;
   }
@@ -402,6 +464,7 @@ public abstract class AnAction implements PossiblyDumbAware, ActionUpdateThreadA
    * <p>
    * TODO Move to template presentation client properties and drop the method.
    */
+  @ApiStatus.Internal
   public boolean isDefaultIcon() {
     return myIsDefaultIcon;
   }

@@ -59,12 +59,32 @@ internal class GHPRReviewNewCommentEditorViewModelImpl(
   private val settings = GithubPullRequestsProjectUISettings.getInstance(project)
   private val reviewDataProvider = dataProvider.reviewData
   private val changesState: StateFlow<ComputedResult<GitBranchComparisonResult>> =
-    dataProvider.changesData.changesComputationState.stateInNow(cs, ComputedResult.loading())
+    dataProvider.changesData.changesComputationState().stateInNow(cs, ComputedResult.loading())
 
   private val pendingReviewState: StateFlow<ComputedResult<GHPullRequestPendingReview?>> =
     reviewDataProvider.pendingReviewComputationFlow.stateInNow(cs, ComputedResult.loading())
 
   private val reviewCommentPreferred = settings.reviewCommentsPreferredState
+
+  private val createSingleCommentAction = SubmitAction.CreateSingleComment {
+    submit {
+      val thread = createThreadDTO(it)
+      val commitSha = position.change.revisionNumberAfter.asString()
+      reviewDataProvider.createReview(GHPullRequestReviewEvent.COMMENT, null, commitSha, listOf(thread))
+      settings.reviewCommentsPreferred = false
+      cancel()
+    }
+  }
+
+  private val createReviewAction = SubmitAction.CreateReview {
+    submit {
+      val thread = createThreadDTO(it)
+      val commitSha = position.change.revisionNumberAfter.asString()
+      reviewDataProvider.createReview(null, null, commitSha, listOf(thread))
+      settings.reviewCommentsPreferred = true
+      cancel()
+    }
+  }
 
   override val submitActions: StateFlow<List<SubmitAction>> =
     combine(pendingReviewState, reviewCommentPreferred, changesState) { reviewResult, reviewPreferred, changesResult ->
@@ -88,26 +108,6 @@ internal class GHPRReviewNewCommentEditorViewModelImpl(
     }.stateInNow(cs, emptyList())
 
   override fun cancel() = onCancel()
-
-  private val createSingleCommentAction = SubmitAction.CreateSingleComment {
-    submit {
-      val thread = createThreadDTO(it)
-      val commitSha = position.change.revisionNumberAfter.asString()
-      reviewDataProvider.createReview(GHPullRequestReviewEvent.COMMENT, null, commitSha, listOf(thread))
-      settings.reviewCommentsPreferred = false
-      cancel()
-    }
-  }
-
-  private val createReviewAction = SubmitAction.CreateReview {
-    submit {
-      val thread = createThreadDTO(it)
-      val commitSha = position.change.revisionNumberAfter.asString()
-      reviewDataProvider.createReview(null, null, commitSha, listOf(thread))
-      settings.reviewCommentsPreferred = true
-      cancel()
-    }
-  }
 
   private fun createReviewCommentAction(reviewId: String, isCumulative: Boolean) = SubmitAction.CreateReviewComment {
     submit {

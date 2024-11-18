@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.application
 
 import com.intellij.configurationStore.getPerOsSettingsStorageFolderName
@@ -10,7 +10,7 @@ import com.intellij.ide.startup.StartupActionScriptManager
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.idea.TestFor
 import com.intellij.openapi.components.StoragePathMacros
-import com.intellij.openapi.components.stateStore
+import com.intellij.openapi.components.impl.stores.stateStore
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.extensions.PluginId
 import com.intellij.openapi.progress.ProgressIndicator
@@ -25,7 +25,6 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Condition
 import org.junit.Assume.assumeTrue
 import org.junit.Test
-import java.io.File
 import java.io.IOException
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -207,15 +206,10 @@ class ConfigImportHelperTest : ConfigImportHelperBaseTest() {
     val options = ConfigImportHelper.ConfigImportOptions(LOG).apply { headless = true }
     options.compatibleBuildNumber = BuildNumber.fromString("201.1")
     options.downloadService = object : MarketplacePluginDownloadService() {
-
-      override fun downloadPlugin(pluginUrl: String, indicator: ProgressIndicator): File {
-        val path = localTempDir.newDirectory("pluginTemp")
-          .toPath()
-          .resolve("my-plugin-new.jar")
-        PluginBuilder()
-          .id(oldBuilder.id)
-          .buildJar(path)
-        return path.toFile()
+      override fun downloadPlugin(pluginUrl: String, indicator: ProgressIndicator?): Path {
+        val path = localTempDir.newDirectory("pluginTemp").toPath().resolve("my-plugin-new.jar")
+        PluginBuilder().id(oldBuilder.id).buildJar(path)
+        return path
       }
     }
 
@@ -237,7 +231,7 @@ class ConfigImportHelperTest : ConfigImportHelperBaseTest() {
     options.compatibleBuildNumber = BuildNumber.fromString("201.1")
     options.downloadService = object : MarketplacePluginDownloadService() {
 
-      override fun downloadPlugin(pluginUrl: String, indicator: ProgressIndicator) =
+      override fun downloadPlugin(pluginUrl: String, indicator: ProgressIndicator?) =
         throw IOException("404")
     }
     ConfigImportHelper.doImport(oldConfigDir, newConfigDir, null, oldPluginsDir, newPluginsDir, options)
@@ -334,7 +328,7 @@ class ConfigImportHelperTest : ConfigImportHelperBaseTest() {
     options.compatibleBuildNumber = BuildNumber.fromString("201.1")
     options.downloadService = object : MarketplacePluginDownloadService() {
 
-      override fun downloadPlugin(pluginUrl: String, indicator: ProgressIndicator) =
+      override fun downloadPlugin(pluginUrl: String, indicator: ProgressIndicator?) =
         throw AssertionError("No file download should be requested")
     }
     ConfigImportHelper.doImport(oldConfigDir, newConfigDir, null, oldPluginsDir, newPluginsDir, options)
@@ -558,6 +552,7 @@ class ConfigImportHelperTest : ConfigImportHelperBaseTest() {
     assertThat(newVmOptionsFile.readLines()).containsExactly("-Xmx2048m", "-Dunique.prop=some.val")
   }
 
+  @Suppress("SpellCheckingInspection")
   @TestFor(issues = ["IDEA-341860"])
   @Test fun `don't ask for VM options restart, if they are actual`() {
     val oldConfigDir = localTempDir.newDirectory("oldConfig").toPath()
@@ -570,7 +565,7 @@ class ConfigImportHelperTest : ConfigImportHelperBaseTest() {
 
     CustomConfigMigrationOption.MigrateFromCustomPlace(oldConfigDir).writeConfigMarkerFile(newConfigDir)
 
-    val oldVmOptionsFile = oldConfigDir.resolve(VMOptions.getFileName()).writeLines(listOf("-Xmx2048m", "-Dsome.prop=old.val"))
+    oldConfigDir.resolve(VMOptions.getFileName()).writeLines(listOf("-Xmx2048m", "-Dsome.prop=old.val"))
 
     val platformVmOptionsFile = newConfigDir.fileSystem.getPath(VMOptions.getPlatformOptionsFile().toString())
     Files.createDirectories(platformVmOptionsFile.parent)
@@ -584,6 +579,5 @@ class ConfigImportHelperTest : ConfigImportHelperBaseTest() {
         fail("A restart must not be required!", ex)
       }
     }
-
   }
 }

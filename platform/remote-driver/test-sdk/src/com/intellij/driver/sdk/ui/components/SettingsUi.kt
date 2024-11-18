@@ -1,23 +1,20 @@
 package com.intellij.driver.sdk.ui.components
 
 import com.intellij.driver.sdk.invokeAction
-import com.intellij.driver.sdk.ui.Locators
+import com.intellij.driver.sdk.ui.xQuery
 
 fun WelcomeScreenUI.settingsDialog(action: SettingsUiComponent.() -> Unit): SettingsUiComponent =
-  x(Locators.byTitle("Settings"), SettingsUiComponent::class.java).apply(action)
+  x(SettingsUiComponent::class.java) { byTitle("Settings") }.apply(action)
 
 fun IdeaFrameUI.settingsDialog(action: SettingsUiComponent.() -> Unit): SettingsUiComponent =
-  x(Locators.byTitle("Settings"), SettingsUiComponent::class.java).apply(action)
+  x(SettingsUiComponent::class.java) { byTitle("Settings") }.apply(action)
 
 fun WelcomeScreenUI.showSettings() = driver.invokeAction("WelcomeScreen.Settings", now = false)
 
-fun IdeaFrameUI.showSettings() = driver.invokeAction("ShowSettings", now = false)
+open class SettingsUiComponent(data: ComponentData): DialogUiComponent(data) {
 
-class SettingsUiComponent(data: ComponentData): UiComponent(data) {
-
-  val settingsTree: JTreeUiComponent = tree(Locators.byType("com.intellij.openapi.options.newEditor.SettingsTreeView${"$"}MyTree"))
-  val okButton = x(Locators.byAccessibleName("OK"))
+  val settingsTree: JTreeUiComponent = tree(xQuery { byType("com.intellij.openapi.options.newEditor.SettingsTreeView${"$"}MyTree") })
 
   fun content(action: UiComponent.() -> Unit): UiComponent =
-    x(Locators.byType("com.intellij.openapi.options.ex.ConfigurableCardPanel")).apply(action)
+    x { byType("com.intellij.openapi.options.ex.ConfigurableCardPanel") }.apply(action)
 }

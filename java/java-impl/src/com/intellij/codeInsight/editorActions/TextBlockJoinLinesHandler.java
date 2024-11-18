@@ -31,6 +31,7 @@ public final class TextBlockJoinLinesHandler implements JoinRawLinesHandlerDeleg
         !tokenType.equals(JavaTokenType.TEXT_BLOCK_TEMPLATE_MID)) {
       return CANNOT_JOIN;
     }
+    if (file.findElementAt(end) != token) return CANNOT_JOIN;
     TextRange tokenRange = token.getTextRange();
     int lineNumber = doc.getLineNumber(start);
     boolean atStartLine = (tokenType.equals(JavaTokenType.TEXT_BLOCK_LITERAL) || tokenType.equals(JavaTokenType.TEXT_BLOCK_TEMPLATE_BEGIN))
@@ -103,7 +104,12 @@ public final class TextBlockJoinLinesHandler implements JoinRawLinesHandlerDeleg
       }
       int nextI = PsiLiteralUtil.parseBackSlash(literal, i);
       if (nextI != -1) {
-        if (sb != null) {
+        if (nextI == i + 1 && literal.charAt(nextI) == 's') {
+          if (sb == null) {
+            sb = new StringBuilder(literal.substring(3, i));
+          }
+          sb.append(' ');
+        } else if (sb != null) {
           sb.append(literal, i + 1, nextI + 1);
         }
         //noinspection AssignmentToForLoopParameter

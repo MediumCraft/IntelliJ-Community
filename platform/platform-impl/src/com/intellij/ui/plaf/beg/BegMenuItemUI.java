@@ -5,8 +5,10 @@ package com.intellij.ui.plaf.beg;
 import com.intellij.ide.ui.UISettings;
 import com.intellij.ide.ui.laf.intellij.IdeaPopupMenuUI;
 import com.intellij.openapi.actionSystem.impl.ActionMenuItem;
+import com.intellij.openapi.actionSystem.impl.Utils;
 import com.intellij.openapi.client.ClientSystemInfo;
 import com.intellij.openapi.keymap.MacKeymapUtil;
+import com.intellij.openapi.options.advanced.AdvancedSettings;
 import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.NlsSafe;
 import com.intellij.ui.ExperimentalUI;
@@ -14,6 +16,7 @@ import com.intellij.ui.JBColor;
 import com.intellij.util.IconUtil;
 import com.intellij.util.ui.JBInsets;
 import com.intellij.util.ui.UIUtil;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
@@ -35,6 +38,7 @@ import java.util.function.Consumer;
 /**
  * @author Eugene Belyaev
  */
+@ApiStatus.Internal
 public final class BegMenuItemUI extends BasicMenuItemUI {
   private static final String KEEP_MENU_OPEN_PROP = "BegMenuItemUI.keep-menu-open";
 
@@ -509,12 +513,13 @@ public final class BegMenuItemUI extends BasicMenuItemUI {
       msm = MenuSelectionManager.defaultManager();
     }
     ActionMenuItem item = (ActionMenuItem)menuItem;
-    if (!item.isKeepMenuOpen()) {
+    boolean keepMenuOpen = Utils.isKeepPopupOpen(item.getKeepPopupOnPerform(), e);
+    if (!keepMenuOpen) {
       msm.clearSelectedPath();
     }
     ActionEvent event = new ActionEvent(menuItem, ActionEvent.ACTION_PERFORMED, null, e.getWhen(), e.getModifiers());
     item.fireActionPerformed(event);
-    if (item.isKeepMenuOpen()) {
+    if (keepMenuOpen) {
       Container parent = item.getParent();
       if (parent instanceof JComponent) {
         //Fake event to trigger update in ActionPopupMenuImpl.MyMenu
@@ -576,6 +581,7 @@ public final class BegMenuItemUI extends BasicMenuItemUI {
 
     @Override
     public void menuDragMouseReleased(MenuDragMouseEvent e){
+      if (!AdvancedSettings.getBoolean("ide.trigger.menu.actions.on.rmb.release")) return;
       MenuSelectionManager manager=e.getMenuSelectionManager();
       Point p=e.getPoint();
       if(p.x>=0&&p.x<menuItem.getWidth()&&

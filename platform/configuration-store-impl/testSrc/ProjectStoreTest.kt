@@ -4,13 +4,17 @@ package com.intellij.configurationStore
 import com.intellij.ide.highlighter.ProjectFileType
 import com.intellij.ide.impl.OpenProjectTask
 import com.intellij.ide.plugins.PluginManagerCore
-import com.intellij.openapi.components.*
+import com.intellij.openapi.components.ComponentManager
+import com.intellij.openapi.components.PersistentStateComponent
+import com.intellij.openapi.components.State
+import com.intellij.openapi.components.Storage
+import com.intellij.openapi.components.impl.stores.stateStore
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ex.ProjectEx
 import com.intellij.openapi.project.ex.ProjectManagerEx
-import com.intellij.openapi.util.io.FileUtilRt
 import com.intellij.openapi.vcs.readOnlyHandler.ReadonlyStatusHandlerImpl
 import com.intellij.openapi.vfs.ReadonlyStatusHandler
+import com.intellij.openapi.vfs.limits.FileSizeLimit
 import com.intellij.project.stateStore
 import com.intellij.testFramework.*
 import com.intellij.testFramework.assertions.Assertions.assertThat
@@ -79,11 +83,11 @@ class ProjectStoreTest {
 
       assertThat(testComponent.state).isEqualTo(TestState("newValue"))
 
-      testComponent.state!!.AAValue = "s".repeat(FileUtilRt.LARGE_FOR_CONTENT_LOADING + 1024)
+      testComponent.state!!.AAValue = "s".repeat(FileSizeLimit.getDefaultContentLoadLimit() + 1024)
       project.stateStore.save()
 
       // we should save twice (first call - virtual file size is not yet set)
-      testComponent.state!!.AAValue = "b".repeat(FileUtilRt.LARGE_FOR_CONTENT_LOADING + 1024)
+      testComponent.state!!.AAValue = "b".repeat(FileSizeLimit.getDefaultContentLoadLimit() + 1024)
       project.stateStore.save()
     }
   }

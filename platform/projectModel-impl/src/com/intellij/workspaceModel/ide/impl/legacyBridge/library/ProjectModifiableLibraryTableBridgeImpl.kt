@@ -12,15 +12,15 @@ import com.intellij.platform.backend.workspace.WorkspaceModel
 import com.intellij.platform.workspace.jps.entities.*
 import com.intellij.platform.workspace.storage.CachedValue
 import com.intellij.platform.workspace.storage.EntityStorage
+import com.intellij.platform.workspace.storage.ImmutableEntityStorage
 import com.intellij.platform.workspace.storage.MutableEntityStorage
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentationApi
 import com.intellij.platform.workspace.storage.instrumentation.MutableEntityStorageInstrumentation
-import com.intellij.platform.workspace.storage.toSnapshot
-import com.intellij.workspaceModel.ide.impl.LegacyBridgeJpsEntitySourceFactory
 import com.intellij.workspaceModel.ide.impl.legacyBridge.LegacyBridgeModifiableBase
 import com.intellij.workspaceModel.ide.impl.legacyBridge.library.ProjectLibraryTableBridgeImpl.Companion.findLibraryEntity
 import com.intellij.workspaceModel.ide.impl.legacyBridge.library.ProjectLibraryTableBridgeImpl.Companion.libraryMap
 import com.intellij.workspaceModel.ide.impl.legacyBridge.library.ProjectLibraryTableBridgeImpl.Companion.mutableLibraryMap
+import com.intellij.workspaceModel.ide.legacyBridge.LegacyBridgeJpsEntitySourceFactory
 import com.intellij.workspaceModel.ide.legacyBridge.ProjectModifiableLibraryTableBridge
 import org.jetbrains.jps.model.serialization.library.JpsLibraryTableSerializer
 
@@ -65,7 +65,7 @@ internal class ProjectModifiableLibraryTableBridgeImpl(
       LOG.error("Project library with name '$name' already exists.")
     }
 
-    val libraryEntity = LibraryEntity(name, libraryTableId, emptyList(), LegacyBridgeJpsEntitySourceFactory.createEntitySourceForProjectLibrary(project, externalSource)) {
+    val libraryEntity = LibraryEntity(name, libraryTableId, emptyList(), LegacyBridgeJpsEntitySourceFactory.getInstance(project).createEntitySourceForProjectLibrary(externalSource)) {
       this.typeId = type?.kindId?.let { LibraryTypeId(it) }
     }
 
@@ -149,5 +149,13 @@ internal class ProjectModifiableLibraryTableBridgeImpl(
 
   companion object {
     val LOG = logger<ProjectModifiableLibraryTableBridgeImpl>()
+  }
+}
+
+private fun EntityStorage.toSnapshot(): ImmutableEntityStorage {
+  return when (this) {
+    is ImmutableEntityStorage -> this
+    is MutableEntityStorage -> this.toSnapshot()
+    else -> error("Unexpected storage: $this")
   }
 }

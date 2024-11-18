@@ -3,16 +3,18 @@ package com.intellij.vcs.log.graph.impl.facade
 
 import com.intellij.vcs.log.graph.actions.GraphAction
 import com.intellij.vcs.log.graph.api.LinearGraph
-import com.intellij.vcs.log.graph.impl.print.elements.PrintElementWithGraphElement
+import com.intellij.vcs.log.graph.api.printer.GraphPrintElement
+import org.jetbrains.annotations.ApiStatus
 import java.awt.Cursor
 
+@ApiStatus.Internal
 interface LinearGraphController {
   val compiledGraph: LinearGraph
 
   fun performLinearGraphAction(action: LinearGraphAction): LinearGraphAnswer
 
   interface LinearGraphAction : GraphAction {
-    override val affectedElement: PrintElementWithGraphElement?
+    override val affectedElement: GraphPrintElement?
   }
 
   // Integer = nodeId

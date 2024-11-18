@@ -3,8 +3,10 @@ package com.intellij.vcs.log.graph.impl.facade
 
 import com.intellij.vcs.log.graph.api.elements.GraphElement
 import com.intellij.vcs.log.graph.api.permanent.PermanentGraphInfo
-import com.intellij.vcs.log.graph.impl.print.elements.PrintElementWithGraphElement
+import com.intellij.vcs.log.graph.api.printer.GraphPrintElement
+import org.jetbrains.annotations.ApiStatus
 
+@ApiStatus.Internal
 abstract class CascadeController protected constructor(protected val delegateController: LinearGraphController,
                                                        val permanentGraphInfo: PermanentGraphInfo<*>) : LinearGraphController {
   override fun performLinearGraphAction(action: LinearGraphController.LinearGraphAction): LinearGraphController.LinearGraphAnswer {
@@ -14,10 +16,10 @@ abstract class CascadeController protected constructor(protected val delegateCon
     return delegateGraphChanged(delegateController.performLinearGraphAction(delegateAction))
   }
 
-  private fun convertToDelegate(element: PrintElementWithGraphElement?): PrintElementWithGraphElement? {
+  private fun convertToDelegate(element: GraphPrintElement?): GraphPrintElement? {
     if (element == null) return null
     val convertedGraphElement = convertToDelegate(element.graphElement) ?: return null
-    return PrintElementWithGraphElement.converted(element, convertedGraphElement)
+    return convertPrintElement(element, convertedGraphElement)
   }
 
   protected open fun convertToDelegate(graphElement: GraphElement): GraphElement? = graphElement
@@ -36,6 +38,12 @@ abstract class CascadeController protected constructor(protected val delegateCon
 
       val result = delegateController.performActionRecursively(action) ?: return null
       return delegateGraphChanged(LinearGraphController.LinearGraphAnswer(result)).graphChanges
+    }
+
+    private fun convertPrintElement(element: GraphPrintElement, convertedGraphElement: GraphElement): GraphPrintElement {
+      return object : GraphPrintElement by element {
+        override val graphElement: GraphElement get() = convertedGraphElement
+      }
     }
   }
 }

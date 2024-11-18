@@ -15,6 +15,7 @@ import com.intellij.openapi.util.CheckedDisposable
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.Key
 import com.intellij.openapi.util.SystemInfoRt
+import com.intellij.openapi.util.registry.Registry
 import com.intellij.openapi.util.text.StringUtil
 import com.intellij.openapi.wm.*
 import com.intellij.openapi.wm.impl.InternalDecorator
@@ -40,7 +41,6 @@ import com.intellij.util.ui.JBUI
 import org.intellij.lang.annotations.MagicConstant
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.ApiStatus.Internal
-import org.jetbrains.annotations.NonNls
 import java.awt.*
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
@@ -56,7 +56,7 @@ class InternalDecoratorImpl internal constructor(
   @JvmField internal val toolWindow: ToolWindowImpl,
   private val contentUi: ToolWindowContentUi,
   private val myDecoratorChild: JComponent
-) : InternalDecorator(), Queryable, DataProvider, ComponentWithMnemonics {
+) : InternalDecorator(), Queryable, UiDataProvider, ComponentWithMnemonics {
   companion object {
     val SHARED_ACCESS_KEY: Key<Boolean> = Key.create("sharedAccess")
 
@@ -177,7 +177,11 @@ class InternalDecoratorImpl internal constructor(
 
     internal fun setBackgroundRecursively(component: Component, bg: Color) {
       val action: (Component) -> Unit = { c ->
-        if (c !is ActionButton && c !is Divider && c !is JTextComponent) {
+        if (c !is ActionButton &&
+            c !is Divider &&
+            c !is JTextComponent &&
+            c !is JComboBox<*> &&
+            c !is EditorTextField) {
           c.background = bg
         }
       }
@@ -229,6 +233,7 @@ class InternalDecoratorImpl internal constructor(
   private var splitter: Splitter? = null
   private val componentsWithEditorLikeBackground = SmartList<Component>()
   private var tabActions: List<AnAction> = emptyList()
+  private val titleActions = mutableListOf<AnAction>()
 
   init {
     isFocusable = false
@@ -306,9 +311,15 @@ class InternalDecoratorImpl internal constructor(
       contentManager.addContent(content, dropIndex)
       return
     }
-    firstDecorator = toolWindow.createCellDecorator().also { it.setTabActions(tabActions) }
+    firstDecorator = toolWindow.createCellDecorator().also {
+      it.setTabActions(tabActions)
+      it.setTitleActions(titleActions)
+    }
     attach(firstDecorator)
-    secondDecorator = toolWindow.createCellDecorator().also { it.setTabActions(tabActions) }
+    secondDecorator = toolWindow.createCellDecorator().also {
+      it.setTabActions(tabActions)
+      it.setTitleActions(titleActions)
+    }
     attach(secondDecorator)
     val contents = contentManager.contents.toMutableList()
     if (!contents.contains(content)) {
@@ -518,12 +529,16 @@ class InternalDecoratorImpl internal constructor(
     return result
   }
 
-  override fun getData(dataId: @NonNls String): Any? {
-    return if (PlatformDataKeys.TOOL_WINDOW.`is`(dataId)) toolWindow else null
+  override fun uiDataSnapshot(sink: DataSink) {
+    sink[PlatformDataKeys.TOOL_WINDOW] = toolWindow
   }
 
   fun setTitleActions(actions: List<AnAction>) {
-    header.setAdditionalTitleActions(actions)
+    titleActions.clear()
+    titleActions.addAll(actions)
+    header.setAdditionalTitleActions(titleActions)
+    firstDecorator?.setTitleActions(actions)
+    secondDecorator?.setTitleActions(actions)
   }
 
   fun setTabActions(actions: List<AnAction>) {
@@ -819,6 +834,9 @@ class InternalDecoratorImpl internal constructor(
     }
 
   override fun addNotify() {
+    if (log().isTraceEnabled) {
+      log().trace(Throwable("Tool window $toolWindowId shown"))
+    }
     super.addNotify()
     if (isSplitUnsplitInProgress()) {
       return
@@ -829,19 +847,28 @@ class InternalDecoratorImpl internal constructor(
     }
 
     val divider = divider
-    disposable = Disposer.newCheckedDisposable()
-    HOVER_STATE_LISTENER.addTo(this, disposable!!)
+    val disposable = Disposer.newCheckedDisposable()
+    this.disposable = disposable
+    HOVER_STATE_LISTENER.addTo(this, disposable)
     updateActiveAndHoverState()
     if (divider != null) {
       val glassPane = rootPane.glassPane as IdeGlassPane
       val listener = ResizeOrMoveDocketToolWindowMouseListener(divider, glassPane, this)
-      glassPane.addMouseMotionPreprocessor(listener, disposable!!)
-      glassPane.addMousePreprocessor(listener, disposable!!)
+      glassPane.addMouseMotionPreprocessor(listener, disposable)
+      glassPane.addMousePreprocessor(listener, disposable)
     }
     contentUi.update()
+
+    if ((toolWindow.type == ToolWindowType.WINDOWED || toolWindow.type == ToolWindowType.FLOATING) &&
+        Registry.`is`("ide.allow.split.and.reorder.in.tool.window")) {
+      ToolWindowInnerDragHelper(disposable, this).start()
+    }
   }
 
   override fun removeNotify() {
+    if (log().isTraceEnabled) {
+      log().trace(Throwable("Tool window $toolWindowId hidden"))
+    }
     super.removeNotify()
     if (isSplitUnsplitInProgress()) {
       return

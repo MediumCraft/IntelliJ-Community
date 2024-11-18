@@ -5,6 +5,7 @@ import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.plus
 import org.jetbrains.intellij.build.BuildPaths.Companion.COMMUNITY_ROOT
 import org.jetbrains.intellij.build.impl.BuildContextImpl
+import org.jetbrains.intellij.build.impl.qodana.QodanaProductProperties
 import org.jetbrains.intellij.build.io.copyDir
 import org.jetbrains.intellij.build.io.copyFileToDir
 import org.jetbrains.intellij.build.kotlin.KotlinBinaries
@@ -31,7 +32,8 @@ open class IdeaCommunityProperties(private val communityHomeDir: Path) : BaseIde
       "intellij.platform.vcs.testFramework",
       "intellij.platform.externalSystem.testFramework",
       "intellij.maven.testFramework",
-      "intellij.platform.reproducibleBuilds.diffTool",
+      "intellij.tools.reproducibleBuilds.diff",
+      "intellij.space.java.jps",
     )
   }
 
@@ -41,8 +43,6 @@ open class IdeaCommunityProperties(private val communityHomeDir: Path) : BaseIde
   init {
     platformPrefix = "Idea"
     applicationInfoModule = "intellij.idea.community.customization"
-    additionalIDEPropertiesFilePaths = persistentListOf(communityHomeDir.resolve("build/conf/ideaCE.properties"))
-    toolsJarRequired = true
     scrambleMainJar = false
     useSplash = true
     buildCrossPlatformDistribution = true
@@ -51,9 +51,7 @@ open class IdeaCommunityProperties(private val communityHomeDir: Path) : BaseIde
       "intellij.platform.starter",
       "intellij.idea.community.customization",
     )
-    productLayout.bundledPluginModules = IDEA_BUNDLED_PLUGINS
-      .addAll(listOf("intellij.javaFX.community", "intellij.vcs.github.community"))
-      .toMutableList()
+    productLayout.bundledPluginModules = IDEA_BUNDLED_PLUGINS + sequenceOf("intellij.javaFX.community", "intellij.vcs.github.community")
 
     productLayout.prepareCustomPluginRepositoryForPublishedPlugins = false
     productLayout.buildAllCompatiblePlugins = false
@@ -61,7 +59,6 @@ open class IdeaCommunityProperties(private val communityHomeDir: Path) : BaseIde
       JavaPluginLayout.javaPlugin(),
       CommunityRepositoryModules.androidPlugin(allPlatforms = true),
       CommunityRepositoryModules.groovyPlugin(),
-      CommunityRepositoryModules.githubPlugin("intellij.vcs.github.community"),
     ))
 
     productLayout.addPlatformSpec { layout, _ ->
@@ -80,7 +77,8 @@ open class IdeaCommunityProperties(private val communityHomeDir: Path) : BaseIde
     baseDownloadUrl = "https://download.jetbrains.com/idea/"
     buildDocAuthoringAssets = true
 
-    additionalVmOptions += "-Dide.show.tips.on.startup.default.value=false"
+    qodanaProductProperties = QodanaProductProperties("QDJVMC", "Qodana Community for JVM")
+    enableKotlinPluginK2ByDefault()
   }
 
   override suspend fun copyAdditionalFiles(context: BuildContext, targetDir: Path) {
@@ -96,7 +94,7 @@ open class IdeaCommunityProperties(private val communityHomeDir: Path) : BaseIde
     bundleExternalPlugins(context, targetDir)
   }
 
-  protected open fun bundleExternalPlugins(context: BuildContext, targetDirectory: Path) {
+  protected open suspend fun bundleExternalPlugins(context: BuildContext, targetDirectory: Path) {
     //temporary unbundle VulnerabilitySearch
     //ExternalPluginBundler.bundle('VulnerabilitySearch',
     //                             "$buildContext.paths.communityHome/build/dependencies",
@@ -136,7 +134,7 @@ open class IdeaCommunityProperties(private val communityHomeDir: Path) : BaseIde
 
     override fun getRootDirectoryName(appInfo: ApplicationInfoProperties, buildNumber: String) = "idea-IC-$buildNumber"
 
-    override fun generateExecutableFilesPatterns(context: BuildContext, includeRuntime: Boolean, arch: JvmArchitecture): List<String> {
+    override fun generateExecutableFilesPatterns(context: BuildContext, includeRuntime: Boolean, arch: JvmArchitecture): Sequence<String> {
       return super.generateExecutableFilesPatterns(context, includeRuntime, arch)
         .plus(KotlinBinaries.kotlinCompilerExecutables)
         .filterNot { it == "plugins/**/*.sh" }
@@ -163,11 +161,10 @@ open class IdeaCommunityProperties(private val communityHomeDir: Path) : BaseIde
       }
     }
 
-    override fun generateExecutableFilesPatterns(context: BuildContext, includeRuntime: Boolean, arch: JvmArchitecture): List<String> {
-      return super.generateExecutableFilesPatterns(context, includeRuntime, arch).asSequence()
+    override fun generateExecutableFilesPatterns(context: BuildContext, includeRuntime: Boolean, arch: JvmArchitecture): Sequence<String> {
+      return super.generateExecutableFilesPatterns(context, includeRuntime, arch)
         .plus(KotlinBinaries.kotlinCompilerExecutables)
         .filterNot { it == "plugins/**/*.sh" }
-        .toList()
     }
   }
 

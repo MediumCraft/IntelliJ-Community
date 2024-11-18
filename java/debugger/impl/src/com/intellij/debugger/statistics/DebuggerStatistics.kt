@@ -1,18 +1,22 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.debugger.statistics
 
+import com.intellij.debugger.actions.JvmSmartStepIntoHandler
 import com.intellij.debugger.engine.DebugProcess
 import com.intellij.debugger.engine.DebugProcessEvents
+import com.intellij.debugger.engine.SteppingAction
 import com.intellij.debugger.ui.breakpoints.Breakpoint
 import com.intellij.internal.statistic.eventLog.EventLogGroup
 import com.intellij.internal.statistic.eventLog.events.EventFields
 import com.intellij.internal.statistic.service.fus.collectors.CounterUsagesCollector
 import com.intellij.openapi.project.Project
+import org.jetbrains.annotations.ApiStatus
 
+@ApiStatus.Internal
 object DebuggerStatistics : CounterUsagesCollector() {
   override fun getGroup(): EventLogGroup = GROUP
 
-  private val GROUP = EventLogGroup("java.debugger", 6)
+  private val GROUP = EventLogGroup("java.debugger", 9)
 
   // fields
 
@@ -42,6 +46,8 @@ object DebuggerStatistics : CounterUsagesCollector() {
   private val steppingOverhead = GROUP.registerEvent("stepping.overhead", steppingActionField, languageField, EventFields.DurationMs)
   /** Reports smart step into unexpected end. Could be caused by unexpected exception. */
   private val steppingFailedMethodNotCalled = GROUP.registerEvent("stepping.method.not.called", steppingActionField, languageField)
+  /** Reports successful or failed targets detection in smart-step-into. */
+  private val smartStepTargetsDetection = GROUP.registerEvent("smart.step.into.targets.detected", languageField, EventFields.Enum<JvmSmartStepIntoHandler.SmartStepIntoDetectionStatus>("status"))
 
   private val breakpointSkipped = GROUP.registerEvent("breakpoint.skipped", EventFields.Enum<DebugProcessEvents.SkippedBreakpointReason>("reason"))
 
@@ -89,6 +95,11 @@ object DebuggerStatistics : CounterUsagesCollector() {
   @JvmStatic
   fun logBreakpointSkipped(project: Project, reason: DebugProcessEvents.SkippedBreakpointReason) {
     breakpointSkipped.log(project, reason)
+  }
+
+  @JvmStatic
+  fun logSmartStepIntoTargetsDetection(project: Project?, language: Engine, status: JvmSmartStepIntoHandler.SmartStepIntoDetectionStatus) {
+    smartStepTargetsDetection.log(project, language, status)
   }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.execution.testframework;
 
 import com.intellij.execution.ExecutionBundle;
@@ -30,9 +30,10 @@ import java.awt.*;
 import java.util.List;
 
 public final class TestsUIUtil {
-  public static final NotificationGroup NOTIFICATION_GROUP = NotificationGroupManager.getInstance().getNotificationGroup("Test Runner");
+  public static @NotNull NotificationGroup getNotificationGroup() {
+    return NotificationGroupManager.getInstance().getNotificationGroup("Test Runner");
+  }
 
-  public static final Color PASSED_COLOR = new Color(0, 128, 0);
   private static final @NonNls String TESTS = "tests";
 
   private TestsUIUtil() {
@@ -121,7 +122,7 @@ public final class TestsUIUtil {
       group.createNotification(balloonText, type).setToolWindowId(windowId).notify(project);
     }
 
-    NOTIFICATION_GROUP.createNotification(balloonText, type).notify(project);
+    getNotificationGroup().createNotification(balloonText, type).notify(project);
     SystemNotifications.getInstance().notify("TestRunner", title, text);
   }
 

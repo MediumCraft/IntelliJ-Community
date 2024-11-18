@@ -41,7 +41,7 @@ import java.util.Map;
  */
 public interface PyClass extends PyAstClass, PsiNameIdentifierOwner, PyCompoundStatement, PyDocStringOwner, StubBasedPsiElement<PyClassStub>,
                                  ScopeOwner, PyDecoratable, PyTypedElement, PyQualifiedNameOwner, PyStatementListContainer, PyWithAncestors,
-                                 PyTypeParameterListOwner {
+                                 PyTypeParameterListOwner, PyDeprecatable {
   PyClass[] EMPTY_ARRAY = new PyClass[0];
   ArrayFactory<PyClass> ARRAY_FACTORY = count -> count == 0 ? EMPTY_ARRAY : new PyClass[count];
 
@@ -98,6 +98,16 @@ public interface PyClass extends PyAstClass, PsiNameIdentifierOwner, PyCompoundS
    */
   @Override
   PyExpression @NotNull [] getSuperClassExpressions();
+
+
+  /**
+   * Collects methods defined in the class, and its parents.
+   * <p/>
+   * This method does not access AST if the underlying PSI is stub-based.
+   *
+   * @return class methods
+   */
+  PyFunction @NotNull [] getMethodsInherited(@Nullable TypeEvalContext context);
 
   /**
    * Collects methods defined in the class.
@@ -211,12 +221,7 @@ public interface PyClass extends PyAstClass, PsiNameIdentifierOwner, PyCompoundS
    *
    * @see #getClassAttributesInherited(TypeEvalContext)
    */
-  @Override
-   default List<PyTargetExpression> getClassAttributes() {
-    //noinspection unchecked
-    return (List<PyTargetExpression>)PyAstClass.super.getClassAttributes();
-  }
-
+  List<PyTargetExpression> getClassAttributes();
 
   /**
    * Returns all class attributes this class class contains, including inherited one.
@@ -294,6 +299,15 @@ public interface PyClass extends PyAstClass, PsiNameIdentifierOwner, PyCompoundS
    */
   @Nullable
   List<String> getSlots(@Nullable TypeEvalContext context);
+
+  /**
+   * Returns the list of names in the class' __slots__ attribute, or null if the class
+   * does not define such an attribute.
+   *
+   * @return the list of names or null.
+   */
+  @Nullable
+  List<String> getOwnSlots();
 
   /**
    * Process all declarations appearing at the syntactic level of this class' body, in particular class attributes, both

@@ -1,11 +1,9 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.util.ui;
 
 import com.intellij.BundleBase;
-import com.intellij.concurrency.ThreadContext;
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.application.AccessToken;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.ui.GraphicsConfig;
 import com.intellij.openapi.util.*;
@@ -34,8 +32,8 @@ import sun.font.FontUtilities;
 import javax.sound.sampled.AudioInputStream;
 import javax.sound.sampled.AudioSystem;
 import javax.sound.sampled.Clip;
-import javax.swing.FocusManager;
 import javax.swing.*;
+import javax.swing.FocusManager;
 import javax.swing.border.Border;
 import javax.swing.border.LineBorder;
 import javax.swing.plaf.ButtonUI;
@@ -65,8 +63,8 @@ import java.lang.reflect.Method;
 import java.net.URL;
 import java.text.NumberFormat;
 import java.text.ParseException;
-import java.util.List;
 import java.util.*;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
 import java.util.function.Supplier;
@@ -215,7 +213,10 @@ public final class UIUtil {
    * Useful for components that are manually painted over the editor to prevent shortcuts from falling-through to editor
    * <p>
    * Usage: {@code component.putClientProperty(HIDE_EDITOR_FROM_DATA_CONTEXT_PROPERTY, Boolean.TRUE)}
+   *
+   * @deprecated Use {@link com.intellij.openapi.actionSystem.CustomizedDataContext#EXPLICIT_NULL} instead.
    */
+  @Deprecated(forRemoval = true)
   public static final @NonNls String HIDE_EDITOR_FROM_DATA_CONTEXT_PROPERTY = "AuxEditorComponent";
   public static final @NonNls String CENTER_TOOLTIP_DEFAULT = "ToCenterTooltip";
   public static final @NonNls String CENTER_TOOLTIP_STRICT = "ToCenterTooltip.default";
@@ -339,7 +340,7 @@ public final class UIUtil {
    * @deprecated use {@link ClientProperty#get(Component, Key)} instead
    */
   @Deprecated
-  public static <T> T getClientProperty(Object component, @NotNull Key<T> key) {
+  public static <T> @Nullable T getClientProperty(Object component, @NotNull Key<T> key) {
     return component instanceof Component ? ClientProperty.get((Component)component, key) : null;
   }
 
@@ -555,6 +556,57 @@ public final class UIUtil {
     }
 
     return ArrayUtilRt.toStringArray(lines);
+  }
+
+  /**
+   * Computes the minimum size the component must have to keep the given number of characters
+   *
+   * Same as {@code computeTextComponentMinimumSize(preferredSize, text, fontMetrics, 4)}.
+   *
+   * @param preferredSize     the size of the component needed to keep everything, usually computed by {@link Component#getPreferredSize()}
+   * @param text              the currently set text
+   * @param fontMetrics       the current font metrics
+   * @return the minimum size the component has to have to keep the given number of characters
+   */
+  public static int computeTextComponentMinimumSize(
+    int preferredSize,
+    @Nullable String text,
+    @Nullable FontMetrics fontMetrics
+  ) {
+    return computeTextComponentMinimumSize(preferredSize, text, fontMetrics, 4);
+  }
+
+  /**
+   * Computes the minimum size the component must have to keep the given number of characters
+   * <p>
+   *   Intended to be used for simple {@code JLabel}-like text components.
+   *   Often they provide the preferred size, but not the minimum size.
+   *   This function can be used to roughly compute the minimum size based on the preferred one.
+   *   The returned size will be reduced by the difference between the full text width and
+   *   the width of the text contracted to just the {@code nCharactersToKeep} first characters plus {@code "..."}
+   *   that's usually added by such components when the text doesn't fit.
+   * </p>
+   * <p>
+   *   Note that, due to various factors, the result may be off by a few pixels which is enough to gain or lose an extra character.
+   *   Because of fractional font metrics, fractional scaling, complicated calculations, rounding errors and other such things
+   *   it's hard to make strict guarantees here.
+   * </p>
+   * @param preferredSize     the size of the component needed to keep everything, usually computed by {@link Component#getPreferredSize()}
+   * @param text              the currently set text
+   * @param fontMetrics       the current font metrics
+   * @param nCharactersToKeep the number of characters the component must keep
+   * @return the minimum size the component has to have to keep the given number of characters
+   */
+  public static int computeTextComponentMinimumSize(
+    int preferredSize,
+    @Nullable String text,
+    @Nullable FontMetrics fontMetrics,
+    int nCharactersToKeep
+  ) {
+    if (text == null || text.length() <= nCharactersToKeep || fontMetrics == null) return preferredSize;
+    var fullTextWidth = fontMetrics.stringWidth(text);
+    var minTextWidth = fontMetrics.stringWidth(text.substring(0, nCharactersToKeep) + "...");
+    return preferredSize - (fullTextWidth - minTextWidth);
   }
 
   public static void setActionNameAndMnemonic(@NotNull @Nls String text, @NotNull Action action) {
@@ -829,7 +881,7 @@ public final class UIUtil {
   /**
    * @deprecated Use {@link FontUtil#getMenuFont()}
    */
-  @Deprecated
+  @Deprecated(forRemoval = true)
   @SuppressWarnings("unused")
   public static Font getMenuFont() {
     return FontUtil.getMenuFont();
@@ -1419,9 +1471,7 @@ public final class UIUtil {
    */
   @TestOnly
   public static void dispatchAllInvocationEvents() {
-    try (AccessToken ignored = ThreadContext.resetThreadContext()) {
-      EDT.dispatchAllInvocationEvents();
-    }
+    EDT.dispatchAllInvocationEvents();
   }
 
   public static void addAwtListener(@NotNull AWTEventListener listener, long mask, @NotNull Disposable parent) {
@@ -1547,11 +1597,17 @@ public final class UIUtil {
    */
   public static boolean isFocusAncestor(@NotNull Component component) {
     Component owner = KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner();
-    if (owner == null) return false;
-    if (SwingUtilities.isDescendingFrom(owner, component)) return true;
+    if (owner == null) {
+      return false;
+    }
+    if (SwingUtilities.isDescendingFrom(owner, component) || GraphicsEnvironment.isHeadless()) {
+      return true;
+    }
 
     while (component != null) {
-      if (kindaHasFocus(component)) return true;
+      if (kindaHasFocus(component)) {
+        return true;
+      }
       component = component.getParent();
     }
     return false;
@@ -1620,10 +1676,6 @@ public final class UIUtil {
   }
 
   private static boolean kindaHasFocus(@NotNull Component component) {
-    if (GraphicsEnvironment.isHeadless()) {
-      return true;
-    }
-
     JComponent jComponent = component instanceof JComponent ? (JComponent)component : null;
     return jComponent != null && Boolean.TRUE.equals(jComponent.getClientProperty(HAS_FOCUS));
   }
@@ -1637,7 +1689,7 @@ public final class UIUtil {
    */
   @ApiStatus.Experimental
   public static boolean hasFocus(@NotNull Component component) {
-    return kindaHasFocus(component) || component.hasFocus();
+    return GraphicsEnvironment.isHeadless() || kindaHasFocus(component) || component.hasFocus();
   }
 
   /**
@@ -1933,23 +1985,23 @@ public final class UIUtil {
    * {@link com.intellij.ui.ScrollPaneFactory#createScrollPane(Component, boolean)}.
    */
   @Deprecated
-  public static void removeScrollBorder(final Component c) {
+  public static void removeScrollBorder(@NotNull Component c) {
     JBIterable<JScrollPane> scrollPanes = uiTraverser(c)
       .expand(o -> o == c || o instanceof JPanel || o instanceof JLayeredPane)
       .filter(JScrollPane.class);
     for (JScrollPane scrollPane : scrollPanes) {
       Integer keepBorderSides = ClientProperty.get(scrollPane, KEEP_BORDER_SIDES);
-      if (keepBorderSides != null) {
-        if (scrollPane.getBorder() instanceof LineBorder) {
-          Color color = ((LineBorder)scrollPane.getBorder()).getLineColor();
-          scrollPane.setBorder(new SideBorder(color, keepBorderSides.intValue()));
-        }
-        else {
-          scrollPane.setBorder(new SideBorder(NamedColorUtil.getBoundsColor(), keepBorderSides.intValue()));
-        }
+      if (keepBorderSides == null) {
+        scrollPane.setBorder(new SideBorder(NamedColorUtil.getBoundsColor(), SideBorder.NONE));
+      }
+      else if (scrollPane.getBorder() instanceof LineBorder lineBorder) {
+        Color color = lineBorder.getLineColor();
+        //noinspection MagicConstant
+        scrollPane.setBorder(new SideBorder(color, keepBorderSides.intValue()));
       }
       else {
-        scrollPane.setBorder(new SideBorder(NamedColorUtil.getBoundsColor(), SideBorder.NONE));
+        //noinspection MagicConstant
+        scrollPane.setBorder(new SideBorder(NamedColorUtil.getBoundsColor(), keepBorderSides.intValue()));
       }
     }
   }
@@ -2139,7 +2191,7 @@ public final class UIUtil {
       result = uiChildren(c);
     }
     if (c instanceof JComponent jc) {
-      Iterable<? extends Component> orphans = ClientProperty.get(jc, NOT_IN_HIERARCHY_COMPONENTS);
+      Iterable<? extends Component> orphans = ClientProperty.get(jc, ComponentUtil.NOT_IN_HIERARCHY_COMPONENTS);
       if (orphans != null) {
         result = result.append(orphans);
       }

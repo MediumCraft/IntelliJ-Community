@@ -325,7 +325,7 @@ public final class TypeConstraints {
       if (equals(other)) return true;
       if (other instanceof PrimitiveArray || other instanceof ExactArray || other instanceof Unresolved) return true;
       if (other instanceof ExactClass exactClass) {
-        return exactClass.classDef.isInheritor(myReference);
+        return exactClass.isSubtypeOf(myReference);
       }
       if (other instanceof ExactSubclass subclass) {
         for (Exact superClass : subclass.mySupers) {
@@ -444,7 +444,7 @@ public final class TypeConstraints {
       if (other instanceof ArraySuperInterface) {
         if (classDef.isInterface()) return true;
         if (!classDef.isFinal()) return true;
-        return classDef.isInheritor(((ArraySuperInterface)other).myReference);
+        return isSubtypeOf(((ArraySuperInterface)other).myReference);
       }
       if (other instanceof ExactClass exactClass) {
         return classDef.isConvertible(exactClass.classDef);
@@ -482,6 +482,12 @@ public final class TypeConstraints {
     @Override
     public @NotNull Exact convert(TypeConstraintFactory factory) {
       return new ExactSubclass(myId, ContainerUtil.map2Array(mySupers, Exact.class, ex -> ex.convert(factory)));
+    }
+
+    @Override
+    public @Nullable PsiType getPsiType(Project project) {
+      PsiType[] types = StreamEx.of(mySupers).map(st -> st.getPsiType(project)).distinct().toArray(PsiType.EMPTY_ARRAY);
+      return types.length == 0 ? null : PsiIntersectionType.createIntersection(types);
     }
 
     @Override
@@ -622,7 +628,6 @@ public final class TypeConstraints {
    * in {@link #isInheritor(ClassDef)}, or in {@link #equals(Object)} calls).
    */
   public interface ClassDef {
-    boolean isInheritor(@NotNull String superClassQualifiedName);
     boolean isInheritor(@NotNull ClassDef superType);
     boolean isConvertible(@NotNull ClassDef other);
     boolean isInterface();
@@ -665,7 +670,7 @@ public final class TypeConstraints {
       }
       return unresolved(def.toString());
     }
-    
+
     @NotNull Exact create(@NotNull String fqn);
   }
 

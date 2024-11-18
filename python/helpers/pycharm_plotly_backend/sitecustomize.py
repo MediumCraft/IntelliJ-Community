@@ -26,7 +26,9 @@ def init_plotly_render():
     from plotly.io._renderers import renderers
 
     class DisplayDataObject:
-        def __init__(self, html_string: str, image_string: str):
+        def __init__(self, html_string, image_string):
+            # type: (str, str) -> None
+
             self.html_string = html_string
             self.image_string = image_string
 
@@ -122,15 +124,23 @@ try:
 
     # Use matplotlib backend from pycharm
     modules_list = list(sys.modules.keys())
+    old_getfilesystemencoding = None
+    if not sys.getfilesystemencoding():
+        old_getfilesystemencoding = sys.getfilesystemencoding
+        sys.getfilesystemencoding = lambda: 'UTF-8'
 
-    init_plotly_render()
+    try:
+        init_plotly_render()
+    except:
+        # fallback in case plotly is not loaded correctly
+        debug("Cannot init plotly backend")
+        if SHOW_DEBUG_INFO:
+            traceback.print_exc()
+
+    if old_getfilesystemencoding:
+            sys.getfilesystemencoding = old_getfilesystemencoding
     debug("Custom plotly backend was set for Plots tool window")
 except:
-    # fallback in case matplotlib is not loaded correctly
-    debug("Cannot init plotly backend")
-    if SHOW_DEBUG_INFO:
-        traceback.print_exc()
-
     keys = list(sys.modules.keys())
     if modules_list:
         for key in keys:

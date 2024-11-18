@@ -45,6 +45,16 @@ public class FirQuickDocTestGenerated extends AbstractFirQuickDocTest {
         runTest("../../idea/tests/testData/editor/quickDoc/Annotation.kt");
     }
 
+    @TestMetadata("AnnotationWithUseSite1.kt")
+    public void testAnnotationWithUseSite1() throws Exception {
+        runTest("../../idea/tests/testData/editor/quickDoc/AnnotationWithUseSite1.kt");
+    }
+
+    @TestMetadata("AnnotationWithUseSite2.kt")
+    public void testAnnotationWithUseSite2() throws Exception {
+        runTest("../../idea/tests/testData/editor/quickDoc/AnnotationWithUseSite2.kt");
+    }
+
     @TestMetadata("AnonymousObjectLocalVariable.kt")
     public void testAnonymousObjectLocalVariable() throws Exception {
         runTest("../../idea/tests/testData/editor/quickDoc/AnonymousObjectLocalVariable.kt");
@@ -95,6 +105,11 @@ public class FirQuickDocTestGenerated extends AbstractFirQuickDocTest {
         runTest("../../idea/tests/testData/editor/quickDoc/DataClass.kt");
     }
 
+    @TestMetadata("DataClassOnConstructor.kt")
+    public void testDataClassOnConstructor() throws Exception {
+        runTest("../../idea/tests/testData/editor/quickDoc/DataClassOnConstructor.kt");
+    }
+
     @TestMetadata("DefinitelyNonNullType.kt")
     public void testDefinitelyNonNullType() throws Exception {
         runTest("../../idea/tests/testData/editor/quickDoc/DefinitelyNonNullType.kt");
@@ -135,9 +150,24 @@ public class FirQuickDocTestGenerated extends AbstractFirQuickDocTest {
         runTest("../../idea/tests/testData/editor/quickDoc/FunctionTypeParameter.kt");
     }
 
+    @TestMetadata("FunctionalReceiver.kt")
+    public void testFunctionalReceiver() throws Exception {
+        runTest("../../idea/tests/testData/editor/quickDoc/FunctionalReceiver.kt");
+    }
+
     @TestMetadata("IndentedCodeBlock.kt")
     public void testIndentedCodeBlock() throws Exception {
         runTest("../../idea/tests/testData/editor/quickDoc/IndentedCodeBlock.kt");
+    }
+
+    @TestMetadata("InlineClass.kt")
+    public void testInlineClass() throws Exception {
+        runTest("../../idea/tests/testData/editor/quickDoc/InlineClass.kt");
+    }
+
+    @TestMetadata("InlineValueClass.kt")
+    public void testInlineValueClass() throws Exception {
+        runTest("../../idea/tests/testData/editor/quickDoc/InlineValueClass.kt");
     }
 
     @TestMetadata("JavaClassConstructorUsedInKotlin.kt")
@@ -248,6 +278,11 @@ public class FirQuickDocTestGenerated extends AbstractFirQuickDocTest {
     @TestMetadata("OnEnumDeclaration.kt")
     public void testOnEnumDeclaration() throws Exception {
         runTest("../../idea/tests/testData/editor/quickDoc/OnEnumDeclaration.kt");
+    }
+
+    @TestMetadata("OnEnumEntries.kt")
+    public void testOnEnumEntries() throws Exception {
+        runTest("../../idea/tests/testData/editor/quickDoc/OnEnumEntries.kt");
     }
 
     @TestMetadata("OnEnumEntry.kt")
@@ -370,6 +405,11 @@ public class FirQuickDocTestGenerated extends AbstractFirQuickDocTest {
         runTest("../../idea/tests/testData/editor/quickDoc/PropertiesInConstructor.kt");
     }
 
+    @TestMetadata("QualifiedNameDocLink.kt")
+    public void testQualifiedNameDocLink() throws Exception {
+        runTest("../../idea/tests/testData/editor/quickDoc/QualifiedNameDocLink.kt");
+    }
+
     @TestMetadata("renderAnnotatedExtensionFunctionType.kt")
     public void testRenderAnnotatedExtensionFunctionType() throws Exception {
         runTest("../../idea/tests/testData/editor/quickDoc/renderAnnotatedExtensionFunctionType.kt");
@@ -378,6 +418,11 @@ public class FirQuickDocTestGenerated extends AbstractFirQuickDocTest {
     @TestMetadata("Samples.kt")
     public void testSamples() throws Exception {
         runTest("../../idea/tests/testData/editor/quickDoc/Samples.kt");
+    }
+
+    @TestMetadata("SuperConstructorWithArgs.kt")
+    public void testSuperConstructorWithArgs() throws Exception {
+        runTest("../../idea/tests/testData/editor/quickDoc/SuperConstructorWithArgs.kt");
     }
 
     @TestMetadata("Tailrec.kt")
@@ -408,5 +453,10 @@ public class FirQuickDocTestGenerated extends AbstractFirQuickDocTest {
     @TestMetadata("TypeParameterConstraints.kt")
     public void testTypeParameterConstraints() throws Exception {
         runTest("../../idea/tests/testData/editor/quickDoc/TypeParameterConstraints.kt");
+    }
+
+    @TestMetadata("UnresolvedAnnotation.kt")
+    public void testUnresolvedAnnotation() throws Exception {
+        runTest("../../idea/tests/testData/editor/quickDoc/UnresolvedAnnotation.kt");
     }
 }

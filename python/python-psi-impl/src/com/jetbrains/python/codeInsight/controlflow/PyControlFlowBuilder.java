@@ -29,18 +29,20 @@ import com.intellij.psi.util.QualifiedName;
 import com.intellij.util.containers.ContainerUtil;
 import com.jetbrains.python.PyNames;
 import com.jetbrains.python.PyTokenTypes;
-import com.jetbrains.python.codeInsight.dataflow.scope.ScopeUtil;
-import com.jetbrains.python.codeInsight.typing.PyTypingTypeProvider;
 import com.jetbrains.python.psi.*;
-import com.jetbrains.python.psi.impl.*;
-import com.jetbrains.python.psi.resolve.PyResolveUtil;
-import com.jetbrains.python.psi.types.TypeEvalContext;
+import com.jetbrains.python.psi.impl.ParamHelper;
+import com.jetbrains.python.psi.impl.PyAugAssignmentStatementNavigator;
+import com.jetbrains.python.psi.impl.PyEvaluator;
+import com.jetbrains.python.psi.impl.PyImportStatementNavigator;
 import kotlin.Triple;
 import one.util.streamex.StreamEx;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Set;
 
 public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
 
@@ -48,7 +50,6 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
   private static final Set<String> EXCEPTION_SUPPRESSORS = ImmutableSet.of("suppress", "assertRaises", "assertRaisesRegex");
 
   private final ControlFlowBuilder myBuilder = new ControlFlowBuilder();
-  private final Map<PyExpression, PyFunction> expressionToGuards = new HashMap<>();
 
   public ControlFlow buildControlFlow(@NotNull final ScopeOwner owner) {
     return myBuilder.build(this, owner);
@@ -59,30 +60,6 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
     return this.myBuilder;
   }
 
-
-  private void startConditionalNodeAndCheckGuards(@NotNull PsiElement element, @Nullable PyExpression condition, boolean result) {
-    myBuilder.startConditionalNode(element, condition, result);
-    addTypeGuardAssertions(condition, result);
-  }
-
-  private void addTypeGuardAssertions(@Nullable PyExpression condition, boolean result) {
-    final PyExpression actualExpression;
-    final boolean negation;
-    if (condition instanceof PyPrefixExpression prefixExpression && prefixExpression.getOperator() == PyTokenTypes.NOT_KEYWORD) {
-      actualExpression = prefixExpression.getOperand();
-      negation = true;
-    }
-    else {
-      actualExpression = condition;
-      negation = false;
-    }
-    var function = expressionToGuards.get(actualExpression);
-    if ((negation && !result || !negation && result) && function != null && actualExpression instanceof PyCallExpression callExpression) {
-      final var evaluator = new PyTypeAssertionEvaluator();
-      evaluator.handleTypeGuardCall(callExpression, function);
-      InstructionBuilder.addAssertInstructions(myBuilder, evaluator);
-    }
-  }
 
   @Override
   public void visitPyFunction(final @NotNull PyFunction node) {
@@ -99,8 +76,7 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
     }
 
     final ReadWriteInstruction instruction = ReadWriteInstruction.write(myBuilder, node, node.getName());
-    myBuilder.addNode(instruction);
-    myBuilder.checkPending(instruction);
+    myBuilder.addNodeAndCheckPending(instruction);
   }
 
   @Override
@@ -143,8 +119,7 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
     }
     visitDecorators(node.getDecoratorList());
     final ReadWriteInstruction instruction = ReadWriteInstruction.write(myBuilder, node, node.getName());
-    myBuilder.addNode(instruction);
-    myBuilder.checkPending(instruction);
+    myBuilder.addNodeAndCheckPending(instruction);
   }
 
   @Override
@@ -164,29 +139,15 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
 
   @Override
   public void visitPyCallExpression(final @NotNull PyCallExpression node) {
-    final PyExpression callee = node.getCallee();
-    final var callNodeType = getCalleeNodeType(callee);
+    super.visitPyCallExpression(node);
 
-    // Flow abrupted
-    if (callNodeType instanceof NoReturnCallKind) {
-      callee.accept(this);
-      for (PyExpression expression : node.getArguments()) {
-        expression.accept(this);
-      }
-      abruptFlow(node);
-    }
-    else if (callNodeType instanceof TypeGuardCallKind typeGuardCallKind && node.getArguments().length > 0) {
-      expressionToGuards.put(node, typeGuardCallKind.pyFunction);
-      super.visitPyCallExpression(node);
-    }
-    else {
-      super.visitPyCallExpression(node);
-    }
+    var callInstruction = new CallInstruction(myBuilder, node);
+    myBuilder.addNodeAndCheckPending(callInstruction);
 
     if (node.isCalleeText(PyNames.ASSERT_IS_INSTANCE)) {
       final PyTypeAssertionEvaluator assertionEvaluator = new PyTypeAssertionEvaluator();
       node.accept(assertionEvaluator);
-      InstructionBuilder.addAssertInstructions(myBuilder, assertionEvaluator);
+      addAssertInstructions(assertionEvaluator);
     }
   }
 
@@ -215,24 +176,21 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
                                                ? ReadWriteInstruction.ACCESS.READWRITE
                                                : ReadWriteInstruction.ACCESS.READ;
     final ReadWriteInstruction readWriteInstruction = ReadWriteInstruction.newInstruction(myBuilder, node, node.getName(), access);
-    myBuilder.addNode(readWriteInstruction);
-    myBuilder.checkPending(readWriteInstruction);
+    myBuilder.addNodeAndCheckPending(readWriteInstruction);
   }
 
   @Override
   public void visitPyBoolLiteralExpression(@NotNull PyBoolLiteralExpression node) {
     final ReadWriteInstruction readWriteInstruction = ReadWriteInstruction.newInstruction(myBuilder, node, node.getText(),
                                                                                           ReadWriteInstruction.ACCESS.READ);
-    myBuilder.addNode(readWriteInstruction);
-    myBuilder.checkPending(readWriteInstruction);
+    myBuilder.addNodeAndCheckPending(readWriteInstruction);
   }
 
   @Override
   public void visitPyNoneLiteralExpression(@NotNull PyNoneLiteralExpression node) {
     final ReadWriteInstruction readWriteInstruction = ReadWriteInstruction.newInstruction(myBuilder, node, node.getText(),
                                                                                           ReadWriteInstruction.ACCESS.READ);
-    myBuilder.addNode(readWriteInstruction);
-    myBuilder.checkPending(readWriteInstruction);
+    myBuilder.addNodeAndCheckPending(readWriteInstruction);
   }
 
   @Override
@@ -294,8 +252,7 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
     if (qName != null) {
       final ReadWriteInstruction instruction = ReadWriteInstruction.newInstruction(myBuilder, node, qName.toString(),
                                                                                    ReadWriteInstruction.ACCESS.WRITE);
-      myBuilder.addNode(instruction);
-      myBuilder.checkPending(instruction);
+      myBuilder.addNodeAndCheckPending(instruction);
     }
 
     final PyExpression qualifier = node.getQualifier();
@@ -311,8 +268,7 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
       annotation.accept(this);
     }
     final ReadWriteInstruction instruction = ReadWriteInstruction.write(myBuilder, node, node.getName());
-    myBuilder.addNode(instruction);
-    myBuilder.checkPending(instruction);
+    myBuilder.addNodeAndCheckPending(instruction);
   }
 
   @Override
@@ -350,8 +306,7 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
     myBuilder.startNode(node);
     for (PyImportElement importElement : node.getImportElements()) {
       final ReadWriteInstruction instruction = ReadWriteInstruction.write(myBuilder, importElement, importElement.getVisibleName());
-      myBuilder.addNode(instruction);
-      myBuilder.checkPending(instruction);
+      myBuilder.addNodeAndCheckPending(instruction);
     }
   }
 
@@ -388,7 +343,7 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
     final PyExpression truePart = node.getTruePart();
     final PyExpression falsePart = node.getFalsePart();
     if (truePart != null) {
-      InstructionBuilder.addAssertInstructions(myBuilder, assertionEvaluator);
+      addAssertInstructions(assertionEvaluator);
       truePart.accept(this);
       myBuilder.addPendingEdge(node, myBuilder.prevInstruction);
     }
@@ -412,10 +367,10 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
     List<Pair<PsiElement, Instruction>> lastBranchingPoints = Collections.emptyList(); // outcoming negative edges from the last condition
     final List<Boolean> conditionResults = new ArrayList<>(); // visited conditions results
 
-    final PyIfPart firstIfPart = node.getIfPart();
+    PyIfPart prevIfPart = null;
 
-    for (PyIfPart part : StreamEx.of(firstIfPart).append(node.getElifParts())) {
-      if (part != firstIfPart) {
+    for (PyIfPart part : StreamEx.of(node.getIfPart()).append(node.getElifParts())) {
+      if (prevIfPart != null) {
         // first `if` could not be considered as some `if` inheritor
         if (!ContainerUtil.exists(conditionResults, Boolean.TRUE::equals)) {
           // edges to `if` would be created below if there were no conditions evaluated to `True` earlier
@@ -423,8 +378,10 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
         }
         myBuilder.prevInstruction = null;
 
-        startConditionalNodeAndCheckGuards(part, lastCondition, false);
+        myBuilder.startConditionalNode(part, lastCondition, false);
+        addAssertInstructions(getNegativeTypeAssertions(prevIfPart));
       }
+      prevIfPart = part;
 
       final Triple<PyExpression, List<Pair<PsiElement, Instruction>>, Boolean> currentPartResults = visitPyConditionalPart(part, node);
       lastCondition = currentPartResults.getFirst();
@@ -432,12 +389,8 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
       conditionResults.add(currentPartResults.getThird());
     }
 
-    final PyTypeAssertionEvaluator negativeAssertionEvaluator = new PyTypeAssertionEvaluator(false);
-    final PyExpression firstIfPartCondition = firstIfPart.getCondition();
-    // TODO: Add support for 'elif'
-    if (firstIfPartCondition != null) {
-      firstIfPartCondition.accept(negativeAssertionEvaluator);
-    }
+    assert prevIfPart != null;
+    final PyTypeAssertionEvaluator negativeAssertionEvaluator = getNegativeTypeAssertions(prevIfPart);
 
     final PyElsePart elseBranch = node.getElsePart();
     if (elseBranch != null) {
@@ -449,8 +402,8 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
 
       final PyStatementList statements = elseBranch.getStatementList();
 
-      startConditionalNodeAndCheckGuards(statements, lastCondition, false);
-      InstructionBuilder.addAssertInstructions(myBuilder, negativeAssertionEvaluator);
+      myBuilder.startConditionalNode(statements, lastCondition, false);
+      addAssertInstructions(negativeAssertionEvaluator);
       statements.accept(this);
 
       myBuilder.addPendingEdge(node, myBuilder.prevInstruction);
@@ -460,8 +413,7 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
 
       myBuilder.prevInstruction = null;
 
-      final Instruction instruction =
-        ContainerUtil.getFirstItem(InstructionBuilder.addAssertInstructions(myBuilder, negativeAssertionEvaluator));
+      final Instruction instruction = ContainerUtil.getFirstItem(addAssertInstructions(negativeAssertionEvaluator));
       if (instruction != null) {
         lastBranchingPoints.forEach(p -> myBuilder.addEdge(p.getSecond(), instruction));
       }
@@ -471,6 +423,15 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
 
       myBuilder.addPendingEdge(node, myBuilder.prevInstruction);
     }
+  }
+
+  private static @NotNull PyTypeAssertionEvaluator getNegativeTypeAssertions(@NotNull PyIfPart ifPart) {
+    final PyTypeAssertionEvaluator negativeAssertionEvaluator = new PyTypeAssertionEvaluator(false);
+    final PyExpression firstIfPartCondition = ifPart.getCondition();
+    if (firstIfPartCondition != null) {
+      firstIfPartCondition.accept(negativeAssertionEvaluator);
+    }
+    return negativeAssertionEvaluator;
   }
 
   @NotNull
@@ -514,8 +475,8 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
                                                 @NotNull PyStatement node) {
     final PyStatementList statements = part.getStatementList();
 
-    startConditionalNodeAndCheckGuards(statements, part.getCondition(), true);
-    InstructionBuilder.addAssertInstructions(myBuilder, assertionEvaluator);
+    myBuilder.startConditionalNode(statements, part.getCondition(), true);
+    addAssertInstructions(assertionEvaluator);
     statements.accept(this);
 
     if (!(node instanceof PyLoopStatement)) { // outcoming edges will be looped
@@ -572,7 +533,7 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
                                        @Nullable PyTypeAssertionEvaluator assertionEvaluator,
                                        boolean conditionResultToContinue) {
     if (previousAssertionEvaluator != null) {
-      InstructionBuilder.addAssertInstructions(myBuilder, previousAssertionEvaluator);
+      addAssertInstructions(previousAssertionEvaluator);
     }
 
     subExpression.accept(this);
@@ -585,12 +546,10 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
 
     final var outside = new ConditionalInstructionImpl(myBuilder, null, subExpression, !conditionResultToContinue);
     myBuilder.addNode(outside);
-    addTypeGuardAssertions(subExpression, !conditionResultToContinue);
     myBuilder.addPendingEdge(node, myBuilder.prevInstruction);
 
     myBuilder.prevInstruction = branchingPoint;
     final var toTheNext = new ConditionalInstructionImpl(myBuilder, null, subExpression, conditionResultToContinue);
-    addTypeGuardAssertions(subExpression, conditionResultToContinue);
     myBuilder.addNode(toTheNext);
   }
 
@@ -621,7 +580,6 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
       final var elsePartInstruction = new ConditionalInstructionImpl(myBuilder, elsePart, mainPartResults.getFirst(), false);
       myBuilder.prevInstruction = null;
       myBuilder.addNode(elsePartInstruction);
-      addTypeGuardAssertions(mainPartResults.getFirst(), false);
 
       if (!isStaticallyTrue) {
         for (Pair<PsiElement, Instruction> pair : branchingPoints) {
@@ -927,7 +885,7 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
         final PyExpression iteratedList = c.getIteratedList();
         final PyExpression iteratorVariable = c.getIteratorVariable();
         if (prevCondition != null) {
-          startConditionalNodeAndCheckGuards(iteratedList, prevCondition, true);
+          myBuilder.startConditionalNode(iteratedList, prevCondition, true);
           prevCondition = null;
         }
         else {
@@ -953,7 +911,7 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
           continue;
         }
         if (prevCondition != null) {
-          startConditionalNodeAndCheckGuards(condition, prevCondition, true);
+          myBuilder.startConditionalNode(condition, prevCondition, true);
         }
         else {
           myBuilder.startNode(condition);
@@ -961,7 +919,7 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
         final PyTypeAssertionEvaluator assertionEvaluator = new PyTypeAssertionEvaluator();
         condition.accept(this);
         condition.accept(assertionEvaluator);
-        InstructionBuilder.addAssertInstructions(myBuilder, assertionEvaluator);
+        addAssertInstructions(assertionEvaluator);
 
         // Condition is true for nested "for" and "if" constructs, next startNode() should create a conditional node
         prevCondition = condition;
@@ -977,7 +935,7 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
     final PyExpression result = node.getResultExpression();
     if (result != null) {
       if (prevCondition != null) {
-        startConditionalNodeAndCheckGuards(result, prevCondition, true);
+        myBuilder.startConditionalNode(result, prevCondition, true);
       }
       else {
         myBuilder.startNode(result);
@@ -1003,7 +961,7 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
     }
     PyTypeAssertionEvaluator evaluator = new PyTypeAssertionEvaluator();
     node.acceptChildren(evaluator);
-    InstructionBuilder.addAssertInstructions(myBuilder, evaluator);
+    addAssertInstructions(evaluator);
   }
 
   @Override
@@ -1049,42 +1007,7 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
     myBuilder.startNode(node);
 
     final ReadWriteInstruction instruction = ReadWriteInstruction.write(myBuilder, node, node.getName());
-    myBuilder.addNode(instruction);
-    myBuilder.checkPending(instruction);
-  }
-
-  @Nullable
-  private static CallTypeKind getCalleeNodeType(@Nullable PyExpression callee) {
-    if (callee instanceof PyReferenceExpression expression) {
-      QualifiedName qName = expression.asQualifiedName();
-
-      if (qName == null) {
-        return null;
-      }
-
-      ScopeOwner scopeOwner = ScopeUtil.getScopeOwner(expression);
-
-      // Flow-insensitive context is required to prevent recursive control flow access during the resolve process
-      TypeEvalContext context = TypeEvalContext.codeInsightFallback(callee.getProject());
-
-      while (scopeOwner != null) {
-        final var result = StreamEx
-          .of(PyResolveUtil.resolveQualifiedNameInScope(qName, scopeOwner, context))
-          .select(PyFunction.class)
-          .map(function -> {
-            if (PyTypingTypeProvider.isNoReturn(function, context)) {
-              return NoReturnCallKind.INSTANCE;
-            }
-            if (PyTypingTypeProvider.isTypeGuard(function, context)) {
-              return new TypeGuardCallKind(function);
-            }
-            return null;
-          }).findFirst( it -> it != null);
-        if (result.isPresent()) return result.get();
-        scopeOwner = ScopeUtil.getScopeOwner(scopeOwner);
-      }
-    }
-    return null;
+    myBuilder.addNodeAndCheckPending(instruction);
   }
 
   private void abruptFlow(final PsiElement node) {
@@ -1109,13 +1032,17 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
                                    PyStatementList.class);
   }
 
-  private interface CallTypeKind { }
-
-  private static class NoReturnCallKind implements CallTypeKind {
-    private NoReturnCallKind() {}
-    public static final NoReturnCallKind INSTANCE = new NoReturnCallKind();
+  @NotNull
+  private List<Instruction> addAssertInstructions(@NotNull PyTypeAssertionEvaluator assertionEvaluator) {
+    final List<Instruction> result = new ArrayList<>();
+    for (PyTypeAssertionEvaluator.Assertion def : assertionEvaluator.getDefinitions()) {
+      final PyReferenceExpression e = def.getElement();
+      final QualifiedName qname = e.asQualifiedName();
+      final String name = qname != null ? qname.toString() : e.getName();
+      ReadWriteInstruction instr = ReadWriteInstruction.assertType(myBuilder, e, name, def.getTypeEvalFunction());
+      myBuilder.addNode(instr);
+      result.add(instr);
+    }
+    return result;
   }
-
-  private record TypeGuardCallKind(@NotNull PyFunction pyFunction) implements CallTypeKind {}
 }
-

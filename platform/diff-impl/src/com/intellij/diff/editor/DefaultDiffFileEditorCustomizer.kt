@@ -1,29 +1,26 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.diff.editor
 
 import com.intellij.diff.DiffContext
 import com.intellij.openapi.actionSystem.*
 import com.intellij.openapi.fileEditor.FileEditor
+import com.intellij.openapi.fileEditor.FileEditorManagerKeys
 import com.intellij.openapi.fileEditor.impl.EditorWindow
-import com.intellij.openapi.fileEditor.impl.FileEditorManagerImpl
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.Key
 import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.ui.docking.impl.DockManagerImpl
 
 internal val IS_DIFF_FILE_EDITOR: Key<Boolean> = Key.create("IS_DEFAULT_DIFF_EDITOR")
 private val CUSTOM_DIFF_ESCAPE_HANDLER: Key<AnAction> = Key.create("CUSTOM_DIFF_ESCAPE_HANDLER")
 
-class DefaultDiffFileEditorCustomizer : DiffRequestProcessorEditorCustomizer {
-
+private class DefaultDiffFileEditorCustomizer : DiffRequestProcessorEditorCustomizer {
   override fun customize(file: VirtualFile, editor: FileEditor, context: DiffContext) {
     registerEscapeAction(editor)
 
     editor.putUserData(IS_DIFF_FILE_EDITOR, true)
-    editor.putUserData(EditorWindow.HIDE_TABS, true)
-    editor.putUserData(FileEditorManagerImpl.SINGLETON_EDITOR_IN_WINDOW, true)
-    editor.putUserData(DockManagerImpl.SHOW_NORTH_PANEL, false)
+    editor.putUserData(FileEditorManagerKeys.SINGLETON_EDITOR_IN_WINDOW, true)
+    editor.putUserData(FileEditorManagerKeys.SHOW_NORTH_PANEL, false)
   }
 
   private fun registerEscapeAction(editor: FileEditor) {
@@ -45,7 +42,7 @@ class DefaultDiffFileEditorCustomizer : DiffRequestProcessorEditorCustomizer {
 
 private class DiffEditorEscapeDelegatingAction(delegate: AnAction) : AnActionWrapper(delegate), DiffEditorEscapeAction
 
-internal class CloseDiffEditorAction : DumbAwareAction(), DiffEditorEscapeAction {
+private class CloseDiffEditorAction : DumbAwareAction(), DiffEditorEscapeAction {
   override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
 
   override fun update(e: AnActionEvent) {

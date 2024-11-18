@@ -6,11 +6,13 @@ import com.intellij.openapi.actionSystem.LangDataKeys;
 import com.intellij.openapi.actionSystem.PlatformCoreDataKeys;
 import com.intellij.openapi.module.Module;
 import com.intellij.psi.PsiElement;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 
+@ApiStatus.Internal
 public final class LangDataValidators extends DataValidators {
   @Override
-  public void collectValidators(@NotNull Registry registry) {
+  protected void collectValidators(@NotNull ValidatorRegistry registry) {
     Validator<PsiElement> psiValidator = (data, dataId, source) -> data.isValid();
     registry.register(CommonDataKeys.PSI_FILE, psiValidator);
     registry.register(CommonDataKeys.PSI_ELEMENT, psiValidator);

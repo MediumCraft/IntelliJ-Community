@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.plugins.gradle.execution.build
 
 import com.intellij.openapi.externalSystem.test.compileModules
@@ -96,6 +96,8 @@ class GradleBuildOutputTest : GradleExecutionTestCase() {
             assertNode("App2.java", skipIf = !isPerTaskOutputSupported()) {
               assertNode("';' expected")
               assertNode("invalid method declaration; return type required")
+              assertNode("';' expected", skipIf = !isBuildCompilationReportSupported())
+              assertNode("invalid method declaration; return type required", skipIf = !isBuildCompilationReportSupported())
             }
           }
           assertNode("App2.java", skipIf = isPerTaskOutputSupported(), isUnordered = true) {

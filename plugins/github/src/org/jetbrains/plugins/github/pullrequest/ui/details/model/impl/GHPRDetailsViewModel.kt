@@ -6,6 +6,7 @@ import com.intellij.collaboration.ui.codereview.details.data.ReviewRequestState
 import com.intellij.collaboration.ui.codereview.details.model.CodeReviewDetailsViewModel
 import com.intellij.collaboration.ui.codereview.issues.processIssueIdsHtml
 import com.intellij.collaboration.ui.icon.IconsProvider
+import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
 import com.intellij.platform.util.coroutines.childScope
 import kotlinx.coroutines.CoroutineScope
@@ -15,14 +16,18 @@ import org.jetbrains.plugins.github.api.data.pullrequest.GHPullRequest
 import org.jetbrains.plugins.github.api.data.pullrequest.GHPullRequestState
 import org.jetbrains.plugins.github.pullrequest.comment.convertToHtml
 import org.jetbrains.plugins.github.pullrequest.data.GHPRDataContext
+import org.jetbrains.plugins.github.pullrequest.data.GHPRIdentifier
 import org.jetbrains.plugins.github.pullrequest.data.provider.GHPRDataProvider
 import org.jetbrains.plugins.github.pullrequest.data.service.GHPRSecurityService
 import org.jetbrains.plugins.github.pullrequest.ui.details.model.GHPRBranchesViewModel
 import org.jetbrains.plugins.github.pullrequest.ui.details.model.GHPRStatusViewModelImpl
 import org.jetbrains.plugins.github.pullrequest.ui.review.GHPRReviewViewModelHelper
+import org.jetbrains.plugins.github.pullrequest.ui.toolwindow.model.GHPRToolWindowViewModel
 
 @ApiStatus.Experimental
 interface GHPRDetailsViewModel : CodeReviewDetailsViewModel {
+  val prId: GHPRIdentifier
+
   val securityService: GHPRSecurityService
   val avatarIconsProvider: IconsProvider<String>
 
@@ -32,18 +37,22 @@ interface GHPRDetailsViewModel : CodeReviewDetailsViewModel {
   val changesVm: GHPRChangesViewModel
   val statusVm: GHPRStatusViewModelImpl
   val reviewFlowVm: GHPRReviewFlowViewModelImpl
+
+  fun openPullRequestInfoAndTimeline(number: Long)
 }
 
 internal class GHPRDetailsViewModelImpl(
-  project: Project,
+  private val project: Project,
   parentCs: CoroutineScope,
   dataContext: GHPRDataContext,
   dataProvider: GHPRDataProvider,
-  details: GHPullRequest
+  details: GHPullRequest,
 ) : GHPRDetailsViewModel {
-  private val cs = parentCs.childScope()
+  private val cs = parentCs.childScope(javaClass.name)
 
   private val detailsState = MutableStateFlow(details)
+
+  override val prId: GHPRIdentifier = detailsState.value.prId
 
   override val number: String = "#${detailsState.value.number}"
   override val url: String = detailsState.value.url
@@ -67,6 +76,7 @@ internal class GHPRDetailsViewModelImpl(
 
   override val isUpdating = MutableStateFlow(false)
 
+  private val twVm by lazy { project.service<GHPRToolWindowViewModel>() }
   override val securityService: GHPRSecurityService = dataContext.securityService
   override val avatarIconsProvider: IconsProvider<String> = dataContext.avatarIconsProvider
   override val branchesVm = GHPRBranchesViewModel(cs, project, dataContext.repositoryDataService.repositoryMapping, detailsState)
@@ -74,7 +84,10 @@ internal class GHPRDetailsViewModelImpl(
   private val reviewVmHelper = GHPRReviewViewModelHelper(cs, dataProvider)
   override val changesVm = GHPRChangesViewModelImpl(cs, project, dataContext, dataProvider)
 
-  override val statusVm = GHPRStatusViewModelImpl(cs, project, dataProvider.detailsData, detailsState)
+  private val serverPath = dataContext.repositoryDataService.repositoryMapping.repository.serverPath
+  override val statusVm = GHPRStatusViewModelImpl(cs, project, serverPath,
+                                                  dataContext.repositoryDataService.repositoryMapping.gitRepository,
+                                                  dataProvider.detailsData, detailsState)
 
   override val reviewFlowVm =
     GHPRReviewFlowViewModelImpl(cs,
@@ -89,6 +102,10 @@ internal class GHPRDetailsViewModelImpl(
 
   fun update(details: GHPullRequest) {
     detailsState.value = details
+  }
+
+  override fun openPullRequestInfoAndTimeline(number: Long) {
+    twVm.projectVm.value?.openPullRequestInfoAndTimeline(number)
   }
 
   suspend fun destroy() = cs.cancelAndJoinSilently()

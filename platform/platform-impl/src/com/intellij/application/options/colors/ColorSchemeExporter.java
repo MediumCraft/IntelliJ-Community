@@ -3,14 +3,16 @@ package com.intellij.application.options.colors;
 
 import com.intellij.application.options.schemes.SerializableSchemeExporter;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
+import org.jetbrains.annotations.ApiStatus;
 
 /**
  * Exports a scheme as .icls file.
  */
+@ApiStatus.Internal
 public final class ColorSchemeExporter extends SerializableSchemeExporter {
 
   @Override
   public String getExtension() {
-    return EditorColorsManager.COLOR_SCHEME_FILE_EXTENSION.substring(1);
+    return EditorColorsManager.getColorSchemeFileExtension().substring(1);
   }
 }

@@ -1,8 +1,9 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.gradle.toolingExtension.impl.modelAction;
 
+import com.intellij.gradle.toolingExtension.impl.model.utilTurnOffDefaultTasksModel.TurnOffDefaultTasks;
+import com.intellij.gradle.toolingExtension.impl.modelSerialization.ToolingSerializerConverter;
 import com.intellij.gradle.toolingExtension.impl.telemetry.GradleOpenTelemetry;
-import com.intellij.gradle.toolingExtension.impl.telemetry.GradleTracingContext;
 import com.intellij.gradle.toolingExtension.impl.util.GradleExecutorServiceUtil;
 import com.intellij.gradle.toolingExtension.modelAction.GradleModelFetchPhase;
 import com.intellij.gradle.toolingExtension.util.GradleVersionUtil;
@@ -20,9 +21,7 @@ import org.gradle.util.GradleVersion;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.plugins.gradle.model.*;
-import com.intellij.gradle.toolingExtension.impl.model.utilTurnOffDefaultTasksModel.TurnOffDefaultTasks;
-import com.intellij.gradle.toolingExtension.impl.modelSerialization.ModelConverter;
+import org.jetbrains.plugins.gradle.model.ProjectImportModelProvider;
 import org.jetbrains.plugins.gradle.model.ProjectImportModelProvider.GradleModelConsumer;
 
 import java.io.Serializable;
@@ -43,10 +42,7 @@ public class GradleModelFetchAction implements BuildAction<GradleModelHolderStat
   private boolean myUseProjectsLoadedPhase = false;
   private boolean myUseStreamedValues = false;
 
-  private @Nullable GradleTracingContext myTracingContext = null;
-
   private transient boolean myProjectLoadedAction = false;
-
   private transient @Nullable GradleDaemonModelHolder myModels = null;
 
   public GradleModelFetchAction addProjectImportModelProviders(
@@ -90,15 +86,6 @@ public class GradleModelFetchAction implements BuildAction<GradleModelHolderStat
     myUseStreamedValues = useStreamedValues;
   }
 
-  public void setTracingContext(@NotNull GradleTracingContext tracingContext) {
-    myTracingContext = tracingContext;
-  }
-
-  @NotNull
-  protected ModelConverter getToolingModelConverter(@NotNull BuildController controller, @NotNull GradleOpenTelemetry telemetry) {
-    return ModelConverter.NOP;
-  }
-
   @Override
   public @NotNull GradleModelHolderState execute(@NotNull BuildController controller) {
     configureAdditionalTypes(controller);
@@ -109,27 +96,6 @@ public class GradleModelFetchAction implements BuildAction<GradleModelHolderStat
         });
       });
     });
-  }
-
-  private GradleModelHolderState withOpenTelemetry(@NotNull Function<GradleOpenTelemetry, GradleModelHolderState> action) {
-    GradleTracingContext tracingContext = myTracingContext;
-    if (tracingContext == null) {
-      GradleOpenTelemetry noopTelemetry = new GradleOpenTelemetry();
-      return action.apply(noopTelemetry);
-    }
-
-    GradleOpenTelemetry telemetry = new GradleOpenTelemetry();
-    telemetry.start(tracingContext);
-    GradleModelHolderState state;
-    try {
-      state = action.apply(telemetry);
-    }
-    catch (Throwable exception) {
-      telemetry.shutdown();
-      throw exception;
-    }
-    byte[] traces = telemetry.shutdown();
-    return state.withOpenTelemetryTraces(traces);
   }
 
   private @NotNull GradleModelHolderState doExecute(
@@ -177,7 +143,7 @@ public class GradleModelFetchAction implements BuildAction<GradleModelHolderStat
     }
   }
 
-  private @NotNull GradleDaemonModelHolder initAction(
+  private static @NotNull GradleDaemonModelHolder initAction(
     @NotNull BuildController controller,
     @NotNull ExecutorService converterExecutor,
     @NotNull GradleOpenTelemetry telemetry
@@ -191,11 +157,11 @@ public class GradleModelFetchAction implements BuildAction<GradleModelHolderStat
     Collection<? extends GradleBuild> nestedGradleBuilds = telemetry.callWithSpan("GetNestedGradleBuilds", __ ->
       getNestedBuilds(buildEnvironment, mainGradleBuild)
     );
-    ModelConverter modelConverter = telemetry.callWithSpan("GetToolingModelConverter", __ ->
-      getToolingModelConverter(controller, telemetry)
+    ToolingSerializerConverter serializer = telemetry.callWithSpan("GetToolingModelConverter", __ ->
+      new ToolingSerializerConverter(controller, telemetry)
     );
     return telemetry.callWithSpan("InitModelConsumer", __ ->
-      new GradleDaemonModelHolder(converterExecutor, modelConverter, mainGradleBuild, nestedGradleBuilds, buildEnvironment)
+      new GradleDaemonModelHolder(converterExecutor, serializer, mainGradleBuild, nestedGradleBuilds, buildEnvironment)
     );
   }
 
@@ -334,5 +300,20 @@ public class GradleModelFetchAction implements BuildAction<GradleModelHolderStat
    */
   public @NotNull SortedSet<GradleModelFetchPhase> getBuildFinishedModelFetchPhases() {
     return myModelFetchPhases.tailSet(GradleModelFetchPhase.PROJECT_LOADED_PHASE, false);
+  }
+
+  private static @NotNull GradleModelHolderState withOpenTelemetry(
+    @NotNull Function<GradleOpenTelemetry, GradleModelHolderState> action
+  ) {
+    GradleOpenTelemetry telemetry = new GradleOpenTelemetry();
+    GradleModelHolderState state;
+    try {
+      state = action.apply(telemetry);
+    }
+    catch (Throwable exception) {
+      telemetry.shutdown();
+      throw exception;
+    }
+    return state.current();
   }
 }

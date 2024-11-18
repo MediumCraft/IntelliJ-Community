@@ -1,10 +1,11 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.intellij.images.editor.actions;
 
 import com.intellij.application.options.colors.ColorAndFontOptions;
 import com.intellij.application.options.colors.SimpleEditorPreview;
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.IdeBundle;
+import com.intellij.ide.IdeCoreBundle;
 import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.*;
@@ -21,6 +22,7 @@ import com.intellij.openapi.roots.ui.configuration.actions.IconWithTextAction;
 import com.intellij.openapi.ui.ComboBox;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.TextComponentAccessor;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.NlsActions;
 import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.text.StringUtil;
@@ -38,7 +40,9 @@ import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.StartupUiUtil;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.update.UiNotifyConnector;
+import org.intellij.images.ImagesBundle;
 import org.intellij.images.fileTypes.ImageFileTypeManager;
+import org.intellij.images.fileTypes.impl.SvgFileType;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -52,8 +56,8 @@ import java.awt.event.ActionEvent;
 import java.awt.event.ItemEvent;
 import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
-import java.util.List;
 import java.util.*;
+import java.util.List;
 
 import static com.intellij.openapi.wm.impl.IdeBackgroundUtil.*;
 
@@ -93,7 +97,7 @@ public class BackgroundImageDialog extends DialogWrapper {
     super(project, true);
     myProject = project;
     setTitle(IdeBundle.message("dialog.title.background.image"));
-    myEditorPreview = createEditorPreview();
+    myEditorPreview = createEditorPreview(getDisposable());
     myIdePreview = createFramePreview();
     myPropertyTmp = getSystemProp() + "#" + project.getLocationHash();
     UiNotifyConnector.doWhenFirstShown(myRoot, () -> createTemporaryBackgroundTransform(myPreviewPanel, myPropertyTmp, getDisposable()));
@@ -136,11 +140,12 @@ public class BackgroundImageDialog extends DialogWrapper {
   }
 
   @NotNull
-  private static SimpleEditorPreview createEditorPreview() {
+  private static SimpleEditorPreview createEditorPreview(@NotNull Disposable disposable) {
     EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
     ColorAndFontOptions options = new ColorAndFontOptions();
     options.reset();
     options.selectScheme(scheme.getName());
+    Disposer.register(disposable, () -> options.disposeUIResources());
     ColorSettingsPage[] pages = ColorSettingsPages.getInstance().getRegisteredPages();
     int index;
     int attempt = 0;
@@ -219,9 +224,9 @@ public class BackgroundImageDialog extends DialogWrapper {
     initFillPanel(myFillPanel, myFillGroup, getDisposable());
     ((CardLayout)myPreviewPanel.getLayout()).show(myPreviewPanel, EDITOR);
     myPathField.getComboBox().setEditable(true);
-    FileChooserDescriptor descriptor = new FileChooserDescriptor(true, false, false, false, true, false)
-      .withFileFilter(file -> ImageFileTypeManager.getInstance().isImage(file));
-    myPathField.addBrowseFolderListener(null, null, null, descriptor, TextComponentAccessor.STRING_COMBOBOX_WHOLE_TEXT);
+    var descriptor = new FileChooserDescriptor(true, false, false, false, true, false)
+      .withExtensionFilter(IdeCoreBundle.message("file.chooser.files.label", ImagesBundle.message("filetype.images.display.name")), ImageFileTypeManager.getInstance().getImageFileType(), SvgFileType.INSTANCE);
+    myPathField.addBrowseFolderListener(null, descriptor, TextComponentAccessor.STRING_COMBOBOX_WHOLE_TEXT);
     JTextComponent textComponent = getComboEditor();
     textComponent.getDocument().addDocumentListener(new DocumentAdapter() {
       @Override

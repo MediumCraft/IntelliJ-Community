@@ -1,4 +1,4 @@
-// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.plugins.gradle.dsl
 
 import com.intellij.openapi.application.invokeAndWaitIfNeeded
@@ -7,7 +7,7 @@ import com.intellij.openapi.editor.ex.DocumentEx
 import com.intellij.openapi.editor.ex.RangeMarkerEx
 import com.intellij.openapi.vfs.readText
 import com.intellij.psi.PsiDocumentManager
-import com.intellij.testFramework.PlatformTestUtil
+import com.intellij.tools.ide.metrics.benchmark.Benchmark
 import com.intellij.util.asSafely
 import org.gradle.util.GradleVersion
 import org.jetbrains.plugins.gradle.testFramework.GradleCodeInsightTestCase
@@ -32,7 +32,7 @@ class GradleHighlightingPerformanceTest : GradleCodeInsightTestCase() {
         fixture.editor.caretModel.moveToOffset(pos + 1)
         fixture.checkHighlighting()
 
-        PlatformTestUtil.newPerformanceTest("GradleHighlightingPerformanceTest.testPerformance") {
+        Benchmark.newBenchmark("GradleHighlightingPerformanceTest.testPerformance") {
           fixture.psiManager.dropPsiCaches()
           repeat(4) {
             fixture.type('a')
@@ -60,7 +60,7 @@ class GradleHighlightingPerformanceTest : GradleCodeInsightTestCase() {
         val document = PsiDocumentManager.getInstance(project).getDocument(fixture.file)
         disableSlowCompletionElements(fixture.testRootDisposable)
         val repeatSize = 10
-        PlatformTestUtil.newPerformanceTest("GradleHighlightingPerformanceTest.testCompletion") {
+        Benchmark.newBenchmark("GradleHighlightingPerformanceTest.testCompletion") {
           fixture.psiManager.dropResolveCaches()
           repeat(repeatSize) {
             val lookupElements = fixture.completeBasic()

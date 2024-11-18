@@ -12,6 +12,7 @@ import com.intellij.openapi.vcs.changes.*;
 import com.intellij.openapi.vcs.changes.shelf.ShelvedChangeList;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.tree.TreeUtil;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -21,6 +22,7 @@ import static com.intellij.openapi.vcs.changes.shelf.ShelveChangesManager.unshel
 import static com.intellij.openapi.vcs.changes.ui.ChangesBrowserNode.IGNORED_FILES_TAG;
 import static com.intellij.openapi.vcs.changes.ui.ChangesBrowserNode.UNVERSIONED_FILES_TAG;
 
+@ApiStatus.Internal
 public final class ChangesViewDnDSupport extends ChangesTreeDnDSupport {
   @NotNull private final Project myProject;
 
@@ -72,8 +74,7 @@ public final class ChangesViewDnDSupport extends ChangesTreeDnDSupport {
   @Override
   public void drop(DnDEvent aEvent) {
     Object attached = aEvent.getAttachedObject();
-    if (attached instanceof ShelvedChangeListDragBean) {
-      ShelvedChangeListDragBean dragBean = (ShelvedChangeListDragBean)attached;
+    if (attached instanceof ShelvedChangeListDragBean dragBean) {
       ChangesBrowserNode<?> dropRootNode = getDropRootNode(myTree, aEvent);
       LocalChangeList targetChangeList;
       if (dropRootNode != null) {
@@ -87,8 +88,7 @@ public final class ChangesViewDnDSupport extends ChangesTreeDnDSupport {
       }
       unshelveSilentlyWithDnd(myProject, dragBean, targetChangeList, !isCopyAction(aEvent));
     }
-    else if (attached instanceof ChangeListDragBean) {
-      final ChangeListDragBean dragBean = (ChangeListDragBean)attached;
+    else if (attached instanceof ChangeListDragBean dragBean) {
       final ChangesBrowserNode<?> changesBrowserNode = dragBean.getTargetNode();
       if (changesBrowserNode != null) {
         changesBrowserNode.acceptDrop(new DefaultChangeListOwner(myProject), dragBean);

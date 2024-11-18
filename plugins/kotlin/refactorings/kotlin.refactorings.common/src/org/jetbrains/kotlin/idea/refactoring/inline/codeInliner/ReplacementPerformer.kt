@@ -69,7 +69,6 @@ class AnnotationEntryReplacementPerformer(
     override fun createDummyElement(mainExpression: KtExpression): KtAnnotationEntry =
         createByPattern("@Dummy($0)", mainExpression) { psiFactory.createAnnotationEntry(it) }
 
-    @Suppress("KotlinConstantConditions") // KTIJ-23767
     override fun rangeToElement(range: PsiChildRange): KtAnnotationEntry {
         val useSiteTargetText = useSiteTarget?.renderName?.let { "$it:" } ?: ""
         val isFileUseSiteTarget = useSiteTarget == AnnotationUseSiteTarget.FILE
@@ -175,7 +174,7 @@ class ExpressionReplacementPerformer(
                 val canDropElementToBeReplaced = allowAnalysisFromWriteAction {
                     allowAnalysisOnEdt {
                         analyze(stub) {
-                            !stub.isUsedAsExpression()
+                            !stub.isUsedAsExpression
                         }
                     }
                 }

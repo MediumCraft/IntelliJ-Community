@@ -3,26 +3,27 @@
 
 package com.intellij.openapi.fileEditor.impl.text
 
-import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer
+import com.intellij.codeInsight.daemon.impl.DaemonCodeAnalyzerEx
 import com.intellij.concurrency.ContextAwareRunnable
 import com.intellij.concurrency.captureThreadContext
 import com.intellij.concurrency.resetThreadContext
 import com.intellij.openapi.application.*
 import com.intellij.openapi.components.serviceAsync
+import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.diagnostic.logger
+import com.intellij.openapi.diagnostic.trace
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.fileEditor.FileEditorStateLevel
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Key
-import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.platform.diagnostic.telemetry.impl.span
 import com.intellij.platform.ide.progress.runWithModalProgressBlocking
-import com.intellij.psi.PsiManager
 import com.intellij.ui.EditorNotifications
 import com.intellij.util.ArrayUtil
 import com.intellij.util.awaitCancellationAndInvoke
 import com.intellij.util.concurrency.annotations.RequiresEdt
 import com.intellij.util.concurrency.annotations.RequiresReadLock
+import com.intellij.util.ui.AnimatedIcon
 import com.intellij.util.ui.AsyncProcessIcon
 import kotlinx.coroutines.*
 import org.jetbrains.annotations.ApiStatus.Internal
@@ -30,8 +31,11 @@ import java.util.concurrent.atomic.AtomicReference
 import javax.swing.JComponent
 import javax.swing.event.ChangeEvent
 import kotlin.coroutines.resume
+import kotlin.math.max
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
+
+private val LOG: Logger = logger<AsyncEditorLoader>()
 
 @Internal
 class AsyncEditorLoader internal constructor(
@@ -53,21 +57,9 @@ class AsyncEditorLoader internal constructor(
     @JvmField
     val ASYNC_LOADER: Key<AsyncEditorLoader> = Key.create("AsyncEditorLoader.isLoaded")
 
-    @JvmField
-    val OPENED_IN_BULK: Key<Boolean> = Key.create("EditorSplitters.opened.in.bulk")
-
-    @Internal
-    fun isOpenedInBulk(file: VirtualFile): Boolean = file.getUserData(OPENED_IN_BULK) != null
-
-    @JvmField
-    val FIRST_IN_BULK: Key<Boolean> = Key.create("EditorSplitters.first.in.bulk")
-
-    internal fun isFirstInBulk(file: VirtualFile): Boolean = file.getUserData(FIRST_IN_BULK) != null
-
     /**
      * Invoke callback when the editor is successfully loaded. The callback will not be called if the loading was canceled.
      */
-    @JvmStatic
     @RequiresEdt
     fun performWhenLoaded(editor: Editor, runnable: Runnable) {
       val asyncLoader = editor.getUserData(ASYNC_LOADER)
@@ -126,48 +118,49 @@ class AsyncEditorLoader internal constructor(
       return
     }
 
+    // do not get service in invokeOnCompletion
+    val daemonCodeAnalyzer = DaemonCodeAnalyzerEx.getInstanceEx(project)
     coroutineScope.launch(CoroutineName("AsyncEditorLoader.wait")) {
-      // don't show another loading indicator on project open - use 3-second delay yet
+      val editorFileName = textEditor.file.name
       val indicatorJob = showLoadingIndicator(
-        startDelay = if (isOpenedInBulk(textEditor.file)) 3_000.milliseconds else 300.milliseconds,
-        addUi = textEditor.component::addLoadingDecoratorUi
+        startDelay = 300.milliseconds,
+        addUi = textEditor.component::addLoadingDecoratorUi,
+        editorFileName = editorFileName,
       )
       // await instead of join to get errors here
-      task.await()
-
-      indicatorJob.cancel()
-
-      // mark as loaded before daemonCodeAnalyzer restart
-      val delayedActions = delayedActions.getAndSet(null)
-      textEditor.editor.putUserData(ASYNC_LOADER, null)
-
-      // make sure the highlighting is restarted when the editor is finally loaded, because otherwise some crazy things happen,
-      // for instance `FileEditor.getBackgroundHighlighter()` returning null, essentially stopping highlighting silently
-      launch {
-        val psiManager = project.serviceAsync<PsiManager>()
-        val daemonCodeAnalyzer = project.serviceAsync<DaemonCodeAnalyzer>()
-        span("DaemonCodeAnalyzer.restart") {
-          readAction { psiManager.findFile(textEditor.file) }?.let {
-            daemonCodeAnalyzer.restart()
-          }
-        }
+      try {
+        task.await()
+        LOG.trace { "async editor task finished for $editorFileName" }
+      }
+      finally {
+        indicatorJob.cancel()
       }
 
-      val scrollingModel = textEditor.editor.scrollingModel
       withContext(Dispatchers.EDT + CoroutineName("execute delayed actions")) {
+        // mark as loaded before daemonCodeAnalyzer restart,
+        // does it from EDT to avoid execution of any following scroll requests before already scheduled delayedActions
+        textEditor.editor.putUserData(ASYNC_LOADER, null)
+
+        val scrollingModel = textEditor.editor.scrollingModel
         scrollingModel.disableAnimation()
         try {
-          executeDelayedActions(delayedActions)
+          writeIntentReadAction {
+            executeDelayedActions(delayedActions.getAndSet(null))
+          }
         }
         finally {
           scrollingModel.enableAnimation()
         }
       }
-      EditorNotifications.getInstance(project).scheduleUpdateNotifications(textEditor)
+      project.serviceAsync<EditorNotifications>().scheduleUpdateNotifications(textEditor)
     }
       .invokeOnCompletion {
         // make sure that async loaded marked as completed
         delayedActions.set(null)
+
+        // make sure the highlighting is restarted when the editor is finally loaded, because otherwise some crazy things happen,
+        // for instance `FileEditor.getBackgroundHighlighter()` returning null, essentially stopping highlighting silently
+        daemonCodeAnalyzer.restart("AsyncEditorLoader.start ${textEditor.file.name}")
       }
   }
 
@@ -226,7 +219,7 @@ private fun restoreCaretPosition(editor: EditorEx, delayedScrollState: DelayedSc
   val viewport = editor.scrollPane.viewport
 
   fun isReady(): Boolean {
-    val extentSize = viewport.extentSize?.takeIf { it.width != 0 && it.height != 0 } ?: viewport.preferredSize
+    val extentSize = viewport.extentSize
     return extentSize.width != 0 && extentSize.height != 0
   }
 
@@ -254,24 +247,37 @@ private fun restoreCaretPosition(editor: EditorEx, delayedScrollState: DelayedSc
   }
 }
 
-private fun CoroutineScope.showLoadingIndicator(startDelay: Duration, addUi: (component: JComponent) -> Unit): Job {
+private fun CoroutineScope.showLoadingIndicator(
+  startDelay: Duration,
+  addUi: (component: JComponent) -> Unit,
+  editorFileName: String,
+): Job {
   require(startDelay >= Duration.ZERO)
 
-  val scheduleTime = System.currentTimeMillis()
-  return launch {
-    delay((startDelay.inWholeMilliseconds - (System.currentTimeMillis() - scheduleTime)).coerceAtLeast(0))
+  val scheduleTimeMs = System.currentTimeMillis()
 
-    val processIcon = withContext(Dispatchers.EDT) {
-      val processIcon = AsyncProcessIcon.createBig(/* coroutineScope = */ this@launch)
-      addUi(processIcon)
-      processIcon
-    }
+  return launch {
+    val delayBeforeIcon = max(0, startDelay.inWholeMilliseconds - (System.currentTimeMillis() - scheduleTimeMs))
+    delay(delayBeforeIcon)
+
+    val processIconRef = AtomicReference<AnimatedIcon>()
 
     awaitCancellationAndInvoke {
       withContext(Dispatchers.EDT) {
-        processIcon.suspend()
-        processIcon.parent.remove(processIcon)
+        val processIcon = processIconRef.getAndSet(null)
+        if (processIcon != null) {
+          processIcon.suspend()
+          processIcon.parent.remove(processIcon)
+          LOG.trace { "spinner icon removed for $editorFileName" }
+        }
       }
+    }
+
+    withContext(Dispatchers.EDT) {
+      val processIcon = AsyncProcessIcon.createBig(/* coroutineScope = */ this@launch)
+      processIconRef.set(processIcon)
+      addUi(processIcon)
+      LOG.trace { "spinner icon created for $editorFileName" }
     }
   }
 }

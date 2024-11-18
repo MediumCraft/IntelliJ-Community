@@ -1,10 +1,12 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 @file:ApiStatus.Internal
-
 package com.intellij.openapi.wm.impl
 
+import com.intellij.diagnostic.LoadingState
+import com.intellij.ide.AppLifecycleListener
 import com.intellij.openapi.components.*
 import com.intellij.openapi.util.SystemInfoRt
+import com.intellij.openapi.util.registry.Registry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -15,8 +17,7 @@ import org.jetbrains.annotations.ApiStatus
  * Cache state for quick application start-up
  */
 @State(name = "WindowButtonsConfiguration", storages = [Storage(StoragePathMacros.CACHE_FILE)])
-internal class WindowButtonsConfiguration(private val scope: CoroutineScope) : PersistentStateComponent<WindowButtonsConfiguration.State?> {
-
+class WindowButtonsConfiguration(private val scope: CoroutineScope) : PersistentStateComponent<WindowButtonsConfiguration.State?> {
   enum class WindowButton {
     MINIMIZE,
     MAXIMIZE,
@@ -40,10 +41,7 @@ internal class WindowButtonsConfiguration(private val scope: CoroutineScope) : P
 
   override fun loadState(state: State) {
     mutableStateFlow.value = state
-
-    scope.launch {
-      loadStateFromOs()
-    }
+    scheduleUpdateFromOs()
   }
 
   override fun noStateLoaded() {
@@ -51,11 +49,17 @@ internal class WindowButtonsConfiguration(private val scope: CoroutineScope) : P
     loadStateFromOs()
   }
 
+  fun scheduleUpdateFromOs() {
+    scope.launch {
+      loadStateFromOs()
+    }
+  }
   private fun loadStateFromOs() {
     var windowButtonsState: State? = null
 
     if (isSupported()) {
-      val config = X11UiUtil.getWindowButtonsConfig()
+      val customConfig = if (LoadingState.COMPONENTS_LOADED.isOccurred) Registry.stringValue("ide.linux.window.buttons.config") else ""
+      val config = customConfig.ifBlank { X11UiUtil.getWindowButtonsConfig() }
       if (config != null) {
         windowButtonsState = parseFromString(config)
       }
@@ -78,35 +82,37 @@ private fun parseFromString(s: String): WindowButtonsConfiguration.State? {
     return null
   }
 
-  val leftIcons = iconAndButtons[0].split(",")
-  val rightIcons = iconAndButtons[1].split(",")
+  val leftIcons = stringsToWindowButtons(iconAndButtons[0].split(","))
+  val rightIcons = stringsToWindowButtons(iconAndButtons[1].split(","))
+  val buttons = leftIcons + rightIcons
 
-  val rightPosition = when {
-    leftIcons.contains("icon") -> true
-    rightIcons.contains("icon") -> false
-    else -> true
+  // Check on duplicate icons
+  for (button in buttons) {
+    if (buttons.count { it == button } != 1) {
+      return null
+    }
   }
 
-  val buttons = mutableListOf<WindowButtonsConfiguration.WindowButton>()
-  for (buttonString in leftIcons + rightIcons) {
-    val button = when (buttonString) {
+  return WindowButtonsConfiguration.State().apply {
+    this.rightPosition = leftIcons.isEmpty() || rightIcons.isNotEmpty()
+    this.buttons = buttons
+  }
+}
+
+private fun stringsToWindowButtons(strings: List<String>): List<WindowButtonsConfiguration.WindowButton> {
+  return strings.mapNotNull {
+    when (it) {
       "minimize" -> WindowButtonsConfiguration.WindowButton.MINIMIZE
       "maximize" -> WindowButtonsConfiguration.WindowButton.MAXIMIZE
       "close" -> WindowButtonsConfiguration.WindowButton.CLOSE
-      else -> continue
+      else -> null
     }
-
-    if (buttons.contains(button)) {
-      // Duplicate icons, undefined behavior
-      return null
-    }
-
-    buttons.add(button)
   }
+}
 
+internal class WindowButtonsAppLifecycleListener : AppLifecycleListener {
 
-  return WindowButtonsConfiguration.State().apply {
-    this.rightPosition = rightPosition
-    this.buttons = buttons
+  override fun appStarted() {
+    WindowButtonsConfiguration.getInstance()?.scheduleUpdateFromOs()
   }
 }

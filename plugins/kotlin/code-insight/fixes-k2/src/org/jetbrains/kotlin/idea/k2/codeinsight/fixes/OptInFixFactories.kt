@@ -4,14 +4,16 @@ package org.jetbrains.kotlin.idea.k2.codeinsight.fixes
 import com.intellij.psi.PsiElement
 import com.intellij.psi.util.findParentOfType
 import com.intellij.util.containers.addIfNotNull
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
+import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
+import org.jetbrains.kotlin.analysis.api.KaImplementationDetail
+import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.analyze
-import org.jetbrains.kotlin.analysis.api.annotations.KtAnnotationApplicationWithArgumentsInfo
-import org.jetbrains.kotlin.analysis.api.annotations.KtKClassAnnotationValue
-import org.jetbrains.kotlin.analysis.api.annotations.annotationsByClassId
+import org.jetbrains.kotlin.analysis.api.annotations.KaAnnotation
+import org.jetbrains.kotlin.analysis.api.annotations.KaAnnotationValue
+import org.jetbrains.kotlin.analysis.api.annotations.KaNamedAnnotationValue
 import org.jetbrains.kotlin.analysis.api.fir.diagnostics.KaFirDiagnostic
 import org.jetbrains.kotlin.analysis.api.fir.utils.getActualAnnotationTargets
-import org.jetbrains.kotlin.analysis.api.types.KtNonErrorClassType
+import org.jetbrains.kotlin.analysis.api.types.KaClassType
 import org.jetbrains.kotlin.idea.base.psi.KotlinPsiHeuristics
 import org.jetbrains.kotlin.idea.codeinsight.api.applicators.fixes.KotlinQuickFixFactory
 import org.jetbrains.kotlin.idea.quickfix.AddAnnotationFix
@@ -35,6 +37,14 @@ internal object OptInFixFactories {
         createQuickFix(diagnostic)
     }
 
+    val optInToInheritanceFactory = KotlinQuickFixFactory.IntentionBased { diagnostic: KaFirDiagnostic.OptInToInheritance ->
+        createQuickFix(diagnostic)
+    }
+
+    val optInToInheritanceErrorFactory = KotlinQuickFixFactory.IntentionBased { diagnostic: KaFirDiagnostic.OptInToInheritanceError ->
+        createQuickFix(diagnostic)
+    }
+
     val optInOverrideFactory = KotlinQuickFixFactory.IntentionBased { diagnostic: KaFirDiagnostic.OptInOverride ->
         createQuickFix(diagnostic)
     }
@@ -43,7 +53,8 @@ internal object OptInFixFactories {
         createQuickFix(diagnostic)
     }
 
-    context(KtAnalysisSession)
+    context(KaSession)
+    @OptIn(KaExperimentalApi::class, KaImplementationDetail::class)
     private fun createQuickFix(diagnostic: KaFirDiagnostic<PsiElement>): List<AddAnnotationFix> {
         val element = diagnostic.psi.findParentOfType<KtElement>(strict = false) ?: return emptyList()
         val annotationClassId = OptInFixUtils.optInMarkerClassId(diagnostic) ?: return emptyList()
@@ -63,7 +74,7 @@ internal object OptInFixFactories {
             if (targetElement !is KtDeclaration) return null
             if (applicableTargets == null) return null
 
-            val actualTargetList = (targetElement as? KtDeclaration)?.getSymbol()?.getActualAnnotationTargets() ?: return null
+            val actualTargetList = targetElement.symbol.getActualAnnotationTargets() ?: return null
             return OptInGeneralUtils.collectPropagateOptInAnnotationFix(
                 targetElement,
                 kind,
@@ -98,17 +109,28 @@ private object OptInGeneralUtils : OptInGeneralUtilsBase() {
         analyze(this) {
             return superTypeListEntries.any {
                 val typeReference = it.typeReference
-                val resolvedClass = typeReference?.getKtType()?.expandedClassSymbol ?: return false
-                val classAnnotation = resolvedClass.annotationsByClassId(OptInNames.SUBCLASS_OPT_IN_REQUIRED_CLASS_ID).firstOrNull()
-                classAnnotation != null && findMarkerClassId(classAnnotation)?.asSingleFqName() == annotationFqName
+                val resolvedClass = typeReference?.type?.expandedSymbol ?: return false
+                val classAnnotation = resolvedClass.annotations[OptInNames.SUBCLASS_OPT_IN_REQUIRED_CLASS_ID].firstOrNull()
+                classAnnotation != null && annotationFqName.isInSubclassArguments(classAnnotation)
             }
         }
     }
 
-    private fun findMarkerClassId(annotation: KtAnnotationApplicationWithArgumentsInfo): ClassId? {
-        val argument = annotation.arguments.find { arg -> arg.name == OptInNames.OPT_IN_ANNOTATION_CLASS } ?: return null
-        val value = argument.expression as? KtKClassAnnotationValue ?: return null
-        val type = value.type as? KtNonErrorClassType ?: return null
-        return type.classId.takeUnless { it.isLocal }
+    private fun FqName.isInSubclassArguments(subclassOptInAnnotation: KaAnnotation): Boolean {
+        val argument = subclassOptInAnnotation.arguments.find { arg -> arg.name == OptInNames.OPT_IN_ANNOTATION_CLASS } ?: return false
+        val classIds = getSubclassArgClassIds(argument)
+        return classIds.any {
+            !it.isLocal && it.asSingleFqName() == this
+        }
+    }
+
+    private fun getSubclassArgClassIds(argument: KaNamedAnnotationValue): List<ClassId> {
+        return when (val expression = argument.expression) {
+            // @SubclassOptInRequired for stdlib versions below 2.1
+            is KaAnnotationValue.ClassLiteralValue -> listOfNotNull((expression.type as? KaClassType)?.classId)
+            // @SubclassOptInRequired for stdlib versions 2.1 and above
+            is KaAnnotationValue.ArrayValue -> expression.values.mapNotNull { (it as? KaAnnotationValue.ClassLiteralValue)?.classId }
+            else -> emptyList()
+        }
     }
 }

@@ -77,7 +77,7 @@ public final class EditorHyperlinkSupport {
 
           Runnable runnable = getLinkNavigationRunnable(e.getLogicalPosition());
           if (runnable != null) {
-            try (AccessToken ignore = SlowOperations.allowSlowOperations(SlowOperations.ACTION_PERFORM)) {
+            try (AccessToken ignore = SlowOperations.startSection(SlowOperations.ACTION_PERFORM)) {
               runnable.run();
             }
             e.consume();
@@ -385,8 +385,10 @@ public final class EditorHyperlinkSupport {
   }
 
   private void addInlay(int offset, @NotNull InlayProvider inlayProvider) {
-    Inlay<?> inlay = myEditor.getInlayModel().addInlineElement(offset, inlayProvider.createInlayRenderer(myEditor));
-    INLAY.set(inlay, Unit.INSTANCE);
+    Inlay<?> inlay = inlayProvider.createInlay(myEditor, offset);
+    if (inlay != null) {
+      INLAY.set(inlay, Unit.INSTANCE);
+    }
   }
 
   private static @NotNull TextAttributes getFollowedHyperlinkAttributes(@NotNull RangeHighlighter range) {

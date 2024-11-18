@@ -4,6 +4,7 @@ package com.intellij.xdebugger.impl.actions.handlers;
 import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
+import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.EditorGutter;
 import com.intellij.openapi.editor.LogicalPosition;
@@ -12,11 +13,13 @@ import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.ExperimentalUI;
+import com.intellij.util.ModalityUiUtil;
 import com.intellij.xdebugger.XSourcePosition;
 import com.intellij.xdebugger.impl.XDebuggerManagerImpl;
 import com.intellij.xdebugger.impl.XSourcePositionImpl;
 import com.intellij.xdebugger.impl.breakpoints.XBreakpointUtil;
 import com.intellij.xdebugger.impl.ui.DebuggerUIUtil;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -25,6 +28,7 @@ import java.awt.*;
 /**
  * @author Konstantin Bulenkov
  */
+@ApiStatus.Internal
 public class AddLineBreakpointAction extends DumbAwareAction {
   @Override
   public void actionPerformed(@NotNull AnActionEvent e) {
@@ -37,10 +41,12 @@ public class AddLineBreakpointAction extends DumbAwareAction {
     XBreakpointUtil.toggleLineBreakpoint(project, position, false, editor, false, false, true)
       .onSuccess(bp -> {
         if (bp != null && isConditional()) {
-          EditorGutterComponentEx gutter = (EditorGutterComponentEx)editor.getGutter();
-          int x = -gutter.getWidth() + gutter.getLineNumberAreaOffset() + gutter.getLineNumberAreaWidth() / 2;
-          int y = editor.offsetToXY(position.getOffset()).y + editor.getLineHeight() / 2;
-          DebuggerUIUtil.showXBreakpointEditorBalloon(project, new Point(x, y), editor.getContentComponent(), false, bp);
+          ModalityUiUtil.invokeLaterIfNeeded(ModalityState.defaultModalityState(), () -> {
+            EditorGutterComponentEx gutter = (EditorGutterComponentEx)editor.getGutter();
+            int x = -gutter.getWidth() + gutter.getLineNumberAreaOffset() + gutter.getLineNumberAreaWidth() / 2;
+            int y = editor.offsetToXY(position.getOffset()).y + editor.getLineHeight() / 2;
+            DebuggerUIUtil.showXBreakpointEditorBalloon(project, new Point(x, y), editor.getContentComponent(), false, bp);
+          });
         }
       });
   }

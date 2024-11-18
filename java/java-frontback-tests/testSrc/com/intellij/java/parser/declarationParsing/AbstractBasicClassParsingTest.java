@@ -86,8 +86,16 @@ public abstract class AbstractBasicClassParsingTest extends AbstractBasicJavaPar
   public void testRecordNoClosingTypeBracket() { doTest(true); }
 
   public void testRecordWithModifiers() { doTest(true); }
+  
+  public void testRecordIncomplete() { doTest(true); }
 
   public void testRecordInCodeBlock() { doTest(true); }
+  
+  public void testRecordInCodeBlockIncompleteBeforeDeclaration() { doTest(true); }
+  
+  public void testRecordInCodeBlockIncompleteBeforeIfStatement() { doTest(true); }
+  
+  public void testVarIncomplete() { doTest(true); }
 
   public void testLocalRecord() { doTest(true); }
 
@@ -137,6 +145,9 @@ public abstract class AbstractBasicClassParsingTest extends AbstractBasicJavaPar
     doTest(true);
   }
   public void testImplicitClass5() {
+    doTest(true);
+  }
+  public void testImplicitClassJavaDoc() {
     doTest(true);
   }
 }

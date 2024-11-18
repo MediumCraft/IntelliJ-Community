@@ -14,12 +14,14 @@
     ]]></description>
 
   <dependencies>
+    <module name="intellij.platform.tips"/>
     <plugin id="com.intellij.modules.lang"/>
     <module name="intellij.platform.lvcs.impl"/>
   </dependencies>
 
   <content>
     <module name="intellij.vcs.git.featuresTrainer"/>
+    <module name="intellij.featuresTrainer.onboarding"/>
   </content>
 
   <resource-bundle>messages.LearnBundle</resource-bundle>
@@ -47,6 +49,8 @@
     <extensionPoint name="ift.learning.commonCourse" beanClass="com.intellij.util.KeyedLazyInstanceEP" dynamic="true">
       <with attribute="implementationClass" implements="training.learn.course.LearningCourse"/>
     </extensionPoint>
+
+    <extensionPoint name="ift.newUsersOnboardingExperimentAccessor" interface="training.learn.NewUsersOnboardingExperimentAccessor" dynamic="true"/>
   </extensionPoints>
 
   <extensions defaultExtensionNs="com.intellij">
@@ -88,8 +92,10 @@
       <action internal="true" id="AutorunCurrentLesson" class="training.actions.AutorunCurrentLesson"/>
       <action internal="true" id="SetCurrentLessonAsPassed" class="training.actions.SetCurrentLessonAsPassed"/>
       <action internal="true" id="ResetOnboardingFeedbackState" class="training.actions.ResetOnboardingFeedbackStateAction"/>
+      <action internal="true" id="ShowDemoAltClickPromoter" class="training.featuresSuggester.suggesters.promo.ShowDemoAltClickPromoterAction"/>
       <add-to-group group-id="Internal" anchor="last"/>
     </group>
+
 
     <action id="PreviousLessonAction" class="training.actions.PreviousLessonAction"
             icon="AllIcons.Actions.Back"/>
@@ -100,19 +106,15 @@
     <action id="RestartLessonAction" class="training.actions.RestartLessonAction"
             icon="training.FeaturesTrainerIcons.ResetLesson"/>
 
-    <!-- Help -->
-    <group id="LearnGroup">
-      <separator/>
-      <action id="ShowLearnPanel" class="training.actions.OpenLearnPanel" icon="training.FeaturesTrainerIcons.FeatureTrainerToolWindow"/>
-      <separator/>
-      <add-to-group group-id="HelpMenu" relative-to-action="HelpTopics" anchor="after"/>
-    </group>
+    <action id="ShowLearnPanel" class="training.actions.OpenLearnPanel" icon="training.FeaturesTrainerIcons.FeatureTrainerToolWindow">
+      <add-to-group group-id="LearnGroup"/>
+    </action>
   </actions>
 
   <extensions defaultExtensionNs="com.intellij">
     <registryKey key="ift.short.onboarding.lesson"
                  description="Use short onborading lesson followed after UI overview"
-                 defaultValue="FALSE"
+                 defaultValue="TRUE"
                  restartRequired="true"/>
     <registryKey key="ift.help.links"
                  description="Turn on IFT Help and Resources section"
@@ -169,6 +171,8 @@
     <ifs.suggester
       implementation="training.featuresSuggester.suggesters.CopyPasteSuggester"/>
     <ifs.suggester
+      implementation="training.featuresSuggester.suggesters.QuickEvaluateSuggester"/>
+    <ifs.suggester
       implementation="training.featuresSuggester.suggesters.SurroundWithSuggester"/>
     <ifs.suggester
       implementation="training.featuresSuggester.suggesters.UnwrapSuggester"/>
@@ -187,8 +191,7 @@
   </extensions>
 
   <extensions defaultExtensionNs="com.intellij">
-    <applicationService
-      serviceImplementation="training.featuresSuggester.settings.FeatureSuggesterSettings"/>
+    <applicationService serviceImplementation="training.featuresSuggester.settings.FeatureSuggesterSettings"/>
     <applicationConfigurable parentId="tools"
                              instance="training.featuresSuggester.settings.FeatureSuggesterConfigurable"
                              id="org.intellij.featuresSuggester.FeatureSuggesterConfigurable"
@@ -209,7 +212,6 @@
                  key="feature.suggester.enable.suggesters" restartRequired="true"/>
     <notificationGroup id="IDE Feature Suggester" displayType="STICKY_BALLOON" isLogByDefault="false"
         bundle="messages.FeatureSuggesterBundle" key="notification.group.feature.suggester"/>
-    <iconMapper mappingFile="FeaturesTrainerIconMappings.json"/>
 
     <newProject.onboarding.tips implementation="training.onboarding.NewProjectOnboardingTipsImpl"/>
     <postStartupActivity implementation="training.onboarding.InstallOnboardingTooltip"/>
@@ -228,5 +230,7 @@
   <applicationListeners>
     <listener class="training.featuresSuggester.listeners.EditorActionsListener"
               topic="com.intellij.openapi.actionSystem.ex.AnActionListener"/>
+    <listener class="training.featuresSuggester.listeners.EvaluationListener"
+              topic="com.intellij.xdebugger.XEvaluationListener"/>
   </applicationListeners>
 </idea-plugin>

@@ -176,7 +176,7 @@ abstract class GitMergeAction extends GitRepositoryAction {
                             boolean commitAfterMerge) {
     VirtualFile root = repository.getRoot();
 
-    if (mergeConflictDetector.hasHappened()) {
+    if (mergeConflictDetector.isDetected()) {
       new GitConflictResolver(project, singletonList(root), new GitConflictResolver.Params(project)) {
         @Override
         protected boolean proceedAfterAllMerged() throws VcsException {
@@ -188,7 +188,7 @@ abstract class GitMergeAction extends GitRepositoryAction {
       }.merge();
     }
 
-    if (result.success() || mergeConflictDetector.hasHappened()) {
+    if (result.success() || mergeConflictDetector.isDetected()) {
       GitUtil.refreshVfsInRoot(root);
       repository.update();
       if (updatedRanges != null &&
@@ -201,13 +201,13 @@ abstract class GitMergeAction extends GitRepositoryAction {
         if (notificationData != null) {
           String title = getTitleForUpdateNotification(notificationData.getUpdatedFilesCount(), notificationData.getReceivedCommitsCount());
           String content = getBodyForUpdateNotification(notificationData.getFilteredCommitsCount());
-          notification = VcsNotifier.STANDARD_NOTIFICATION
+          notification = VcsNotifier.standardNotification()
             .createNotification(title, content, INFORMATION)
             .setDisplayId(GitNotificationIdsHolder.FILES_UPDATED_AFTER_MERGE)
             .addAction(NotificationAction.createSimple(GitBundle.message("action.NotificationAction.GitMergeAction.text.view.commits"), notificationData.getViewCommitAction()));
         }
         else {
-          notification = VcsNotifier.STANDARD_NOTIFICATION
+          notification = VcsNotifier.standardNotification()
             .createNotification(VcsBundle.message("message.text.all.files.are.up.to.date"), INFORMATION)
             .setDisplayId(GitNotificationIdsHolder.FILES_UP_TO_DATE);
         }
@@ -217,11 +217,11 @@ abstract class GitMergeAction extends GitRepositoryAction {
         showUpdates(project, repository, currentRev, beforeLabel, getActionName());
       }
     }
-    else if (localChangesDetector.wasMessageDetected()) {
+    else if (localChangesDetector.isDetected()) {
       LocalChangesWouldBeOverwrittenHelper.showErrorNotification(project, LOCAL_CHANGES_DETECTED, repository.getRoot(), getActionName(),
                                                                  localChangesDetector.getRelativeFilePaths());
     }
-    else if (untrackedFilesDetector.wasMessageDetected()) {
+    else if (untrackedFilesDetector.isDetected()) {
       GitUntrackedFilesHelper.notifyUntrackedFilesOverwrittenBy(project, root, untrackedFilesDetector.getRelativeFilePaths(),
                                                                 getActionName(), null);
     }

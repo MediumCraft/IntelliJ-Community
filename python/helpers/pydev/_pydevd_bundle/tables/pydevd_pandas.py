@@ -4,7 +4,8 @@ import pandas as pd
 import typing
 
 TABLE_TYPE_NEXT_VALUE_SEPARATOR = '__pydev_table_column_type_val__'
-MAX_COLWIDTH_PYTHON_2 = 100000
+MAX_COLWIDTH = 100000
+CSV_FORMAT_SEPARATOR = '~'
 
 
 def get_type(table):
@@ -21,7 +22,7 @@ def get_shape(table):
 # noinspection PyUnresolvedReferences
 def get_head(table):
     # type: (Union[pd.DataFrame, pd.Series]) -> str
-    return repr(__convert_to_df(table).head().to_html(notebook=True, max_cols=None))
+    return repr(__convert_to_df(table).head(1).to_html(notebook=True, max_cols=None))
 
 
 # noinspection PyUnresolvedReferences
@@ -34,23 +35,42 @@ def get_column_types(table):
 
 # used by pydevd
 # noinspection PyUnresolvedReferences
-def get_data(table, start_index=None, end_index=None):
-    # type: (Union[pd.DataFrame, pd.Series], int, int) -> str
+def get_data(table, use_csv_serialization, start_index=None, end_index=None, format=None):
+    # type: (Union[pd.DataFrame, pd.Series], bool, int, int) -> str
 
-    def convert_data_to_html(data, max_cols):
-        return repr(__convert_to_df(data).to_html(notebook=True, max_cols=max_cols))
+    def convert_data_to_csv(data):
+        return repr(__convert_to_df(data).to_csv(na_rep = "NaN", float_format=format, sep=CSV_FORMAT_SEPARATOR))
 
-    return _compute_sliced_data(table, convert_data_to_html, start_index, end_index)
+    def convert_data_to_html(data):
+        return repr(__convert_to_df(data).to_html(notebook=True))
+
+    if use_csv_serialization:
+        computed_data = _compute_sliced_data(table, convert_data_to_csv, start_index, end_index, format)
+    else:
+        computed_data = _compute_sliced_data(table, convert_data_to_html, start_index, end_index, format)
+    return computed_data
 
 
 # used by DSTableCommands
 # noinspection PyUnresolvedReferences
-def display_data(table, start_index, end_index):
+def display_data_csv(table, start_index, end_index):
     # type: (Union[pd.DataFrame, pd.Series], int, int) -> None
-    def ipython_display(data, max_cols):
+    def ipython_display(data):
+        try:
+            data = data.to_csv(na_rep = "NaN", sep=CSV_FORMAT_SEPARATOR)
+        except AttributeError:
+            pass
+        print(__convert_to_df(data))
+    _compute_sliced_data(table, ipython_display, start_index, end_index)
+
+
+# used by DSTableCommands
+# noinspection PyUnresolvedReferences
+def display_data_html(table, start_index, end_index):
+    # type: (Union[pd.DataFrame, pd.Series], int, int) -> None
+    def ipython_display(data):
         from IPython.display import display
         display(__convert_to_df(data))
-
     _compute_sliced_data(table, ipython_display, start_index, end_index)
 
 
@@ -58,27 +78,49 @@ def __get_data_slice(table, start, end):
     return __convert_to_df(table).iloc[start:end]
 
 
-def _compute_sliced_data(table, fun, start_index=None, end_index=None):
+def _compute_sliced_data(table, fun, start_index=None, end_index=None, format=None):
     # type: (Union[pd.DataFrame, pd.Series], function, int, int) -> str
 
-    max_cols, max_colwidth = __get_tables_display_options()
+    max_cols, max_colwidth, max_rows = __get_tables_display_options()
 
     _jb_max_cols = pd.get_option('display.max_columns')
     _jb_max_colwidth = pd.get_option('display.max_colwidth')
+    _jb_max_rows = pd.get_option('display.max_rows')
+    if format is not None:
+        _jb_float_options = pd.get_option('display.float_format')
+
 
     pd.set_option('display.max_columns', max_cols)
+    pd.set_option('display.max_rows', max_rows)
     pd.set_option('display.max_colwidth', max_colwidth)
+
+    format_function = _define_format_function(format)
+    if format_function is not None:
+        pd.set_option('display.float_format', format_function)
 
     if start_index is not None and end_index is not None:
         table = __get_data_slice(table, start_index, end_index)
 
-    data = fun(table, max_cols)
+    data = fun(table)
 
     pd.set_option('display.max_columns', _jb_max_cols)
     pd.set_option('display.max_colwidth', _jb_max_colwidth)
+    pd.set_option('display.max_rows', _jb_max_rows)
+    if format is not None:
+        pd.set_option('display.float_format', _jb_float_options)
 
     return data
 
+
+def _define_format_function(format):
+    # type: (Union[None, str]) -> Union[Callable, None]
+    if format is None or format == 'null':
+        return None
+
+    if format.startswith("%"):
+        return lambda x: format % x
+
+    return None
 
 def get_column_descriptions(table):
     # type: (Union[pd.DataFrame, pd.Series]) -> str
@@ -88,13 +130,6 @@ def get_column_descriptions(table):
         return get_data(described_result, None, None)
     else:
         return ""
-
-
-def get_value_counts(table):
-    # type: (Union[pd.DataFrame, pd.Series]) -> str
-    counts_result = __get_counts(table)
-
-    return get_data(counts_result, None, None)
 
 
 def __get_describe(table):
@@ -116,11 +151,6 @@ def __get_describe(table):
         return described_
     else:
         return described_.reindex(columns=table.columns, copy=False)
-
-
-def __get_counts(table):
-    # type: (Union[pd.DataFrame, pd.Series]) -> pd.DataFrame
-    return __convert_to_df(table).count().to_frame().transpose()
 
 
 class ColumnVisualisationType:
@@ -263,8 +293,13 @@ def __categorical_to_df(table):
 
 # In old versions of pandas max_colwidth accepted only Int-s
 def __get_tables_display_options():
-    # type: () -> Tuple[None, Union[int, None]]
+    # type: () -> Tuple[None, Union[int, None], None]
     import sys
     if sys.version_info < (3, 0):
-        return None, MAX_COLWIDTH_PYTHON_2
-    return None, None
+        return None, MAX_COLWIDTH, None
+    try:
+        if int(pd.__version__.split('.')[0]) < 1:
+            return None, MAX_COLWIDTH, None
+    except ImportError:
+        pass
+    return None, None, None

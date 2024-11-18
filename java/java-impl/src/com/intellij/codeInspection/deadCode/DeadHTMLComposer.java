@@ -38,17 +38,16 @@ public class DeadHTMLComposer extends HTMLComposerImpl {
     if (refEntity instanceof RefElementImpl refElement) {
       if (refElement.isSuspicious() && !refElement.isEntry()) {
         appendHeading(buf, AnalysisBundle.message("inspection.problem.synopsis"));
-        buf.append("<br>");
-        buf.append("<div class=\"problem-description\">");
+        startProblemDescription(buf);
         appendProblemSynopsis(refElement, buf);
-        buf.append("</div>");
+        doneProblemDescription(buf);
 
         if (toExternalHtml) {
-          buf.append("<br><br>");
           appendResolution(buf, refElement, DescriptorComposer.quickFixTexts(refElement, myToolPresentation));
         }
         refElement.accept(new RefJavaVisitor() {
-          @Override public void visitClass(@NotNull RefClass aClass) {
+          @Override
+          public void visitClass(@NotNull RefClass aClass) {
             appendClassInstantiations(buf, aClass);
             myComposer.appendDerivedClasses(buf, aClass);
             myComposer.appendClassExtendsImplements(buf, aClass);
@@ -56,7 +55,8 @@ public class DeadHTMLComposer extends HTMLComposerImpl {
             myComposer.appendTypeReferences(buf, aClass);
           }
 
-          @Override public void visitMethod(@NotNull RefMethod method) {
+          @Override
+          public void visitMethod(@NotNull RefMethod method) {
             appendElementInReferences(buf, method);
             appendElementOutReferences(buf, method);
             myComposer.appendDerivedMethods(buf, method);
@@ -64,7 +64,8 @@ public class DeadHTMLComposer extends HTMLComposerImpl {
             myComposer.appendSuperMethods(buf, method);
           }
 
-          @Override public void visitField(@NotNull RefField field) {
+          @Override
+          public void visitField(@NotNull RefField field) {
             appendElementInReferences(buf, field);
             appendElementOutReferences(buf, field);
           }
@@ -86,7 +87,9 @@ public class DeadHTMLComposer extends HTMLComposerImpl {
 
         if (!field.isUsedForReading() && field.isUsedForWriting()) {
           if (field.isOnlyAssignedInInitializer()) {
-            buf.append(AnalysisBundle.message("inspection.dead.code.problem.synopsis1"));
+            buf.append(field.isEnumConstant()
+                       ? AnalysisBundle.message("inspection.dead.code.problem.synopsis.enum.constant")
+                       : AnalysisBundle.message("inspection.dead.code.problem.synopsis1"));
             return;
           }
 
@@ -105,37 +108,50 @@ public class DeadHTMLComposer extends HTMLComposerImpl {
       }
 
       @Override public void visitClass(@NotNull RefClass refClass) {
+        String classOrInterface = HTMLJavaHTMLComposer.getClassOrInterface(refClass, true);
         if (refClass.isAnonymous()) {
           buf.append(AnalysisBundle.message("inspection.dead.code.problem.synopsis10"));
-        } else if (refClass.isInterface() || refClass.isAbstract()) {
-          String classOrInterface = HTMLJavaHTMLComposer.getClassOrInterface(refClass, true);
-          buf.append("&nbsp;");
+        } else if (refClass.isAnnotationType()) {
+          buf.append(AnalysisBundle.message("inspection.dead.code.problem.synopsis11", classOrInterface));
+        }
+        else if (refClass.isEnum()) {
+          buf.append(AnalysisBundle.message("inspection.dead.code.problem.synopsis11", classOrInterface));
+        }
+        else {
+          if (refClass.isInterface() || refClass.isAbstract()) {
+            int nDerived = getImplementationsCount(refClass);
 
-          int nDerived = getImplementationsCount(refClass);
-
-          if (nDerived == 0) {
-            buf.append(AnalysisBundle.message("inspection.dead.code.problem.synopsis23", classOrInterface));
-          } else if (nDerived == 1) {
-            buf.append(AnalysisBundle.message("inspection.dead.code.problem.synopsis24", classOrInterface));
-          } else {
-            buf.append(AnalysisBundle.message("inspection.dead.code.problem.synopsis25", classOrInterface, nDerived));
-          }
-        } else if (refClass.isUtilityClass()) {
-          buf.append(AnalysisBundle.message("inspection.dead.code.problem.synopsis11"));
-        } else {
-          int nInstantiationsCount = getInstantiationsCount(refClass);
-
-          if (nInstantiationsCount == 0) {
-            int nImplementations = getImplementationsCount(refClass);
-            if (nImplementations != 0) {
-              buf.append(AnalysisBundle.message("inspection.dead.code.problem.synopsis19", nImplementations));
-            } else {
-              buf.append(AnalysisBundle.message("inspection.dead.code.problem.synopsis13"));
+            if (nDerived == 0) {
+              buf.append(AnalysisBundle.message("inspection.dead.code.problem.synopsis23", classOrInterface));
             }
-          } else if (nInstantiationsCount == 1) {
-            buf.append(AnalysisBundle.message("inspection.dead.code.problem.synopsis12"));
-          } else {
-            buf.append(AnalysisBundle.message("inspection.dead.code.problem.synopsis20", nInstantiationsCount));
+            else if (nDerived == 1) {
+              buf.append(AnalysisBundle.message("inspection.dead.code.problem.synopsis24", classOrInterface));
+            }
+            else {
+              buf.append(AnalysisBundle.message("inspection.dead.code.problem.synopsis25", classOrInterface, nDerived));
+            }
+          }
+          else if (refClass.isUtilityClass()) {
+            buf.append(AnalysisBundle.message("inspection.dead.code.problem.synopsis11", classOrInterface));
+          }
+          else {
+            int nInstantiationsCount = getInstantiationsCount(refClass);
+
+            if (nInstantiationsCount == 0) {
+              int nImplementations = getImplementationsCount(refClass);
+              if (nImplementations != 0) {
+                buf.append(AnalysisBundle.message("inspection.dead.code.problem.synopsis19", nImplementations));
+              }
+              else {
+                buf.append(AnalysisBundle.message("inspection.dead.code.problem.synopsis13", classOrInterface));
+              }
+            }
+            else if (nInstantiationsCount == 1) {
+              buf.append(AnalysisBundle.message("inspection.dead.code.problem.synopsis12", classOrInterface));
+            }
+            else {
+              buf.append(AnalysisBundle.message("inspection.dead.code.problem.synopsis20", nInstantiationsCount, classOrInterface));
+            }
           }
         }
       }
@@ -297,7 +313,7 @@ public class DeadHTMLComposer extends HTMLComposerImpl {
       boolean found = false;
 
       appendHeading(buf, AnalysisBundle.message("inspection.dead.code.export.results.instantiated.from.heading"));
-
+      startProblemDescription(buf);
       startList(buf);
       for (RefMethod refMethod : refClass.getConstructors()) {
         for (RefElement refCaller : refMethod.getInReferences()) {
@@ -313,6 +329,7 @@ public class DeadHTMLComposer extends HTMLComposerImpl {
       }
 
       doneList(buf);
+      doneProblemDescription(buf);
     }
   }
 
@@ -321,7 +338,6 @@ public class DeadHTMLComposer extends HTMLComposerImpl {
     if (!possibleChildren.isEmpty()) {
       if (appendCallees){
         appendHeading(buf, JavaBundle.message("inspection.export.results.callees"));
-        buf.append("<div class=\"problem-description\">");
       }
       final @NonNls String ul = "<ul>";
       buf.append(ul);
@@ -338,9 +354,6 @@ public class DeadHTMLComposer extends HTMLComposerImpl {
       }
       final @NonNls String closeUl = "</ul>";
       buf.append(closeUl);
-      if (appendCallees) {
-        buf.append("</div>");
-      }
     }
   }
 

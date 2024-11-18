@@ -9,6 +9,7 @@ import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import com.intellij.psi.PsiWhiteSpace
 import com.intellij.psi.util.parentOfType
+import com.intellij.psi.util.parents
 import com.intellij.psi.util.parentsOfType
 import com.intellij.util.asSafely
 import com.intellij.util.text.CharArrayUtil
@@ -21,6 +22,7 @@ import org.jetbrains.kotlin.psi.psiUtil.*
 import org.jetbrains.kotlin.util.match
 import org.jetbrains.kotlin.utils.addToStdlib.firstIsInstanceOrNull
 import org.jetbrains.kotlin.utils.addToStdlib.safeAs
+import org.jetbrains.kotlin.psi.psiUtil.isExpectDeclaration as isExpectDeclaration_alias
 
 val KtClassOrObject.classIdIfNonLocal: ClassId?
     get() {
@@ -132,6 +134,15 @@ fun <T> getTopmostElementAtOffset(element: PsiElement, offset: Int, vararg class
     return lastElementOfType
 }
 
+/**
+ * @return the [FqName] of the first non-local declaration containing [offset]
+ */
+fun getFqNameAtOffset(file: KtFile, offset: Int): FqName? {
+    if (offset !in 0 until file.textLength) return null
+
+    return file.findElementAt(offset)?.parents(withSelf = true)?.mapNotNull { it.kotlinFqName }?.firstOrNull()
+}
+
 private fun <T> Array<out Class<out T>>.anyIsInstance(element: PsiElement): Boolean =
     any { it.isInstance(element) }
 
@@ -141,12 +152,11 @@ private fun PsiElement.isSuitableTopmostElementAtOffset(offset: Int): Boolean =
 
 fun KtExpression.safeDeparenthesize(): KtExpression = KtPsiUtil.safeDeparenthesize(this)
 
-fun KtDeclaration.isExpectDeclaration(): Boolean =
-    when {
-        hasExpectModifier() -> true
-        this is KtParameter -> ownerFunction?.isExpectDeclaration() == true
-        else -> containingClassOrObject?.isExpectDeclaration() == true
-    }
+@Deprecated(
+    "Use 'isExpectDeclaration()' instead",
+    ReplaceWith("isExpectDeclaration()", "org.jetbrains.kotlin.psi.psiUtil.isExpectDeclaration"),
+)
+fun KtDeclaration.isExpectDeclaration(): Boolean = isExpectDeclaration_alias()
 
 fun KtDeclaration.isEffectivelyActual(checkConstructor: Boolean = true): Boolean = when {
     hasActualModifier() -> true
@@ -155,8 +165,7 @@ fun KtDeclaration.isEffectivelyActual(checkConstructor: Boolean = true): Boolean
 }
 
 fun KtPropertyAccessor.deleteBody() {
-    val leftParenthesis = leftParenthesis ?: return
-    deleteChildRange(leftParenthesis, lastChild)
+    deleteChildRange(parameterList ?: return, lastChild)
 }
 
 /**
@@ -229,7 +238,7 @@ fun KtPrimaryConstructor.isRedundant(): Boolean {
         valueParameters.isNotEmpty() -> false
         annotations.isNotEmpty() -> false
         modifierList?.text?.isBlank() == false -> false
-        isExpectDeclaration() -> false
+        isExpectDeclaration_alias() -> false
         containingClass.mustHaveNonEmptyPrimaryConstructor() -> false
         containingClass.secondaryConstructors.isNotEmpty() -> false
         else -> true
@@ -321,4 +330,22 @@ fun KtSimpleNameExpression.isPartOfQualifiedExpression(): Boolean {
 
 fun KtTypeReference?.typeArguments(): List<KtTypeProjection> {
     return (this?.typeElement as? KtUserType)?.typeArguments.orEmpty()
+}
+
+fun KtNamedDeclaration.getReturnTypeReference(): KtTypeReference? = getReturnTypeReferences().singleOrNull()
+
+fun KtNamedDeclaration.getReturnTypeReferences(): List<KtTypeReference> {
+    return when (this) {
+        is KtCallableDeclaration -> listOfNotNull(typeReference)
+        is KtClassOrObject -> superTypeListEntries.mapNotNull { it.typeReference }
+        is KtScript -> emptyList()
+        else -> throw AssertionError("Unexpected declaration kind: $text")
+    }
+}
+
+fun KtSimpleNameExpression.canBeUsedInImport(): Boolean {
+    if (this is KtEnumEntrySuperclassReferenceExpression) return false
+    if (parent is KtThisExpression || parent is KtSuperExpression) return false
+
+    return true
 }

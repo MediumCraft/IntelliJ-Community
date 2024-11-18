@@ -9,6 +9,7 @@
 
   <dependencies>
     <plugin id="com.intellij.modules.lang"/>
+    <plugin id="com.intellij.modules.json"/>
   </dependencies>
 
   <extensions defaultExtensionNs="com.intellij">
@@ -71,8 +72,8 @@
     <renameInputValidator implementation="org.jetbrains.yaml.resolve.YAMLAnchorRenameInputValidator" order="first"/>
     <lang.refactoringSupport language="yaml" implementationClass="org.jetbrains.yaml.resolve.YAMLRefactoringSupportProvider"/>
     <renamePsiElementProcessor implementation="org.jetbrains.yaml.resolve.YAMLRenamePsiElementProcessor"/>
-    <languageInjectionContributor implementationClass="org.jetbrains.yaml.schema.YamlJsonSchemaLanguageInjector" language="yaml"/>
-    <languageInjectionPerformer implementationClass="org.jetbrains.yaml.YamlLanguageInjectionPerformer" language="yaml"/>
+    <languageInjectionContributor implementationClass="org.jetbrains.yaml.schema.YamlJsonSchemaLanguageInjector" language="yaml" id="yamlJsonSchemaLanguageInjector"/>
+    <languageInjectionPerformer implementationClass="org.jetbrains.yaml.YamlLanguageInjectionPerformer" language="yaml" id="yamlLanguageInjectionPerformer"/>
     <lang.inspectionSuppressor language="yaml" implementationClass="org.jetbrains.yaml.YAMLlInspectionSuppressor"/>
     <annotator language="yaml" implementationClass="org.jetbrains.yaml.annotator.YAMLInvalidBlockChildrenErrorAnnotator"/>
     <applicationService serviceImplementation="org.jetbrains.yaml.smart.YAMLEditorOptions"/>
@@ -127,6 +128,8 @@
     <psi.referenceContributor language="yaml" implementation="org.jetbrains.yaml.YAMLJsonSchemaIdReferenceContributor"/>
     <completion.contributor language="yaml" implementationClass="org.jetbrains.yaml.YAMLJsonSchemaInCommentCompletionContributor"/>
 
+    <lang.floatingToolbar language="yaml" minimal="true"/>
+
     <pluginSuggestionProvider implementation="org.jetbrains.yaml.swagger.OpenApiSuggestionProvider"/>
     <intentionAction>
       <language>yaml</language>
@@ -152,6 +155,12 @@
       <bundleName>messages.YAMLBundle</bundleName>
       <categoryKey>yaml.intention.category.name</categoryKey>
     </intentionAction>
+
+    <fileTypeUsageSchemaDescriptor schema="kubernetes" implementationClass="org.jetbrains.yaml.K8sFileTypeUsageDescriptor"/>
+    <fileTypeUsageSchemaDescriptor schema="openapi" implementationClass="org.jetbrains.yaml.OpenapiFileTypeUsageDescriptor"/>
+    <fileTypeUsageSchemaDescriptor schema="swagger" implementationClass="org.jetbrains.yaml.SwaggerFileTypeUsageDescriptor"/>
+    <fileTypeUsageSchemaDescriptor schema="docker-compose" implementationClass="org.jetbrains.yaml.DockerComposeFileTypeUsageDescriptor"/>
+    <fileTypeUsageSchemaDescriptor schema="cloudformation" implementationClass="org.jetbrains.yaml.CloudFormationFileTypeUsageDescriptor"/>
   </extensions>
 
   <extensions defaultExtensionNs="com.intellij.json">
@@ -164,6 +173,9 @@
   </extensions>
 
   <extensionPoints>
+    <extensionPoint qualifiedName="com.intellij.yaml.tagRecogniser"
+                    interface="org.jetbrains.yaml.psi.YamlTagRecogniser"
+                    dynamic="true"/>
     <extensionPoint qualifiedName="com.intellij.yaml.customStructureViewFactory"
                     interface="org.jetbrains.yaml.structureView.YAMLCustomStructureViewFactory"
                     dynamic="true">

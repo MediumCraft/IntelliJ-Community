@@ -61,7 +61,11 @@ __jetbrains_intellij_run_generator() {
 }
 
 __jetbrains_intellij_get_directory_files() {
-  builtin printf '%s' "$(command ls -1ap "$1")"
+  command ls -1ap "$1"
+}
+
+__jetbrains_intellij_get_aliases() {
+  __jetbrains_intellij_escape_json "$(alias)"
 }
 
 __jetbrains_intellij_get_environment() {
@@ -70,7 +74,7 @@ __jetbrains_intellij_get_environment() {
   builtin local builtin_names="$(__jetbrains_intellij_escape_json "$(builtin compgen -A builtin)")"
   builtin local function_names="$(__jetbrains_intellij_escape_json "$(builtin compgen -A function)")"
   builtin local command_names="$(__jetbrains_intellij_escape_json "$(builtin compgen -A command)")"
-  builtin local aliases_mapping="$(__jetbrains_intellij_escape_json "$(alias)")"
+  builtin local aliases_mapping="$(__jetbrains_intellij_get_aliases)"
 
   builtin local result="{\"envs\": \"$env_vars\", \"keywords\": \"$keyword_names\", \"builtins\": \"$builtin_names\", \"functions\": \"$function_names\", \"commands\": \"$command_names\",  \"aliases\": \"$aliases_mapping\"}"
   builtin printf '%s' "$result"
@@ -134,19 +138,19 @@ __jetbrains_intellij_command_terminated() {
     return 0
   fi
 
-  __jetbrains_intellij_report_prompt_state
   if [ -z "$__jetbrains_intellij_initialized" ]; then
     __jetbrains_intellij_initialized='1'
     __jetbrains_intellij_fix_prompt_command_order
+    builtin local hist="$(HISTTIMEFORMAT="" builtin history)"
+    builtin printf '\e]1341;command_history;history_string=%s\a' "$(__jetbrains_intellij_encode "$hist")"
     builtin local shell_info="$(__jetbrains_intellij_collect_shell_info)"
     __jetbrains_intellij_debug_log 'initialized'
     builtin printf '\e]1341;initialized;shell_info=%s\a' "$(__jetbrains_intellij_encode $shell_info)"
-    builtin local hist="$(HISTTIMEFORMAT="" builtin history)"
-    builtin printf '\e]1341;command_history;history_string=%s\a' "$(__jetbrains_intellij_encode "$hist")"
   else
     __jetbrains_intellij_debug_log "command_finished exit_code=$last_exit_code"
     builtin printf '\e]1341;command_finished;exit_code=%s\a' "$last_exit_code"
   fi
+  __jetbrains_intellij_report_prompt_state
 }
 
 __jetbrains_intellij_report_prompt_state() {
@@ -288,15 +292,10 @@ function __jetbrains_intellij_report_shell_editor_buffer () {
   __JETBRAINS_INTELLIJ_GENERATOR_COMMAND=1
   builtin printf '\e]1341;shell_editor_buffer_reported;shell_editor_buffer=%s\a' "$(__jetbrains_intellij_encode "${READLINE_LINE:-}")"
 }
-
-# Binding works in Bash >= 4.0.
-if [[ -n "${BASH_VERSINFO-}" ]] && (( BASH_VERSINFO[0] >= 4)); then
-  # Remove binding if exists.
-  builtin bind -r '"\e[24~"'
-  # Bind F12 key to report prompt buffer.
-  # Note: We are allowed to bind only shortcuts which could not be typed by user via IJ UI.
-  builtin bind -x '"\e[24~":"__jetbrains_intellij_report_shell_editor_buffer"'
-fi
+# Remove binding if exists.
+builtin bind -r '"\eo"'
+# Bind [Esc, o] key sequence to report prompt buffer.
+builtin bind -x '"\eo":"__jetbrains_intellij_report_shell_editor_buffer"'
 
 preexec_functions+=(__jetbrains_intellij_command_started)
 precmd_functions+=(__jetbrains_intellij_command_terminated)

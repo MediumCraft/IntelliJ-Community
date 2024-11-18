@@ -10,7 +10,7 @@ import com.intellij.openapi.util.Comparing
 import com.intellij.platform.workspace.jps.entities.SdkEntity
 import com.intellij.platform.workspace.jps.entities.SdkRoot
 import com.intellij.platform.workspace.jps.entities.SdkRootTypeId
-import com.intellij.platform.workspace.jps.entities.modifyEntity
+import com.intellij.platform.workspace.jps.entities.modifySdkEntity
 import com.intellij.util.containers.ConcurrentFactoryMap
 import com.intellij.workspaceModel.ide.JpsGlobalModelSynchronizer
 import com.intellij.workspaceModel.ide.impl.GlobalWorkspaceModel
@@ -19,6 +19,7 @@ import com.intellij.workspaceModel.ide.impl.legacyBridge.sdk.SdkBridgeImpl.Compa
 import com.intellij.workspaceModel.ide.impl.legacyBridge.sdk.SdkBridgeImpl.Companion.sdkMap
 import com.intellij.workspaceModel.ide.legacyBridge.sdk.SdkTableImplementationDelegate
 import kotlinx.coroutines.runBlocking
+import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.TestOnly
 
 //TODO::
@@ -28,6 +29,7 @@ import org.jetbrains.annotations.TestOnly
 // [] Strange to have type `SDK` but methods - `updateJDK`
 
 private val rootTypes = ConcurrentFactoryMap.createMap<String, SdkRootTypeId> { SdkRootTypeId(it) }
+@ApiStatus.Internal
 class SdkTableBridgeImpl: SdkTableImplementationDelegate {
 
   override fun findSdkByName(name: String): Sdk? {
@@ -104,7 +106,7 @@ class SdkTableBridgeImpl: SdkTableImplementationDelegate {
     val modifiedSdkBridge = modifiedSdk.delegate as SdkBridgeImpl
     val originalSdkBridge = originalSdk.delegate as SdkBridgeImpl
     globalWorkspaceModel.updateModel("Updating SDK ${originalSdk.name} ${originalSdk.sdkType.name}") {
-      it.modifyEntity(sdkEntity) {
+      it.modifySdkEntity(sdkEntity) {
         this.applyChangesFrom(modifiedSdkBridge.getEntityBuilder())
       }
       originalSdkBridge.applyChangesFrom(modifiedSdkBridge)

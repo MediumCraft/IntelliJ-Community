@@ -188,31 +188,41 @@ public final class PyTypeParameterMapping {
     else if (expectedTypesDeque.size() == 1) {
       PyType onlyLeftExpectedType = expectedTypesDeque.peekFirst();
       if (onlyLeftExpectedType instanceof PyVariadicType) {
+        // [*Ts] <- [*Ts] or [*Ts] <- [*tuple[T1, ...]]
         if (actualTypesDeque.size() == 1 && actualTypesDeque.peekFirst() instanceof PyVariadicType variadicType) {
           centerMappedTypes.add(Couple.of(onlyLeftExpectedType, variadicType));
         }
         else {
+          // [*Ts] <- []
           List<PyType> unmatchedActualTypes = actualTypesDeque.toList();
-          centerMappedTypes.add(Couple.of(onlyLeftExpectedType, PyUnpackedTupleTypeImpl.create(unmatchedActualTypes)));
+          if (optionSet.contains(Option.USE_DEFAULTS)
+              && onlyLeftExpectedType instanceof PyTypeVarTupleType typeVarTupleType
+              && typeVarTupleType.getDefaultType() != null
+              && unmatchedActualTypes.isEmpty()) {
+            centerMappedTypes.add(Couple.of(onlyLeftExpectedType, typeVarTupleType.getDefaultType()));
+          }
+          // [*Ts] <- [T1, *Ts[T2, ...], T2, ...]
+          else {
+            centerMappedTypes.add(Couple.of(onlyLeftExpectedType, PyUnpackedTupleTypeImpl.create(unmatchedActualTypes)));
+          }
         }
         sizeMismatch = false;
       }
-      else if (optionSet.contains(Option.MAP_UNMATCHED_EXPECTED_TYPES_TO_ANY)) {
-        centerMappedTypes.add(Couple.of(onlyLeftExpectedType, null));
-        sizeMismatch = false;
-      }
+      // [T1] <- []
       else {
-        sizeMismatch = true;
+        Couple<PyType> fallbackMapping = mapToFallback(onlyLeftExpectedType, optionSet);
+        ContainerUtil.addIfNotNull(centerMappedTypes, fallbackMapping);
+        sizeMismatch = fallbackMapping == null;
       }
-    }
-    else if (optionSet.contains(Option.MAP_UNMATCHED_EXPECTED_TYPES_TO_ANY)) {
-      for (PyType unmatchedType : expectedTypesDeque.toList()) {
-        centerMappedTypes.add(Couple.of(unmatchedType, null));
-      }
-      sizeMismatch = false;
     }
     else {
+      // [T1, T2, ...] <- []
       sizeMismatch = true;
+      for (PyType unmatchedType : expectedTypesDeque.toList()) {
+        Couple<PyType> fallbackMapping = mapToFallback(unmatchedType, optionSet);
+        ContainerUtil.addIfNotNull(centerMappedTypes, fallbackMapping);
+        sizeMismatch = fallbackMapping == null;
+      }
     }
     if (sizeMismatch) {
       return null;
@@ -222,6 +232,18 @@ public final class PyTypeParameterMapping {
     Collections.reverse(rightMappedTypes);
     resultMapping.addAll(rightMappedTypes);
     return new PyTypeParameterMapping(resultMapping);
+  }
+
+  private static @Nullable Couple<PyType> mapToFallback(@Nullable PyType unmatchedExpectedType, @NotNull EnumSet<Option> optionSet) {
+    if (optionSet.contains(Option.USE_DEFAULTS) &&
+        unmatchedExpectedType instanceof PyTypeParameterType typeParameterType &&
+        typeParameterType.getDefaultType() != null) {
+      return Couple.of(unmatchedExpectedType, typeParameterType.getDefaultType());
+    }
+    else if (optionSet.contains(Option.MAP_UNMATCHED_EXPECTED_TYPES_TO_ANY)) {
+      return Couple.of(unmatchedExpectedType, null);
+    }
+    return null;
   }
 
   private static @NotNull List<PyType> flattenUnpackedTupleTypes(List<? extends PyType> types) {
@@ -239,6 +261,7 @@ public final class PyTypeParameterMapping {
 
   public enum Option {
     MAP_UNMATCHED_EXPECTED_TYPES_TO_ANY,
+    USE_DEFAULTS,
   }
 
   private static final class NullTolerantDeque<T> {

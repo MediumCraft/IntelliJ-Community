@@ -179,14 +179,14 @@ public final class PsiCodeBlockImpl extends LazyParseablePsiElement implements P
   public ASTNode findChildByRole(int role) {
     LOG.assertTrue(ChildRole.isUnique(role));
     switch(role){
-      default:
-        return null;
-
       case ChildRole.LBRACE:
         return findChildByType(JavaTokenType.LBRACE);
 
       case ChildRole.RBRACE:
         return TreeUtil.findChildBackward(this, JavaTokenType.RBRACE);
+
+      default:
+        return null;
     }
   }
 
@@ -263,7 +263,7 @@ public final class PsiCodeBlockImpl extends LazyParseablePsiElement implements P
     }
 
     if (child == null) {
-      child = ((PsiElement)this).getLastChild();
+      child = this.getLastChild();
     }
 
     while (child != null) {

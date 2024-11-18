@@ -236,7 +236,7 @@ public abstract class CoverageEnabledConfiguration implements JDOMExternalizable
   }
 
   @NonNls
-  private @Nullable String createCoverageFile() {
+  protected @Nullable String createCoverageFile() {
     CoverageRunner runner = getCoverageRunner();
     if (runner == null) {
       return null;
@@ -291,7 +291,7 @@ public abstract class CoverageEnabledConfiguration implements JDOMExternalizable
   /**
    * @deprecated Is not used
    */
-  @Deprecated
+  @Deprecated(forRemoval = true)
   public boolean canHavePerTestCoverage() {
     for (CoverageEngine engine : CoverageEngine.EP_NAME.getExtensions()) {
       if (engine.isApplicableTo(myConfiguration)) {

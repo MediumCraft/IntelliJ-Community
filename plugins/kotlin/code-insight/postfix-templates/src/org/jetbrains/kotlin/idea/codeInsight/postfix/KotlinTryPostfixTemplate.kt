@@ -5,17 +5,14 @@ import com.intellij.codeInsight.template.postfix.templates.StringBasedPostfixTem
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiMethod
 import org.jetbrains.kotlin.analysis.api.analyze
-import org.jetbrains.kotlin.analysis.api.annotations.KtAnnotationValue
-import org.jetbrains.kotlin.analysis.api.annotations.KtArrayAnnotationValue
-import org.jetbrains.kotlin.analysis.api.annotations.KtKClassAnnotationValue
-import org.jetbrains.kotlin.analysis.api.annotations.annotationsByClassId
-import org.jetbrains.kotlin.analysis.api.calls.*
+import org.jetbrains.kotlin.analysis.api.annotations.KaAnnotationValue
 import org.jetbrains.kotlin.analysis.api.permissions.KaAllowAnalysisFromWriteAction
 import org.jetbrains.kotlin.analysis.api.permissions.KaAllowAnalysisOnEdt
 import org.jetbrains.kotlin.analysis.api.permissions.allowAnalysisFromWriteAction
 import org.jetbrains.kotlin.analysis.api.permissions.allowAnalysisOnEdt
+import org.jetbrains.kotlin.analysis.api.resolution.*
 import org.jetbrains.kotlin.analysis.api.symbols.*
-import org.jetbrains.kotlin.analysis.api.types.KtNonErrorClassType
+import org.jetbrains.kotlin.analysis.api.types.KaClassType
 import org.jetbrains.kotlin.idea.base.psi.classIdIfNonLocal
 import org.jetbrains.kotlin.name.ClassId
 import org.jetbrains.kotlin.psi.*
@@ -111,29 +108,28 @@ private class ExceptionClassCollector : KtTreeVisitor<Unit?>() {
             @OptIn(KaAllowAnalysisFromWriteAction::class)
             allowAnalysisFromWriteAction {
                 analyze(element) {
-                    processCall(element.resolveCall())
+                    processCall(element.resolveToCall())
                 }
             }
         }
     }
 
-    private fun processCall(callInfo: KtCallInfo?) {
-        val call = (callInfo as? KtSuccessCallInfo)?.call ?: return
+    private fun processCall(callInfo: KaCallInfo?) {
+        val call = (callInfo as? KaSuccessCallInfo)?.call ?: return
 
         when (call) {
-            is KtSimpleFunctionCall -> processCallable(call.symbol)
+            is KaSimpleFunctionCall -> processCallable(call.symbol)
             is KaSimpleVariableAccessCall -> {
                 val symbol = call.symbol
-                if (symbol is KtPropertySymbol) {
+                if (symbol is KaPropertySymbol) {
                     when (call.simpleAccess) {
-                        KaSimpleVariableAccess.Read -> symbol.getter?.let { processCallable(it) }
+                        is KaSimpleVariableAccess.Read -> symbol.getter?.let { processCallable(it) }
                         is KaSimpleVariableAccess.Write -> symbol.setter?.let { processCallable(it) }
-                        else -> {}
                     }
                 }
             }
-            is KtCompoundVariableAccessCall -> processCallable(call.compoundAccess.operationPartiallyAppliedSymbol.symbol)
-            is KtCompoundArrayAccessCall -> {
+            is KaCompoundVariableAccessCall -> processCallable(call.compoundOperation.operationPartiallyAppliedSymbol.symbol)
+            is KaCompoundArrayAccessCall -> {
                 processCallable(call.getPartiallyAppliedSymbol.symbol)
                 processCallable(call.setPartiallyAppliedSymbol.symbol)
             }
@@ -141,8 +137,8 @@ private class ExceptionClassCollector : KtTreeVisitor<Unit?>() {
         }
     }
 
-    private fun processCallable(symbol: KtCallableSymbol) {
-        if (symbol.origin == KtSymbolOrigin.JAVA) {
+    private fun processCallable(symbol: KaCallableSymbol) {
+        if (symbol.origin == KaSymbolOrigin.JAVA_SOURCE || symbol.origin == KaSymbolOrigin.JAVA_LIBRARY) {
             val javaMethod = symbol.psiSafe<PsiMethod>() ?: return
             for (type in javaMethod.throwsList.referencedTypes) {
                 val classId = type.resolve()?.classIdIfNonLocal
@@ -157,7 +153,7 @@ private class ExceptionClassCollector : KtTreeVisitor<Unit?>() {
         }
 
         for (classId in THROWS_ANNOTATION_FQ_NAMES) {
-            for (annotation in symbol.annotationsByClassId(classId)) {
+            for (annotation in symbol.annotations[classId]) {
                 for (argument in annotation.arguments) {
                     processAnnotationValue(argument.expression)
                 }
@@ -165,12 +161,12 @@ private class ExceptionClassCollector : KtTreeVisitor<Unit?>() {
         }
     }
 
-    private fun processAnnotationValue(value: KtAnnotationValue) {
+    private fun processAnnotationValue(value: KaAnnotationValue) {
         when (value) {
-            is KtArrayAnnotationValue -> value.values.forEach(::processAnnotationValue)
-            is KtKClassAnnotationValue -> {
+          is KaAnnotationValue.ArrayValue -> value.values.forEach(::processAnnotationValue)
+            is KaAnnotationValue.ClassLiteralValue -> {
                 val type = value.type
-                if (type is KtNonErrorClassType) {
+                if (type is KaClassType) {
                     val classId = type.classId
                     if (classId.isLocal) {
                         hasLocalClasses = true

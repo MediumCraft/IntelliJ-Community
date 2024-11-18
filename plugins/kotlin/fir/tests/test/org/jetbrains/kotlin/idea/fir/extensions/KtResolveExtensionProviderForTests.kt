@@ -7,25 +7,26 @@ import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiManager
 import com.intellij.psi.xml.XmlFile
 import com.intellij.psi.xml.XmlTag
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
+import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
+import org.jetbrains.kotlin.analysis.api.KaSession
+import org.jetbrains.kotlin.analysis.api.projectStructure.KaModule
+import org.jetbrains.kotlin.analysis.api.projectStructure.KaSourceModule
 import org.jetbrains.kotlin.analysis.api.resolve.extensions.*
-import org.jetbrains.kotlin.analysis.api.symbols.KtClassLikeSymbol
-import org.jetbrains.kotlin.analysis.api.symbols.KtFunctionSymbol
-import org.jetbrains.kotlin.analysis.api.symbols.KtSymbol
-import org.jetbrains.kotlin.analysis.project.structure.KtModule
-import org.jetbrains.kotlin.analysis.project.structure.KtSourceModule
-import org.jetbrains.kotlin.idea.base.projectStructure.ideaModule
+import org.jetbrains.kotlin.analysis.api.symbols.KaClassLikeSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaNamedFunctionSymbol
+import org.jetbrains.kotlin.idea.base.projectStructure.openapiModule
 import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.psi.KtDeclaration
 import org.jetbrains.kotlin.psi.KtElement
 import org.jetbrains.kotlin.psi.psiUtil.parentsWithSelf
 
-class KtResolveExtensionProviderForTests : KtResolveExtensionProvider() {
-    override fun provideExtensionsFor(module: KtModule): List<KtResolveExtension> {
+@OptIn(KaExperimentalApi::class)
+class KtResolveExtensionProviderForTests : KaResolveExtensionProvider() {
+    override fun provideExtensionsFor(module: KaModule): List<KaResolveExtension> {
         return when (module) {
-            is KtSourceModule -> {
-                val ideaModule = module.ideaModule
+            is KaSourceModule -> {
+                val ideaModule = module.openapiModule
                 val xmlVirtualFile = OrderEnumerator.orderEntries(ideaModule).roots(OrderRootType.SOURCES).roots.firstNotNullOfOrNull {
                     it.findChild("data.xml")
                 } ?: return emptyList()
@@ -39,7 +40,8 @@ class KtResolveExtensionProviderForTests : KtResolveExtensionProvider() {
     }
 }
 
-private class ExtensionForTests(private val xmlFile: XmlFile) : KtResolveExtension() {
+@OptIn(KaExperimentalApi::class)
+private class ExtensionForTests(private val xmlFile: XmlFile) : KaResolveExtension() {
     private val packageName by lazy {
         xmlFile.rootTag?.findFirstSubTag("package")?.value?.text?.let(::FqName)
     }
@@ -53,12 +55,13 @@ private class ExtensionForTests(private val xmlFile: XmlFile) : KtResolveExtensi
         return setOfNotNull(packageName)
     }
 
-    override fun getKtFiles(): List<KtResolveExtensionFile> {
+    override fun getKtFiles(): List<KaResolveExtensionFile> {
         return files
     }
 }
 
-private class ExtensionFileForTest(private val rootTag: XmlTag, private val packageName: FqName) : KtResolveExtensionFile() {
+@OptIn(KaExperimentalApi::class)
+private class ExtensionFileForTest(private val rootTag: XmlTag, private val packageName: FqName) : KaResolveExtensionFile() {
     private val functionNames by lazy {
         rootTag.findSubTags("function").mapTo(mutableSetOf()) { Name.identifier(it.getAttributeValue("name")!!) }
     }
@@ -94,20 +97,20 @@ private class ExtensionFileForTest(private val rootTag: XmlTag, private val pack
         }
     }
 
-    override fun createNavigationTargetsProvider(): KtResolveExtensionNavigationTargetsProvider {
-        return object : KtResolveExtensionNavigationTargetsProvider() {
-            override fun KtAnalysisSession.getNavigationTargets(element: KtElement): Collection<PsiElement> =
+    override fun createNavigationTargetsProvider(): KaResolveExtensionNavigationTargetsProvider {
+        return object : KaResolveExtensionNavigationTargetsProvider() {
+            override fun KaSession.getNavigationTargets(element: KtElement): Collection<PsiElement> =
                 element.parentsWithSelf
                     .filterIsInstance<KtDeclaration>()
                     .firstNotNullOfOrNull { declaration ->
-                        val fqNameParts = when (val symbol = declaration.getSymbol()) {
-                            is KtFunctionSymbol -> {
+                        val fqNameParts = when (val symbol = declaration.symbol) {
+                            is KaNamedFunctionSymbol -> {
                                 val callableId = symbol.callableId
                                     ?: return@firstNotNullOfOrNull null
                                 callableId.className?.pathSegments().orEmpty() + callableId.callableName
                             }
 
-                            is KtClassLikeSymbol -> {
+                            is KaClassLikeSymbol -> {
                                 symbol.classId?.relativeClassName?.pathSegments()
                                     ?: return@firstNotNullOfOrNull null
                             }

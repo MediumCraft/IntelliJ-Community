@@ -1,7 +1,7 @@
 // Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.testFramework;
 
-import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer;
+import com.intellij.codeInsight.daemon.impl.DaemonCodeAnalyzerEx;
 import com.intellij.codeInsight.highlighting.HighlightUsagesHandler;
 import com.intellij.ide.DataManager;
 import com.intellij.injected.editor.DocumentWindow;
@@ -37,11 +37,11 @@ import com.intellij.openapi.vfs.CharsetToolkit;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.encoding.EncodingProjectManager;
+import com.intellij.platform.testFramework.core.FileComparisonFailedError;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.impl.source.PostprocessReformattingAspect;
 import com.intellij.psi.impl.source.tree.injected.InjectedLanguageUtil;
-import com.intellij.rt.execution.junit.FileComparisonFailure;
 import com.intellij.util.ThrowableRunnable;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -208,7 +208,7 @@ public abstract class LightPlatformCodeInsightTestCase extends LightPlatformTest
   protected Editor createEditor(@NotNull VirtualFile file) {
     PsiDocumentManager.getInstance(getProject()).commitAllDocuments();
     Editor editor = FileEditorManager.getInstance(getProject()).openTextEditor(new OpenFileDescriptor(getProject(), file, 0), false);
-    DaemonCodeAnalyzer.getInstance(getProject()).restart();
+    DaemonCodeAnalyzerEx.getInstanceEx(getProject()).restart("LightPlatformCodeInsightTestCase.createEditor");
     assertNotNull(editor);
     ((EditorImpl)editor).setCaretActive();
     getIndexingMode().ensureIndexingStatus(getProject());
@@ -443,7 +443,7 @@ public abstract class LightPlatformCodeInsightTestCase extends LightPlatformTest
       String fileText1 = myFile.getText();
       String failMessage = getMessage("Text mismatch", message);
       if (filePath != null && !newFileText.equals(fileText1)) {
-        throw new FileComparisonFailure(failMessage, newFileText, fileText1, filePath);
+        throw new FileComparisonFailedError(failMessage, newFileText, fileText1, filePath);
       }
       assertEquals(failMessage, newFileText, fileText1);
 
@@ -469,7 +469,7 @@ public abstract class LightPlatformCodeInsightTestCase extends LightPlatformTest
       String fileText1 = editor.getDocument().getText();
       String failMessage = getMessage("Text mismatch", message);
       if (filePath != null && !newFileText.equals(fileText1)) {
-        throw new FileComparisonFailure(failMessage, newFileText, fileText1, filePath);
+        throw new FileComparisonFailedError(failMessage, newFileText, fileText1, filePath);
       }
       assertEquals(failMessage, newFileText, fileText1);
 
@@ -736,24 +736,17 @@ public abstract class LightPlatformCodeInsightTestCase extends LightPlatformTest
   @NotNull
   protected DataContext getCurrentEditorDataContext() {
     DataContext defaultContext = DataManager.getInstance().getDataContext();
-    return CustomizedDataContext.create(defaultContext, dataId -> {
-      if (CommonDataKeys.EDITOR.is(dataId)) {
-        return getEditor();
-      }
-      if (CommonDataKeys.PROJECT.is(dataId)) {
-        return getProject();
-      }
-      if (CommonDataKeys.PSI_FILE.is(dataId)) {
-        return getFile();
-      }
-      if (CommonDataKeys.PSI_ELEMENT.is(dataId)) {
+    return CustomizedDataContext.withSnapshot(defaultContext, sink -> {
+      sink.set(CommonDataKeys.EDITOR, getEditor());
+      sink.set(CommonDataKeys.PROJECT, getProject());
+      sink.set(CommonDataKeys.PSI_FILE, getFile());
+      sink.lazy(CommonDataKeys.PSI_ELEMENT, () -> {
         PsiFile file = getFile();
         if (file == null) return null;
         Editor editor = getEditor();
         if (editor == null) return null;
         return file.findElementAt(editor.getCaretModel().getOffset());
-      }
-      return null;
+      });
     });
   }
 

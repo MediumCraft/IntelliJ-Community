@@ -16,7 +16,7 @@ import com.intellij.ide.util.treeView.AbstractTreeNode;
 import com.intellij.ide.util.treeView.NodeRenderer;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.*;
-import com.intellij.openapi.actionSystem.impl.ActionButton;
+import com.intellij.openapi.actionSystem.impl.ActionButtonUtil;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.client.ClientSystemInfo;
@@ -26,6 +26,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.NlsActions;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.vcs.FileStatusListener;
 import com.intellij.openapi.vcs.FileStatusManager;
@@ -46,6 +47,7 @@ import com.intellij.util.ui.StatusText;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.components.BorderLayoutPanel;
 import com.intellij.util.ui.tree.TreeUtil;
+import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -65,7 +67,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-public class CoverageView extends BorderLayoutPanel implements DataProvider, Disposable {
+public class CoverageView extends BorderLayoutPanel implements UiDataProvider, Disposable {
   @NonNls private static final String ACTION_DRILL_DOWN = "DrillDown";
   @NonNls static final String HELP_ID = "reference.toolWindows.Coverage";
   private static final Icon FILTER_ICON = AllIcons.General.Filter;
@@ -179,10 +181,9 @@ public class CoverageView extends BorderLayoutPanel implements DataProvider, Dis
         resetView(() -> myStateBean.setShowOnlyModified(false));
       }
       else {
-        final String message = CoverageBundle.message("coverage.filter.gotit", myViewExtension.getElementsName());
-        final GotItTooltip gotIt = new GotItTooltip("coverage.view.elements.filter", message, this);
+        GotItTooltip gotIt = createGotIt();
         if (gotIt.canShow()) {
-          final JComponent filterAction = findToolbarActionButtonWithIcon(actionToolbar, FILTER_ICON);
+          final JComponent filterAction = ActionButtonUtil.findToolbarActionButton(actionToolbar, button -> button.getIcon() == FILTER_ICON);
           if (filterAction != null) {
             gotIt.show(filterAction, GotItTooltip.BOTTOM_MIDDLE);
           }
@@ -191,10 +192,26 @@ public class CoverageView extends BorderLayoutPanel implements DataProvider, Dis
     }
   }
 
+  private @NotNull GotItTooltip createGotIt() {
+    String branchName = getFilteredBranchName();
+    if (branchName != null) {
+      return new GotItTooltip("coverage.view.elements.by.branch.filter",
+                              CoverageBundle.message("coverage.filter.branch.gotit", myViewExtension.getElementsName()),
+                              this);
+    }
+    return new GotItTooltip("coverage.view.elements.filter",
+                            CoverageBundle.message("coverage.filter.gotit", myViewExtension.getElementsName()),
+                            this);
+  }
+
   private boolean hasVCSFilteredNodes() {
-    CoverageAnnotator annotator = mySuitesBundle.getCoverageEngine().getCoverageAnnotator(myProject);
-    ModifiedFilesFilter filter = annotator.getModifiedFilesFilter();
+    var filter = getModifiedFilesFilter();
     return filter != null && filter.getHasFilteredFiles();
+  }
+
+  private @Nullable ModifiedFilesFilter getModifiedFilesFilter() {
+    CoverageAnnotator annotator = mySuitesBundle.getCoverageEngine().getCoverageAnnotator(myProject);
+    return annotator.getModifiedFilesFilter();
   }
 
   private void setUpShowRootNode(ActionToolbar actionToolbar) {
@@ -386,8 +403,8 @@ public class CoverageView extends BorderLayoutPanel implements DataProvider, Dis
 
     boolean hasFilters = false;
     final DefaultActionGroup filtersActionGroup = new DefaultActionGroup();
-    if (ProjectLevelVcsManager.getInstance(myProject).hasActiveVcss()) {
-      filtersActionGroup.add(new ShowOnlyModifiedAction());
+    if (ProjectLevelVcsManager.getInstance(myProject).hasActiveVcss() && getModifiedFilesFilter() != null) {
+      filtersActionGroup.add(new ShowOnlyModifiedAction(getModifiedActionName()));
       hasFilters = true;
       myHasVCSFilter = true;
     }
@@ -470,14 +487,9 @@ public class CoverageView extends BorderLayoutPanel implements DataProvider, Dis
   }
 
   @Override
-  public Object getData(@NotNull @NonNls String dataId) {
-    if (CommonDataKeys.NAVIGATABLE.is(dataId)) {
-      return getSelectedValue();
-    }
-    if (PlatformCoreDataKeys.HELP_ID.is(dataId)) {
-      return HELP_ID;
-    }
-    return null;
+  public void uiDataSnapshot(@NotNull DataSink sink) {
+    sink.set(CommonDataKeys.NAVIGATABLE, getSelectedValue());
+    sink.set(PlatformCoreDataKeys.HELP_ID, HELP_ID);
   }
 
   private void resetView(@Nullable Runnable updateSettings) {
@@ -574,8 +586,8 @@ public class CoverageView extends BorderLayoutPanel implements DataProvider, Dis
 
   private final class ShowOnlyModifiedAction extends ToggleAction {
 
-    private ShowOnlyModifiedAction() {
-      super(CoverageBundle.messagePointer("coverage.show.only.modified.elements", myViewExtension.getElementsCapitalisedName()));
+    private ShowOnlyModifiedAction(@NlsActions.ActionText String name) {
+      super(name);
     }
 
     @Override
@@ -592,6 +604,21 @@ public class CoverageView extends BorderLayoutPanel implements DataProvider, Dis
     public @NotNull ActionUpdateThread getActionUpdateThread() {
       return ActionUpdateThread.BGT;
     }
+  }
+
+  private @Nls @NotNull String getModifiedActionName() {
+    String elementName = myViewExtension.getElementsCapitalisedName();
+    String branchName = getFilteredBranchName();
+    if (branchName != null) {
+      return CoverageBundle.message("coverage.show.only.elements.in.feature.branch", elementName, branchName);
+    } else {
+      return CoverageBundle.message("coverage.show.only.modified.elements", elementName);
+    }
+  }
+
+  private @Nullable String getFilteredBranchName() {
+    ModifiedFilesFilter filter = getModifiedFilesFilter();
+    return filter == null ? null : filter.getBranchName();
   }
 
   private void select(Object object) {
@@ -652,12 +679,5 @@ public class CoverageView extends BorderLayoutPanel implements DataProvider, Dis
         }
       }).submit(AppExecutorUtil.getAppExecutorService());
     }
-  }
-
-  private static JComponent findToolbarActionButtonWithIcon(ActionToolbar toolbar, Icon icon) {
-    return UIUtil.uiTraverser(toolbar.getComponent())
-      .filter(ActionButton.class)
-      .filter(button -> button.getIcon() == icon)
-      .first();
   }
 }

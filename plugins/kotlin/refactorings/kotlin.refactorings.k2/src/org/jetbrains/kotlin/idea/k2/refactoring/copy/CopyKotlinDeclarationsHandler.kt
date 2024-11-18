@@ -3,11 +3,17 @@
 package org.jetbrains.kotlin.idea.k2.refactoring.copy
 
 import com.intellij.ide.util.EditorHelper
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
+import com.intellij.openapi.application.ex.ApplicationManagerEx
 import com.intellij.openapi.application.runWriteAction
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
-import com.intellij.openapi.vfs.*
-import com.intellij.psi.*
+import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.psi.PsiDirectory
+import com.intellij.psi.PsiElement
+import com.intellij.psi.PsiFile
+import com.intellij.psi.PsiFileSystemItem
 import com.intellij.psi.search.LocalSearchScope
 import com.intellij.psi.search.searches.ReferencesSearch
 import com.intellij.refactoring.BaseRefactoringProcessor
@@ -24,21 +30,16 @@ import org.jetbrains.kotlin.idea.core.getFqNameWithImplicitPrefix
 import org.jetbrains.kotlin.idea.core.getFqNameWithImplicitPrefixOrRoot
 import org.jetbrains.kotlin.idea.core.packageMatchesDirectoryOrImplicit
 import org.jetbrains.kotlin.idea.k2.refactoring.move.descriptor.K2MoveTargetDescriptor
-import org.jetbrains.kotlin.idea.k2.refactoring.move.descriptor.K2MoveTargetDescriptor.SourceDirectory
+import org.jetbrains.kotlin.idea.k2.refactoring.move.descriptor.K2MoveTargetDescriptor.Directory
 import org.jetbrains.kotlin.idea.k2.refactoring.move.processor.K2MoveRenameUsageInfo.Companion.markInternalUsages
-import org.jetbrains.kotlin.idea.k2.refactoring.move.processor.K2MoveRenameUsageInfo.Companion.retargetInternalUsages
 import org.jetbrains.kotlin.idea.k2.refactoring.move.processor.K2MoveRenameUsageInfo.Companion.retargetInternalUsagesForCopyFile
+import org.jetbrains.kotlin.idea.k2.refactoring.move.processor.K2MoveRenameUsageInfo.Companion.retargetUsages
 import org.jetbrains.kotlin.idea.k2.refactoring.move.processor.K2MoveRenameUsageInfo.Companion.unMarkAllUsages
-import org.jetbrains.kotlin.idea.k2.refactoring.move.processor.checkModuleDependencyConflictsForInternalUsages
-import org.jetbrains.kotlin.idea.k2.refactoring.move.processor.checkVisibilityConflictsForInternalUsages
-import org.jetbrains.kotlin.idea.k2.refactoring.move.processor.createCopyTarget
+import org.jetbrains.kotlin.idea.k2.refactoring.move.processor.conflict.checkModuleDependencyConflictsForInternalUsages
+import org.jetbrains.kotlin.idea.k2.refactoring.move.processor.conflict.checkVisibilityConflictsForInternalUsages
 import org.jetbrains.kotlin.idea.k2.refactoring.move.processor.createKotlinFile
 import org.jetbrains.kotlin.idea.refactoring.checkConflictsInteractively
-import org.jetbrains.kotlin.idea.refactoring.copy.AbstractCopyKotlinDeclarationsHandler
-import org.jetbrains.kotlin.idea.refactoring.copy.CopyKotlinDeclarationDialog
-import org.jetbrains.kotlin.idea.refactoring.copy.copyCommandName
-import org.jetbrains.kotlin.idea.refactoring.copy.copyNewName
-import org.jetbrains.kotlin.idea.refactoring.copy.getCopyableElement
+import org.jetbrains.kotlin.idea.refactoring.copy.*
 import org.jetbrains.kotlin.idea.util.application.executeCommand
 import org.jetbrains.kotlin.idea.util.application.isUnitTestMode
 import org.jetbrains.kotlin.idea.util.sourceRoot
@@ -73,7 +74,7 @@ class CopyKotlinDeclarationsHandler : AbstractCopyKotlinDeclarationsHandler() {
             return TargetData(
                 openInEditor = false,
                 newName = newName,
-                targetDirWrapper = sourceData.initialTargetDirectory.toSourceDirectory(),
+                targetDirWrapper = sourceData.initialTargetDirectory.toDirectory(),
                 targetSourceRoot = targetSourceRoot
             )
 
@@ -93,7 +94,7 @@ class CopyKotlinDeclarationsHandler : AbstractCopyKotlinDeclarationsHandler() {
 
             openInEditor = dialog.openInEditor
             newName = dialog.newName
-            targetDirWrapper = dialog.targetDirectory?.toSourceDirectory(sourceData)
+            targetDirWrapper = dialog.targetDirectory?.toDirectory(sourceData)
             targetSourceRoot = dialog.targetSourceRoot
         } else {
             val dialog = CopyFilesOrDirectoriesDialog(
@@ -102,7 +103,7 @@ class CopyKotlinDeclarationsHandler : AbstractCopyKotlinDeclarationsHandler() {
             if (!dialog.showAndGet()) return null
             openInEditor = dialog.openInEditor()
             newName = dialog.newName
-            targetDirWrapper = dialog.targetDirectory?.toSourceDirectory()
+            targetDirWrapper = dialog.targetDirectory?.toDirectory()
             targetSourceRoot = dialog.targetDirectory?.sourceRoot
         }
 
@@ -115,12 +116,12 @@ class CopyKotlinDeclarationsHandler : AbstractCopyKotlinDeclarationsHandler() {
         )
     }
 
-    private fun MoveDestination.toSourceDirectory(
+    private fun MoveDestination.toDirectory(
         sourceData: SourceData
-    ): SourceDirectory = SourceDirectory(FqName(targetPackage.qualifiedName), runWriteAction { getTargetDirectory(sourceData.initialTargetDirectory) })
+    ): Directory = Directory(FqName(targetPackage.qualifiedName), runWriteAction { getTargetDirectory(sourceData.initialTargetDirectory) })
 
-    private fun PsiDirectory.toSourceDirectory(
-    ): SourceDirectory = SourceDirectory(getFqNameWithImplicitPrefixOrRoot(), this)
+    private fun PsiDirectory.toDirectory(
+    ): Directory = Directory(getFqNameWithImplicitPrefixOrRoot(), this)
 
     private fun doCopyFiles(filesToCopy: Array<out PsiFileSystemItem>, initialTargetDirectory: PsiDirectory?) {
         if (filesToCopy.isEmpty()) return
@@ -162,7 +163,9 @@ class CopyKotlinDeclarationsHandler : AbstractCopyKotlinDeclarationsHandler() {
         val targetData = getTargetData(sourceData) ?: return
 
         for (element in elementsToCopy) {
-            markInternalUsages(element)
+            analyzeInModalWindow(elementsToCopy.first(), RefactoringBundle.message("refactoring.preprocess.usages.progress")) {
+                markInternalUsages(element, element)
+            }
         }
 
         val conflicts: MultiMap<PsiElement, String> =
@@ -172,8 +175,10 @@ class CopyKotlinDeclarationsHandler : AbstractCopyKotlinDeclarationsHandler() {
 
         project.checkConflictsInteractively(conflicts) {
             try {
-                project.executeCommand(copyCommandName) {
-                    doRefactor(sourceData, targetData)
+                ApplicationManagerEx.getApplicationEx().runWriteActionWithCancellableProgressInDispatchThread(copyCommandName, project, null) {
+                    project.executeCommand(copyCommandName) {
+                        doRefactor(sourceData, targetData)
+                    }
                 }
             } finally {
                 elements.filterIsInstance<KtElement>().forEach(::unMarkAllUsages)
@@ -189,7 +194,7 @@ class CopyKotlinDeclarationsHandler : AbstractCopyKotlinDeclarationsHandler() {
 
         try {
             val targetDirectory = runWriteAction {
-                targetData.targetDirWrapper.getOrCreateTarget() as PsiDirectory
+                targetData.targetDirWrapper.getOrCreateTarget(dirStructureMatchesPkg = true) as PsiDirectory
             }
 
             val targetFileName =
@@ -225,7 +230,17 @@ class CopyKotlinDeclarationsHandler : AbstractCopyKotlinDeclarationsHandler() {
                 EditorHelper.openInEditor(refactoringResult.targetFile)
             }
         } catch (e: IncorrectOperationException) {
-            Messages.showMessageDialog(sourceData.project, e.message, RefactoringBundle.message("error.title"), Messages.getErrorIcon())
+            ApplicationManager.getApplication().invokeLater(
+                Runnable {
+                    Messages.showMessageDialog(
+                        sourceData.project,
+                        e.message,
+                        RefactoringBundle.message("error.title"),
+                        Messages.getErrorIcon()
+                    )
+                },
+                ModalityState.nonModal()
+            )
         }
     }
 
@@ -273,7 +288,8 @@ class CopyKotlinDeclarationsHandler : AbstractCopyKotlinDeclarationsHandler() {
                     .toMap(oldToNewElementsMapping)
             }
 
-            retargetInternalUsages(oldToNewElementsMapping, fromCopy = true)
+            @Suppress("UNCHECKED_CAST")
+            retargetUsages(emptyList(), oldToNewElementsMapping as Map<PsiElement, PsiElement>, fromCopy = true)
 
             newElements.singleOrNull()
         }
@@ -293,13 +309,12 @@ class CopyKotlinDeclarationsHandler : AbstractCopyKotlinDeclarationsHandler() {
         val elements = mutableSetOf<KtNamedDeclaration>()
         elements.addAll(sourceData.elementsToCopy)
         (sourceData.singleElementToCopy as? KtFile)?.declarations?.filterIsInstance<KtNamedDeclaration>()?.forEach(elements::add)
-        val (fakeTarget, _) = createCopyTarget(
-            elements, targetData.targetDirWrapper.baseDirectory, targetData.targetDirWrapper.pkgName, targetData.newName
-        )
+
+        if (elements.isEmpty()) return MultiMap.empty()
 
         return MultiMap<PsiElement, String>().apply {
-            putAllValues(checkVisibilityConflictsForInternalUsages(elements, fakeTarget))
-            putAllValues(checkModuleDependencyConflictsForInternalUsages(elements, fakeTarget))
+            putAllValues(checkVisibilityConflictsForInternalUsages(sourceData.elementsToCopy, elements, targetData.targetDirWrapper.pkgName, targetData.targetDirWrapper.baseDirectory))
+            putAllValues(checkModuleDependencyConflictsForInternalUsages(sourceData.elementsToCopy, elements, targetData.targetDirWrapper.baseDirectory))
         }
     }
 

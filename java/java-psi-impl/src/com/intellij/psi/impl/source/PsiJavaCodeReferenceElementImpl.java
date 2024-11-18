@@ -593,7 +593,6 @@ public class PsiJavaCodeReferenceElementImpl extends CompositePsiElement impleme
         else {
           throw cannotBindError(element, kind, element+ " is not a PsiClass but "+element.getClass());
         }
-
       default:
         throw new IllegalArgumentException("Unexpected kind: " + kind);
     }
@@ -1055,6 +1054,15 @@ public class PsiJavaCodeReferenceElementImpl extends CompositePsiElement impleme
     else {
       visitor.visitElement(this);
     }
+  }
+
+  @Override
+  public PsiElement getOriginalElement() {
+    PsiElement parent = getParent();
+    if (parent instanceof PsiTypeElement) {
+      return PsiImplUtil.getCorrespondingOriginalElementOfType(this, PsiJavaCodeReferenceElement.class);
+    }
+    return this;
   }
 
   @Override

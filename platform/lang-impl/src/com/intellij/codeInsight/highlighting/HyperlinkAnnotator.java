@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.highlighting;
 
 import com.intellij.codeInsight.daemon.impl.HighlightInfoType;
@@ -28,15 +28,14 @@ import com.intellij.psi.util.ParameterizedCachedValue;
 import com.intellij.psi.util.ParameterizedCachedValueProvider;
 import com.intellij.psi.util.PsiModificationTracker;
 import com.intellij.util.containers.ContainerUtil;
-import org.jetbrains.annotations.ApiStatus;
-import org.jetbrains.annotations.Nls;
-import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.*;
 
 import java.util.List;
 
 import static com.intellij.util.containers.ContainerUtil.emptyList;
 import static java.util.Objects.requireNonNull;
 
+@ApiStatus.Internal
 @ApiStatus.NonExtendable
 public class HyperlinkAnnotator implements Annotator, DumbAware {
 
@@ -75,11 +74,16 @@ public class HyperlinkAnnotator implements Annotator, DumbAware {
     }
   }
 
+  @VisibleForTesting
+  public static @NotNull List<PsiReference> calculateReferences(@NotNull PsiElement element) {
+    return PsiReferenceService.getService().getReferences(element, Hints.HIGHLIGHTED_REFERENCES);
+  }
+
   private static final Key<ParameterizedCachedValue<List<PsiReference>, PsiElement>> REFS_KEY = Key.create("HyperlinkAnnotator");
   private static final ParameterizedCachedValueProvider<List<PsiReference>, PsiElement> REFS_PROVIDER = element -> {
     List<PsiReference> references;
     try {
-      references = PsiReferenceService.getService().getReferences(element, Hints.HIGHLIGHTED_REFERENCES);
+      references = calculateReferences(element);
     }
     catch (IndexNotReadyException ignored) {
       return Result.create(emptyList(), DumbService.getInstance(element.getProject()));
@@ -131,10 +135,8 @@ public class HyperlinkAnnotator implements Annotator, DumbAware {
     return hasUnprocessedReferences;
   }
 
-  @Nls
-  @NotNull
   @ApiStatus.Internal
-  public static String getMessage() {
+  public static @Nls @NotNull String getMessage() {
     String message = IdeBundle.message("open.url.in.browser.tooltip");
     Shortcut[] shortcuts = requireNonNull(KeymapManager.getInstance()).getActiveKeymap().getShortcuts(IdeActions.ACTION_GOTO_DECLARATION);
     String shortcutText = "";

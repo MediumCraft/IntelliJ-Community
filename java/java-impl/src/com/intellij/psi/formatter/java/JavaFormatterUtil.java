@@ -24,7 +24,12 @@ import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+import static com.intellij.psi.formatter.java.JavaFormatterAnnotationUtil.isTypeAnnotation;
 
 public final class JavaFormatterUtil {
   /**
@@ -35,10 +40,6 @@ public final class JavaFormatterUtil {
 
   private static final int CALL_EXPRESSION_DEPTH = 500;
 
-  private static final Set<String> KNOWN_TYPE_ANNOTATIONS = Set.of(
-    "org.jetbrains.annotations.NotNull",
-    "org.jetbrains.annotations.Nullable"
-  );
 
   private JavaFormatterUtil() { }
 
@@ -291,11 +292,11 @@ public final class JavaFormatterUtil {
       if (prev != null && prev.getElementType() == JavaElementType.MODIFIER_LIST) {
         ASTNode last = prev.getLastChildNode();
         if (last != null && last.getElementType() == JavaElementType.ANNOTATION) {
-          if (javaSettings.DO_NOT_WRAP_AFTER_SINGLE_ANNOTATION && isModifierListWithSingleAnnotation(prev, JavaElementType.FIELD) ||
+          if (isTypeAnnotation(last) && parent.getElementType() != JavaElementType.RECORD_COMPONENT ||
+              javaSettings.DO_NOT_WRAP_AFTER_SINGLE_ANNOTATION && isModifierListWithSingleAnnotation(prev, JavaElementType.FIELD) ||
               javaSettings.DO_NOT_WRAP_AFTER_SINGLE_ANNOTATION_IN_PARAMETER &&
               isModifierListWithSingleAnnotation(prev, JavaElementType.PARAMETER) ||
-              isAnnotationAfterKeyword(last) ||
-              isTypeAnnotationsBeforeTypeInMethodWithoutModifiers(last)
+              isAnnotationAfterKeyword(last)
           ) {
             return Wrap.createWrap(WrapType.NONE, false);
           }
@@ -314,8 +315,15 @@ public final class JavaFormatterUtil {
         if (prev instanceof PsiKeyword) {
           return null;
         }
-        else if (isAnnoInsideModifierListWithAtLeastOneKeyword(child, parent) || isTypeAnnotationsBeforeTypeInMethodWithoutModifiers(child)) {
+
+        else if (isAnnoInsideModifierListWithAtLeastOneKeyword(child, parent) || (JavaFormatterRecordUtil.isInRecordComponent(child) && prev == null)) {
           return Wrap.createWrap(WrapType.NONE, false);
+        }
+
+        if (isTypeAnnotation(child)) {
+          if (prev == null || prev.getElementType() != JavaElementType.ANNOTATION || (isTypeAnnotation(prev) && !JavaFormatterRecordUtil.isInRecordComponent(child))) {
+            return Wrap.createWrap(WrapType.NONE, false);
+          }
         }
 
         return Wrap.createWrap(getWrapType(getAnnotationWrapType(parent.getTreeParent(), child, settings, javaSettings)), true);
@@ -435,6 +443,9 @@ public final class JavaFormatterUtil {
     return prev != null && prev.getElementType() != JavaElementType.BLOCK_STATEMENT;
   }
 
+
+
+
   private static void putPreferredWrapInParentBlock(@NotNull AbstractJavaBlock block, @NotNull Wrap preferredWrap) {
     AbstractJavaBlock parentBlock = block.getParentBlock();
     if (parentBlock != null) {
@@ -495,6 +506,10 @@ public final class JavaFormatterUtil {
       return settings.FIELD_ANNOTATION_WRAP;
     }
 
+    if (nodeType == JavaElementType.RECORD_COMPONENT) {
+      return isAnnotationOnNewLineInRecordComponent(javaSettings) ? CommonCodeStyleSettings.WRAP_ALWAYS : CommonCodeStyleSettings.DO_NOT_WRAP;
+    }
+
     if (nodeType == JavaElementType.PARAMETER ||
         nodeType == JavaElementType.RECEIVER_PARAMETER ||
         nodeType == JavaElementType.RESOURCE_VARIABLE) {
@@ -516,23 +531,9 @@ public final class JavaFormatterUtil {
     return CommonCodeStyleSettings.DO_NOT_WRAP;
   }
 
-  private static boolean isTypeAnnotationsBeforeTypeInMethodWithoutModifiers(@NotNull ASTNode node) {
-    ASTNode parent = node.getTreeParent();
-    if (parent == null || parent.getElementType() != JavaElementType.MODIFIER_LIST) return false;
-
-    ASTNode grandParent = parent.getTreeParent();
-    if (grandParent == null || grandParent.getElementType() != JavaElementType.METHOD) return false;
-
-    ASTNode rightParentSibling = FormatterUtil.getNextNonWhitespaceSibling(parent);
-    if (rightParentSibling == null || (rightParentSibling.getElementType() != JavaElementType.TYPE_PARAMETER_LIST && rightParentSibling.getElementType() != JavaElementType.TYPE)) return false;
-
-    for (ASTNode currentChild = parent.getFirstChildNode(); currentChild != null; currentChild = FormatterUtil.getNextNonWhitespaceSibling(currentChild)) {
-      if (currentChild.getElementType() != JavaElementType.ANNOTATION) return false;
-      PsiElement psiElement = currentChild.getPsi();
-      if (!(psiElement instanceof PsiAnnotation psiAnnotation) || !KNOWN_TYPE_ANNOTATIONS.contains(psiAnnotation.getQualifiedName())) return false;
-    }
-
-    return true;
+  private static boolean isAnnotationOnNewLineInRecordComponent(JavaCodeStyleSettings javaSettings) {
+    return CommonCodeStyleSettings.WRAP_ALWAYS == javaSettings.RECORD_COMPONENTS_WRAP &&
+           javaSettings.ANNOTATION_NEW_LINE_IN_RECORD_COMPONENT;
   }
 
   private static boolean isAnnoInsideModifierListWithAtLeastOneKeyword(@NotNull ASTNode current, @NotNull ASTNode parent) {
@@ -547,6 +548,7 @@ public final class JavaFormatterUtil {
     }
     return false;
   }
+
 
   /**
    * Traverses the children of the node and collects nodes with type method calls or reference expressions to the list.
@@ -634,5 +636,13 @@ public final class JavaFormatterUtil {
       if (!Character.isWhitespace(text.charAt(i))) return false;
     }
     return true;
+  }
+
+  public static boolean isExplicitlyAbstract(@NotNull PsiMethod method) {
+    PsiModifierList modifierList = method.getModifierList();
+    return modifierList.hasExplicitModifier(PsiModifier.ABSTRACT) ||
+           ((method.getParent() instanceof PsiClass clazz && clazz.isInterface() &&
+             !modifierList.hasExplicitModifier(PsiModifier.DEFAULT) &&
+             !modifierList.hasExplicitModifier(PsiModifier.STATIC)));
   }
 }

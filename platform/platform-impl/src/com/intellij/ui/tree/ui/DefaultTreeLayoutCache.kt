@@ -1,12 +1,11 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ui.tree.ui
 
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.util.registry.Registry
 import com.intellij.ui.treeStructure.CachingTreePath
-import com.intellij.util.SlowOperations
 import com.intellij.util.ui.JBUI
-import org.jetbrains.annotations.ApiStatus.Internal
+import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.VisibleForTesting
 import java.awt.Rectangle
 import java.util.*
@@ -17,12 +16,12 @@ import javax.swing.tree.TreePath
 import kotlin.collections.ArrayDeque
 import kotlin.math.max
 
+@ApiStatus.Internal
 @VisibleForTesting
 class DefaultTreeLayoutCache(
   private val defaultRowHeight: Int,
   private val autoExpandHandler: (TreePath) -> Unit,
 ) : AbstractLayoutCache() {
-
   constructor(autoExpandHandler: (TreePath) -> Unit) : this(JBUI.CurrentTheme.Tree.rowHeight(), autoExpandHandler)
 
   private var root: Node? = null
@@ -33,10 +32,13 @@ class DefaultTreeLayoutCache(
   private val boundsBuffer = Rectangle()
   private var variableHeight: VariableHeightSupport? = VariableHeightSupport()
 
-  internal var isCachedSizeValid = false
+  @JvmField
+  internal var isCachedSizeValid: Boolean = false
 
   override fun setModel(newModel: TreeModel?) {
+    @Suppress("UsePropertyAccessSyntax")
     super.setModel(newModel)
+
     rebuild()
   }
 
@@ -44,6 +46,7 @@ class DefaultTreeLayoutCache(
     if (isRootVisible == rootVisible) {
       return
     }
+    @Suppress("UsePropertyAccessSyntax")
     super.setRootVisible(rootVisible)
     val root = this.root ?: return
     val debugLocation = Location("setRootVisible(%s)", rootVisible)
@@ -112,14 +115,14 @@ class DefaultTreeLayoutCache(
     }
   }
 
-  // The following two methods appear to be almost identical, and their javadocs are very confusing:
+  // The following two methods appear to be almost identical, and their Javadocs are very confusing:
   // according to them, the former checks whether the node is visible and expanded,
   // and the latter just checks whether a node is expanded.
   // However, this is not what they actually do. In fact, both check that the node is visible,
-  // but in a rather weird way: the root is always considered visible, regardless of the isRootVisible value.
+  // but in a rather weird way: the root is always considered visible, regardless of the `isRootVisible` value.
   // In practice, though, isExpanded() is used for checking whether the children are visible or not,
   // while getExpandedState() is used to paint the node itself (the expanded/collapsed indicators, etc.),
-  // so we preserve this contract instead of trying to make sense of the javadocs.
+  // so we preserve this contract instead of trying to make sense of the Javadocs.
 
   override fun getExpandedState(path: TreePath?): Boolean = getNode(path)?.run{ isVisible && isExpanded } == true
 
@@ -222,9 +225,17 @@ class DefaultTreeLayoutCache(
     val changedValue = changedNode.userObject
     val changedChildIndexes = e?.childIndices ?: return
     val model = this.model ?: return
+    // We must do it in two passes: first remove all path mappings, then add the new ones.
+    // If we do it in one loop, we may end up in an inconsistent state
+    // if the new path of some child is equal to the old path of some other child.
+    // For example, when the children were sorted by the model.
     for (i in changedChildIndexes) {
       val changedChildNode = changedNode.getChildAt(i)
-      changedChildNode.userObject = model.getChild(changedValue, i)
+      changedChildNode.removePathsRecursively()
+    }
+    for (i in changedChildIndexes) {
+      val changedChildNode = changedNode.getChildAt(i)
+      changedChildNode.addPathsRecursively(changedNode.path, model.getChild(changedValue, i))
       changedChildNode.invalidateSize()
     }
     checkInvariants(Location("treeNodesChanged(value=%s, indices=%s)", changedValue, changedChildIndexes))
@@ -449,18 +460,21 @@ class DefaultTreeLayoutCache(
     val visibleChildCount: Int
       get() = if (isChildrenVisible) childCount else 0
 
-    var userObject: Any
+    val userObject: Any
       get() = path.lastPathComponent
-      set(value) {
-        updatePathsRecursively(parent?.path, value)
-      }
 
-    private fun updatePathsRecursively(newParent: TreePath?, newUserObject: Any) {
+    fun removePathsRecursively() {
       nodeByPath.remove(path)
-      path = newParent?.pathByAddingChild(newUserObject) ?: CachingTreePath(newUserObject)
+      children?.forEach { child ->
+        child.removePathsRecursively()
+      }
+    }
+
+    fun addPathsRecursively(newParent: TreePath, newUserObject: Any) {
+      path = newParent.pathByAddingChild(newUserObject)
       nodeByPath[path] = this
       children?.forEach { child ->
-        child.updatePathsRecursively(path, child.userObject)
+        child.addPathsRecursively(path, child.userObject)
       }
     }
 
@@ -717,7 +731,7 @@ class DefaultTreeLayoutCache(
 
     inline fun updateImpl(location: Location?, update: () -> Unit) {
       val reentry = minimumAffectedRow != -1
-      if (reentry) { // Indirect recursion, will update later up the stack.
+      if (reentry) { // Indirect recursion will update later up the stack.
         update()
         return
       }
@@ -869,9 +883,7 @@ class DefaultTreeLayoutCache(
     if (!Registry.`is`("ide.tree.experimental.layout.cache.debug", false)) {
       return
     }
-    SlowOperations.startSection(SlowOperations.GENERIC).use { // Only for debugging, so slow ops are fine here.
-      InvariantChecker(location).checkInvariants()
-    }
+    InvariantChecker(location).checkInvariants()
   }
 
   private class Location(private val location: String, private vararg val args: Any?) {
@@ -929,6 +941,10 @@ class DefaultTreeLayoutCache(
       }
       else if (node.row != -1 && node.row != row) {
         messages += "Row inconsistency: node ${node.path} should be at ${row}, but is at ${node.row}"
+      }
+      val rowForPath = getRowForPath(node.path)
+      if (rowForPath != node.row) {
+        messages += "Row inconsistency: row for path ${node.path} is $rowForPath, but the node's row is ${node.row}"
       }
       var count = if (node.row == -1) 0 else 1 // This may be the invisible root, but it may still have visible children!
       row += count

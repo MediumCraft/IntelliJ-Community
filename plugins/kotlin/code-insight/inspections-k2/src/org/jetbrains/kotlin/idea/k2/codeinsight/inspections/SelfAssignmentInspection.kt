@@ -5,12 +5,12 @@ import com.intellij.codeInspection.CleanupLocalInspectionTool
 import com.intellij.codeInspection.ProblemsHolder
 import com.intellij.modcommand.ModPsiUpdater
 import com.intellij.openapi.project.Project
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
-import org.jetbrains.kotlin.analysis.api.calls.singleVariableAccessCall
-import org.jetbrains.kotlin.analysis.api.calls.symbol
-import org.jetbrains.kotlin.analysis.api.symbols.KtClassOrObjectSymbol
-import org.jetbrains.kotlin.analysis.api.symbols.KtSymbol
-import org.jetbrains.kotlin.analysis.api.symbols.KtVariableLikeSymbol
+import org.jetbrains.kotlin.analysis.api.KaSession
+import org.jetbrains.kotlin.analysis.api.resolution.singleVariableAccessCall
+import org.jetbrains.kotlin.analysis.api.resolution.symbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaClassSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaVariableSymbol
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.codeinsight.api.applicable.inspections.KotlinApplicableInspectionBase
 import org.jetbrains.kotlin.idea.codeinsight.api.applicable.inspections.KotlinModCommandQuickFix
@@ -53,14 +53,14 @@ internal class SelfAssignmentInspection : KotlinApplicableInspectionBase.Simple<
         }
     }
 
-    context(KtAnalysisSession)
+    context(KaSession)
     override fun prepareContext(element: KtBinaryExpression): String? {
         val left = element.left
         val right = element.right
 
-        val leftResolvedCall = left?.resolveCall()?.singleVariableAccessCall()
+        val leftResolvedCall = left?.resolveToCall()?.singleVariableAccessCall()
         val leftCallee = leftResolvedCall?.symbol ?: return null
-        val rightResolvedCall = right?.resolveCall()?.singleVariableAccessCall()
+        val rightResolvedCall = right?.resolveToCall()?.singleVariableAccessCall()
         val rightCallee = rightResolvedCall?.symbol ?: return null
 
         if (leftCallee != rightCallee) return null
@@ -70,7 +70,7 @@ internal class SelfAssignmentInspection : KotlinApplicableInspectionBase.Simple<
         if (!rightDeclaration.isVar) return null
         if (rightDeclaration is KtProperty) {
             if (rightDeclaration.isOverridable()) return null
-            if (rightDeclaration.accessors.any { !it.getPropertyAccessorSymbol().isDefault }) return null
+            if (rightDeclaration.accessors.any { !it.symbol.isDefault }) return null
         }
 
         if (left.receiver(leftCallee) != right.receiver(rightCallee)) return null
@@ -92,15 +92,15 @@ internal class SelfAssignmentInspection : KotlinApplicableInspectionBase.Simple<
         else -> null
     }
 
-    context(KtAnalysisSession)
+    context(KaSession)
     private fun KtExpression.receiver(
-        callSymbol: KtVariableLikeSymbol,
-    ): KtSymbol? {
+      callSymbol: KaVariableSymbol,
+    ): KaSymbol? {
         when (val receiverExpression = (this as? KtDotQualifiedExpression)?.receiverExpression) {
             is KtThisExpression -> return receiverExpression.instanceReference.mainReference.resolveToSymbol()
             is KtNameReferenceExpression -> return receiverExpression.mainReference.resolveToSymbol()
         }
 
-        return callSymbol.getContainingSymbol() as? KtClassOrObjectSymbol
+        return callSymbol.containingDeclaration as? KaClassSymbol
     }
 }

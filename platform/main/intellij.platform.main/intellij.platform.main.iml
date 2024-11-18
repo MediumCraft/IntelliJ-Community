@@ -7,6 +7,10 @@
     <orderEntry type="sourceFolder" forTests="false" />
     <orderEntry type="module" module-name="intellij.platform.bootstrap" scope="RUNTIME" />
     <orderEntry type="module" module-name="intellij.platform.clouds" scope="RUNTIME" />
+    <orderEntry type="module" module-name="intellij.platform.execution.dashboard" scope="RUNTIME" />
+    <orderEntry type="module" module-name="intellij.platform.execution.serviceView" scope="RUNTIME" />
     <orderEntry type="module" module-name="intellij.platform.kernel" scope="RUNTIME" />
+    <orderEntry type="module" module-name="intellij.platform.ide.ui.inspector" scope="RUNTIME" />
+    <orderEntry type="module" module-name="intellij.platform.inline.completion" scope="RUNTIME" />
   </component>
 </module>

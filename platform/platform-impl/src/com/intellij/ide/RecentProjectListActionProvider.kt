@@ -1,4 +1,4 @@
-// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide
 
 import com.intellij.ide.impl.ProjectUtilCore
@@ -36,7 +36,12 @@ open class RecentProjectListActionProvider {
     val projectGroups = groups.asSequence().map { projectGroup ->
       val projects = projectGroup.projects.toSet()
       val children = projects.map { recentProject ->
-        createRecentProject(recentProject, duplicates, projectGroup)
+        createRecentProject(
+          path = recentProject,
+          duplicates = duplicates,
+          projectGroup = projectGroup,
+          recentProjectManager = recentProjectManager,
+        )
       }
       for (project in projects) {
         allRecentProjectPaths.remove(project)
@@ -45,7 +50,7 @@ open class RecentProjectListActionProvider {
     }
 
     val projectsWithoutGroups = allRecentProjectPaths.asSequence().map { recentProject ->
-      createRecentProject(recentProject, duplicates, null)
+      createRecentProject(path = recentProject, duplicates = duplicates, projectGroup = null, recentProjectManager = recentProjectManager)
     }
     return (projectGroups + projectsWithoutGroups).toList()
   }
@@ -73,28 +78,45 @@ open class RecentProjectListActionProvider {
         }
       }
 
-      addGroups(groups = groups, duplicates = duplicates, addClearListItem = addClearListItem, actions = actions, bottom = false)
+      addGroups(
+        groups = groups,
+        duplicates = duplicates,
+        addClearListItem = addClearListItem,
+        actions = actions,
+        bottom = false,
+        recentProjectManager = recentProjectManager,
+      )
     }
 
     for (path in paths) {
-      actions.add(createOpenAction(path, duplicates))
+      actions.add(createOpenAction(path, duplicates, recentProjectManager))
     }
 
     if (useGroups) {
-      addGroups(groups, duplicates, addClearListItem, actions, true)
+      addGroups(
+        groups = groups,
+        duplicates = duplicates,
+        addClearListItem = addClearListItem,
+        actions = actions,
+        bottom = true,
+        recentProjectManager = recentProjectManager,
+      )
     }
     return actions
   }
 
-  private fun addGroups(groups: List<ProjectGroup>,
-                        duplicates: Set<String>,
-                        addClearListItem: Boolean,
-                        actions: MutableList<AnAction>,
-                        bottom: Boolean) {
+  private fun addGroups(
+    groups: List<ProjectGroup>,
+    duplicates: Set<ProjectNameOrPathIfNotYetComputed>,
+    addClearListItem: Boolean,
+    actions: MutableList<AnAction>,
+    bottom: Boolean,
+    recentProjectManager: RecentProjectsManagerBase,
+  ) {
     for (group in groups.asSequence().filter { it.isBottomGroup == bottom }) {
       val children = mutableListOf<AnAction>()
       for (path in group.projects) {
-        val action = createOpenAction(path ?: continue, duplicates)
+        val action = createOpenAction(path = path ?: continue, duplicates = duplicates, recentProjectManager = recentProjectManager)
         action.setProjectGroup(group)
         children.add(action)
         if (addClearListItem && children.size >= RecentProjectsManagerBase.MAX_PROJECTS_IN_MAIN_MENU) {
@@ -108,54 +130,66 @@ open class RecentProjectListActionProvider {
     }
   }
 
-  protected open fun createOpenAction(path: String, duplicates: Set<String>): ReopenProjectAction {
-    val recentProjectManager = RecentProjectsManager.getInstance() as RecentProjectsManagerBase
+  protected open fun createOpenAction(
+    path: String,
+    duplicates: Set<ProjectNameOrPathIfNotYetComputed>,
+    recentProjectManager: RecentProjectsManagerBase,
+  ): ReopenProjectAction {
     var displayName = recentProjectManager.getDisplayName(path)
     val projectName = recentProjectManager.getProjectName(path)
 
     var branch: String? = null
 
     if (displayName.isNullOrBlank()) {
-      displayName = if (duplicates.contains(projectName)) {
-        if (Registry.`is`("ide.welcom.screen.branch.name", false)) {
+      displayName = if (duplicates.contains(ProjectNameOrPathIfNotYetComputed(projectName))) {
+        if (Registry.`is`("ide.welcome.screen.branch.name", true)) {
           branch = recentProjectManager.getCurrentBranchName(path)
         }
         FileUtil.toSystemDependentName(path)
       }
-      else projectName
+      else {
+        projectName
+      }
     }
 
-    // It's better don't to remove non-existent projects. Sometimes projects stored
-    // on USB-sticks or flash-cards, and it will be nice to have them in the list
-    // when USB device or SD-card is mounted
-    return ReopenProjectAction(path, projectName, displayName, branch)
+    // It's better don't to remove non-existent projects.
+    // Sometimes projects are stored on USB-sticks or flash-cards, and it will be nice to have them in the list
+    // when a USB device or SD-card is mounted
+    return ReopenProjectAction(projectPath = path, projectName = projectName, displayName = displayName, branchName = branch)
   }
 
-  private fun createRecentProject(path: String, duplicates: Set<String>, projectGroup: ProjectGroup?): RecentProjectItem {
-    val reopenProjectAction = createOpenAction(path, duplicates)
+  private fun createRecentProject(
+    path: String,
+    duplicates: Set<ProjectNameOrPathIfNotYetComputed>,
+    projectGroup: ProjectGroup?,
+    recentProjectManager: RecentProjectsManagerBase,
+  ): RecentProjectItem {
+    val reopenProjectAction = createOpenAction(path = path, duplicates = duplicates, recentProjectManager = recentProjectManager)
     return RecentProjectItem(
       projectPath = reopenProjectAction.projectPath,
-      projectName = reopenProjectAction.projectName,
+      projectName = reopenProjectAction.projectName ?: "",
       displayName = reopenProjectAction.projectNameToDisplay ?: "",
       branchName = reopenProjectAction.branchName,
-      projectGroup = projectGroup
+      projectGroup = projectGroup,
     )
   }
 
   /**
-   * Returns true if action corresponds to specified project
+   * Returns true if action corresponds to a specified project
    */
   open fun isCurrentProjectAction(project: Project, action: ReopenProjectAction): Boolean = action.projectPath == project.basePath
 }
 
-private fun getDuplicateProjectNames(openedPaths: Set<String>,
-                                     recentPaths: Set<String>,
-                                     recentProjectManager: RecentProjectsManagerBase): Set<String> {
-  val names = HashSet<String>()
-  val duplicates = HashSet<String>()
+private fun getDuplicateProjectNames(
+  openedPaths: Set<String>,
+  recentPaths: Set<String>,
+  recentProjectManager: RecentProjectsManagerBase,
+): Set<ProjectNameOrPathIfNotYetComputed> {
+  val names = HashSet<ProjectNameOrPathIfNotYetComputed>()
+  val duplicates = HashSet<ProjectNameOrPathIfNotYetComputed>()
   // a project name should not be considered duplicate if a project is both in recent projects and open projects (IDEA-211955)
   for (path in (openedPaths + recentPaths)) {
-    val name = recentProjectManager.getProjectName(path)
+    val name = ProjectNameOrPathIfNotYetComputed(recentProjectManager.getProjectName(path))
     if (!names.add(name)) {
       duplicates.add(name)
     }

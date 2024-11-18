@@ -4,12 +4,11 @@ package com.jetbrains.python.psi.types
 import com.intellij.openapi.util.Ref
 import com.jetbrains.python.PyNames
 import com.jetbrains.python.PyTokenTypes
-import com.jetbrains.python.codeInsight.dataflow.scope.ScopeUtil
+import com.jetbrains.python.codeInsight.stdlib.PyStdlibTypeProvider
 import com.jetbrains.python.codeInsight.typing.PyTypingTypeProvider
 import com.jetbrains.python.psi.*
 import com.jetbrains.python.psi.impl.PyEvaluator
 import com.jetbrains.python.psi.impl.PyPsiUtils
-import com.jetbrains.python.psi.resolve.PyResolveContext
 
 
 /**
@@ -40,6 +39,14 @@ class PyLiteralType private constructor(cls: PyClass, val expression: PyExpressi
         }
         else -> toLiteralType(expression, context, true)
       }
+
+    @JvmStatic
+    fun enumMember(enumClass: PyClass, memberName: String): PyType {
+      val expression = PyElementGenerator.getInstance(enumClass.getProject())
+        .createExpressionFromText(LanguageLevel.forElement(enumClass), "${enumClass.name}.$memberName")
+      assert(expression is PyReferenceExpression)
+      return PyLiteralType(enumClass, expression)
+    }
 
     /**
      * Tries to construct literal type or collection of literal types for a value that could be downcasted to `typing.Literal[...] type
@@ -78,8 +85,11 @@ class PyLiteralType private constructor(cls: PyClass, val expression: PyExpressi
      * [actual] matches [expected] if it has the same type and its expression evaluates to the same value
      */
     fun match(expected: PyLiteralType, actual: PyLiteralType): Boolean {
-      return expected.pyClass == actual.pyClass &&
-             PyEvaluator.evaluateNoResolve(expected.expression, Any::class.java) ==
+      if (expected.pyClass != actual.pyClass) return false
+      if (expected.expression is PyReferenceExpression && actual.expression is PyReferenceExpression) {
+        return expected.expression.name == actual.expression.name
+      }
+      return PyEvaluator.evaluateNoResolve(expected.expression, Any::class.java) ==
              PyEvaluator.evaluateNoResolve(actual.expression, Any::class.java)
     }
 
@@ -121,22 +131,19 @@ class PyLiteralType private constructor(cls: PyClass, val expression: PyExpressi
       }
 
       if (expression is PyReferenceExpression && expression.isQualified) {
-        PyUtil
-          .multiResolveTopPriority(expression, PyResolveContext.defaultContext(context))
-          .asSequence()
-          .filterIsInstance<PyTargetExpression>()
-          .mapNotNull { ScopeUtil.getScopeOwner(it) as? PyClass }
-          .firstOrNull { owner -> owner.getAncestorTypes(context).any { it?.classQName == "enum.Enum" } }
-          ?.let {
-            val type = context.getType(it)
-            return if (type is PyInstantiableType<*>) type.toInstance() else type
-          }
+        val type = context.getType(expression)
+        if (type is PyLiteralType) {
+          // expression is a reference to an enum member
+          return type
+        }
       }
 
       if (expression is PyConditionalExpression) {
-        return PyUnionType.union(listOf(expression.truePart, expression.falsePart).map { expr ->
-          expr?.let { classOfAcceptableLiteral(expr, context, index)?.let { cls -> PyLiteralType(cls, expr) } }
-        })
+        return PyUnionType.union(
+          listOf(expression.truePart, expression.falsePart).map {
+            it?.let { literalType(it, context, index) }
+          }
+        )
       }
 
       if (expression is PyStringLiteralExpression && expression.isInterpolated) {
@@ -151,6 +158,10 @@ class PyLiteralType private constructor(cls: PyClass, val expression: PyExpressi
         }
       }
 
+      return literalType(expression, context, index)
+    }
+
+    private fun literalType(expression: PyExpression, context: TypeEvalContext, index: Boolean): PyLiteralType? {
       return classOfAcceptableLiteral(expression, context, index)?.let { PyLiteralType(it, expression) }
     }
 
@@ -163,7 +174,7 @@ class PyLiteralType private constructor(cls: PyClass, val expression: PyExpressi
 
         expression is PyLiteralExpression -> getPyClass(expression, context)
 
-        expression is PyPrefixExpression && expression.operator == PyTokenTypes.MINUS -> {
+        expression is PyPrefixExpression && (expression.operator == PyTokenTypes.PLUS || expression.operator == PyTokenTypes.MINUS) -> {
           val operand = expression.operand
           if (operand is PyNumericLiteralExpression && operand.isIntegerLiteral) getPyClass(operand, context) else null
         }

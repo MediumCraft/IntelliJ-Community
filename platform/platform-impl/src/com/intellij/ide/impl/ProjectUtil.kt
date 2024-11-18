@@ -15,6 +15,7 @@ import com.intellij.ide.highlighter.ProjectFileType
 import com.intellij.openapi.application.*
 import com.intellij.openapi.components.ComponentManagerEx
 import com.intellij.openapi.components.StorageScheme
+import com.intellij.openapi.components.serviceAsync
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.diagnostic.debug
 import com.intellij.openapi.fileChooser.impl.FileChooserUtil
@@ -73,6 +74,7 @@ import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.Result
+import kotlin.getOrThrow
 
 private val LOG = Logger.getInstance(ProjectUtil::class.java)
 private var ourProjectPath: String? = null
@@ -176,7 +178,7 @@ object ProjectUtil {
     }
     if (ProjectUtilCore.isValidProjectPath(file)) {
       // see OpenProjectTest.`open valid existing project dir with inability to attach using OpenFileAction` test about why `runConfigurators = true` is specified here
-      return ProjectManagerEx.getInstanceEx().openProjectAsync(file, options.copy(runConfigurators = true))
+      return (serviceAsync<ProjectManager>() as ProjectManagerEx).openProjectAsync(file, options.copy(runConfigurators = true))
     }
 
     if (!options.preventIprLookup && Files.isDirectory(file)) {
@@ -192,7 +194,7 @@ object ProjectUtil {
           }
         }
       }
-      catch (ignore: IOException) {
+      catch (_: IOException) {
       }
     }
 
@@ -216,7 +218,7 @@ object ProjectUtil {
 
     val project: Project?
     if (processors.size == 1 && processors[0] is PlatformProjectOpenProcessor) {
-      project = ProjectManagerEx.getInstanceEx().openProjectAsync(
+      project = (serviceAsync<ProjectManager>() as ProjectManagerEx).openProjectAsync(
         projectStoreBaseDir = file,
         options = options.copy(
           isNewProject = true,
@@ -316,7 +318,10 @@ object ProjectUtil {
     }
 
     return withContext(Dispatchers.EDT) {
-      processor.doOpenProject(virtualFile, options.projectToClose, options.forceOpenInNewFrame)
+      //readaction is not enough
+      writeIntentReadAction {
+        processor.doOpenProject(virtualFile, options.projectToClose, options.forceOpenInNewFrame)
+      }
     }
   }
 
@@ -395,10 +400,10 @@ object ProjectUtil {
    * `-1` (when a user cancels the dialog)
    */
   @JvmOverloads
-  fun confirmOpenOrAttachProject(project: Project? = null, path: Path? = null): Int {
+  fun confirmOpenOrAttachProject(project: Project? = null, computed: ProjectAttachProcessor? = null): Int {
     var mode = GeneralSettings.getInstance().confirmOpenNewProject
     if (mode == GeneralSettings.OPEN_PROJECT_ASK) {
-      val processor = ProjectAttachProcessor.getProcessor(project, path)
+      val processor = computed ?: ProjectAttachProcessor.getProcessor(project, null, null)
       val exitCode = Messages.showDialog(
         project?.let { processor?.getDescription(it) } ?: IdeBundle.message("prompt.open.project.or.attach"),
         IdeBundle.message("prompt.open.project.or.attach.title"), arrayOf(
@@ -407,7 +412,7 @@ object ProjectUtil {
         project?.let { processor?.getActionText(it) } ?: IdeBundle.message("prompt.open.project.or.attach.button.attach"),
         CommonBundle.getCancelButtonText()
       ),
-        processor?.defaultOptionIndex?: 0,
+        processor?.defaultOptionIndex(project) ?: 0,
         Messages.getQuestionIcon(),
         ProjectNewWindowDoNotAskOption())
       mode = if (exitCode == 0) GeneralSettings.OPEN_PROJECT_SAME_WINDOW else if (exitCode == 1) GeneralSettings.OPEN_PROJECT_NEW_WINDOW else if (exitCode == 2) GeneralSettings.OPEN_PROJECT_SAME_WINDOW_ATTACH else -1
@@ -430,7 +435,7 @@ object ProjectUtil {
       return try {
         Files.isSameFile(projectFile, existingBaseDirPath)
       }
-      catch (ignore: IOException) {
+      catch (_: IOException) {
         false
       }
     }
@@ -439,7 +444,7 @@ object ProjectUtil {
       return try {
         Files.isSameFile(projectFile, projectStore.projectFilePath)
       }
-      catch (ignore: IOException) {
+      catch (_: IOException) {
         false
       }
     }
@@ -549,7 +554,10 @@ object ProjectUtil {
         val virtualFile = LocalFileSystem.getInstance().refreshAndFindFileByPath(FileUtilRt.toSystemIndependentName(file.toString()))
         if (virtualFile != null && virtualFile.isValid) {
           withContext(Dispatchers.EDT) {
-            OpenFileAction.openFile(virtualFile, projectToClose)
+            //readaction is not enough
+            writeIntentReadAction {
+              OpenFileAction.openFile(virtualFile, projectToClose)
+            }
           }
         }
         result = projectToClose
@@ -607,7 +615,7 @@ object ProjectUtil {
 
   private suspend fun openOrCreateProjectInner(name: String, file: Path): Project? {
     val existingFile = if (isProjectFile(file)) file else null
-    val projectManager = ProjectManagerEx.getInstanceEx()
+    val projectManager = serviceAsync<ProjectManager>() as ProjectManagerEx
     if (existingFile != null) {
       for (p in projectManager.openProjects) {
         if (isSameProject(existingFile, p)) {
@@ -623,7 +631,7 @@ object ProjectUtil {
         !Files.exists(file) && Files.createDirectories(file) != null || Files.isDirectory(file)
       }
     }
-    catch (e: IOException) {
+    catch (_: IOException) {
       false
     }
 
@@ -665,6 +673,7 @@ object ProjectUtil {
     return w as? IdeFrame
   }
 
+  @JvmStatic
   fun getProjectForWindow(window: Window?): Project? {
     return getRootFrameForWindow(window)?.project
   }
@@ -685,13 +694,13 @@ object ProjectUtil {
     val preferAttach = currentProject != null &&
                        canAttach &&
                        (PlatformUtils.isDataGrip() && !ProjectUtilCore.isValidProjectPath(file))
-    if (preferAttach && attachToProjectAsync(projectToClose = currentProject!!, projectDir = file, callback = null)) {
+    if (preferAttach && attachToProjectAsync(projectToClose = currentProject, projectDir = file, callback = null)) {
       return null
     }
 
     val project = if (canAttach) {
       val options = createOptionsToOpenDotIdeaOrCreateNewIfNotExists(file, currentProject)
-      ProjectManagerEx.getInstanceEx().openProjectAsync(file, options)
+      (serviceAsync<ProjectManager>() as ProjectManagerEx).openProjectAsync(file, options)
     }
     else {
       openOrImportAsync(file, OpenProjectTask().withProjectToClose(currentProject))

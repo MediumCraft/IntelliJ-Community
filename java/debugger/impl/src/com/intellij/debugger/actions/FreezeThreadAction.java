@@ -2,6 +2,7 @@
 package com.intellij.debugger.actions;
 
 import com.intellij.debugger.engine.DebugProcessImpl;
+import com.intellij.debugger.engine.DebuggerManagerThreadImpl;
 import com.intellij.debugger.engine.events.DebuggerCommandImpl;
 import com.intellij.debugger.impl.DebuggerContextImpl;
 import com.intellij.debugger.jdi.ThreadReferenceProxyImpl;
@@ -12,6 +13,8 @@ import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.application.ApplicationManager;
 import org.jetbrains.annotations.NotNull;
+
+import java.util.Objects;
 
 public class FreezeThreadAction extends DebuggerAction {
   @Override
@@ -28,10 +31,11 @@ public class FreezeThreadAction extends DebuggerAction {
       final ThreadReferenceProxyImpl thread = threadDescriptor.getThreadReference();
 
       if (!threadDescriptor.isFrozen()) {
-        debugProcess.getManagerThread().schedule(new DebuggerCommandImpl() {
+        DebuggerManagerThreadImpl debuggerManagerThread = Objects.requireNonNull(debuggerContext.getManagerThread());
+        debuggerManagerThread.schedule(new DebuggerCommandImpl() {
           @Override
-          protected void action() throws Exception {
-            debugProcess.createFreezeThreadCommand(thread).run();
+          protected void action() {
+            debuggerManagerThread.invoke(debugProcess.createFreezeThreadCommand(thread));
             ApplicationManager.getApplication().invokeLater(() -> debuggerTreeNode.calcValue());
           }
         });

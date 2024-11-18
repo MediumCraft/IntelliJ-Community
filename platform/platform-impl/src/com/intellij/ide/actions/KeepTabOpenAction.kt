@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.actions
 
 import com.intellij.openapi.actionSystem.ActionPlaces
@@ -10,12 +10,14 @@ import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
 import com.intellij.openapi.fileEditor.impl.EditorComposite
 import com.intellij.openapi.fileEditor.impl.EditorWindow
 import com.intellij.openapi.project.DumbAwareAction
+import org.jetbrains.annotations.ApiStatus
 
+@ApiStatus.Internal
 class KeepTabOpenAction : DumbAwareAction(), ActionRemoteBehaviorSpecification.Frontend {
   override fun actionPerformed(e: AnActionEvent) {
     val (window, composite) = getActionState(e) ?: return
     composite.isPreview = false
-    window.owner.updateFileColorAsync(composite.file)
+    window.owner.scheduleUpdateFileColor(composite.file)
   }
 
   override fun update(e: AnActionEvent) {

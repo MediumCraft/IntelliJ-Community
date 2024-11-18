@@ -4,9 +4,10 @@ package org.jetbrains.kotlin.idea.codeinsights.impl.base.intentions
 import com.intellij.modcommand.ModPsiUpdater
 import com.intellij.psi.SmartPsiElementPointer
 import com.intellij.psi.createSmartPointer
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
-import org.jetbrains.kotlin.analysis.api.symbols.KtClassOrObjectSymbol
-import org.jetbrains.kotlin.analysis.api.symbols.KtValueParameterSymbol
+import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
+import org.jetbrains.kotlin.analysis.api.KaSession
+import org.jetbrains.kotlin.analysis.api.symbols.KaClassSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaValueParameterSymbol
 import org.jetbrains.kotlin.descriptors.annotations.AnnotationUseSiteTarget
 import org.jetbrains.kotlin.descriptors.annotations.KotlinTarget
 import org.jetbrains.kotlin.idea.references.KtReference
@@ -39,7 +40,8 @@ sealed interface MovePropertyToConstructorInfo {
     fun toWritable(updater: ModPsiUpdater): MovePropertyToConstructorInfo
 
     companion object {
-        context(KtAnalysisSession)
+        context(KaSession)
+        @OptIn(KaExperimentalApi::class)
         fun create(element: KtProperty, initializer: KtExpression? = element.initializer): MovePropertyToConstructorInfo? {
             if (initializer != null && !initializer.isValidInConstructor()) return null
 
@@ -52,7 +54,7 @@ sealed interface MovePropertyToConstructorInfo {
                     propertyAnnotationsText = propertyAnnotationsText,
                 )
             } else {
-                val typeText = element.typeReference?.text ?: element.getVariableSymbol().returnType.render(position = Variance.INVARIANT)
+                val typeText = element.typeReference?.text ?: element.symbol.returnType.render(position = Variance.INVARIANT)
                 return AdditionalParameter(
                     parameterTypeText = typeText,
                     propertyAnnotationsText = propertyAnnotationsText,
@@ -60,14 +62,14 @@ sealed interface MovePropertyToConstructorInfo {
             }
         }
 
-        context(KtAnalysisSession)
+        context(KaSession)
         private fun KtExpression.isValidInConstructor(): Boolean {
-            val parentClassSymbol = getStrictParentOfType<KtClass>()?.getClassOrObjectSymbol() ?: return false
+            val parentClassSymbol = getStrictParentOfType<KtClass>()?.classSymbol ?: return false
             var isValid = true
             accept(referenceExpressionRecursiveVisitor { expression ->
                 if (!isValid) return@referenceExpressionRecursiveVisitor
                 for (reference in expression.references.filterIsInstance<KtReference>()) {
-                    for (classSymbol in reference.resolveToSymbols().filterIsInstance<KtClassOrObjectSymbol>()) {
+                    for (classSymbol in reference.resolveToSymbols().filterIsInstance<KaClassSymbol>()) {
                         if (classSymbol == parentClassSymbol) {
                             isValid = false
                             return@referenceExpressionRecursiveVisitor
@@ -79,17 +81,18 @@ sealed interface MovePropertyToConstructorInfo {
             return isValid
         }
 
-        context(KtAnalysisSession)
+        context(KaSession)
         private fun KtProperty.collectAnnotationsAsText(): String? = modifierList?.annotationEntries?.joinToString(separator = " ") {
             it.getTextWithUseSite()
         }
 
-        context(KtAnalysisSession)
+        context(KaSession)
+        @OptIn(KaExperimentalApi::class)
         private fun KtAnnotationEntry.getTextWithUseSite(): String {
             if (useSiteTarget != null) return text
             val typeReference = typeReference ?: return text
 
-            val applicableTargets = typeReference.getKtType().expandedClassSymbol?.annotationApplicableTargets ?: return text
+            val applicableTargets = typeReference.type.expandedSymbol?.annotationApplicableTargets ?: return text
 
             fun AnnotationUseSiteTarget.textWithMe() = "@$renderName:${typeReference.text}${valueArgumentList?.text.orEmpty()}"
 
@@ -108,9 +111,9 @@ sealed interface MovePropertyToConstructorInfo {
             }
         }
 
-        context(KtAnalysisSession)
+        context(KaSession)
         private fun KtExpression.findConstructorParameter(): KtParameter? {
-            val constructorParam = mainReference?.resolveToSymbol() as? KtValueParameterSymbol ?: return null
+            val constructorParam = mainReference?.resolveToSymbol() as? KaValueParameterSymbol ?: return null
             return constructorParam.psi as? KtParameter
         }
     }

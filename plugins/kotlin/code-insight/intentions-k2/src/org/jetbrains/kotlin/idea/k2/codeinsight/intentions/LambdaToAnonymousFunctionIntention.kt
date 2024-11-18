@@ -4,11 +4,12 @@ package org.jetbrains.kotlin.idea.k2.codeinsight.intentions
 import com.intellij.codeInspection.util.IntentionFamilyName
 import com.intellij.modcommand.ActionContext
 import com.intellij.modcommand.ModPsiUpdater
+import com.intellij.modcommand.Presentation
 import com.intellij.openapi.util.TextRange
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
-import org.jetbrains.kotlin.analysis.api.symbols.KtAnonymousFunctionSymbol
-import org.jetbrains.kotlin.analysis.api.types.KtErrorType
-import org.jetbrains.kotlin.analysis.api.types.KtFunctionalType
+import org.jetbrains.kotlin.analysis.api.KaSession
+import org.jetbrains.kotlin.analysis.api.symbols.KaAnonymousFunctionSymbol
+import org.jetbrains.kotlin.analysis.api.types.KaErrorType
+import org.jetbrains.kotlin.analysis.api.types.KaFunctionType
 import org.jetbrains.kotlin.idea.base.psi.moveInsideParenthesesAndReplaceWith
 import org.jetbrains.kotlin.idea.base.psi.shouldLambdaParameterBeNamed
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
@@ -30,21 +31,23 @@ internal class LambdaToAnonymousFunctionIntention :
         val lambdaArgumentName: Name?,
     )
 
-    override fun getFamilyName(): @IntentionFamilyName String = KotlinBundle.message("convert.lambda.expression.to.anonymous.function")
+    override fun getFamilyName(): @IntentionFamilyName String =
+        KotlinBundle.message("convert.lambda.expression.to.anonymous.function")
 
-    override fun getActionName(
-      actionContext: ActionContext,
-      element: KtLambdaExpression,
-      elementContext: LambdaToFunctionContext,
-    ): String = KotlinBundle.message("convert.to.anonymous.function")
+    override fun getPresentation(
+        context: ActionContext,
+        element: KtLambdaExpression,
+    ): Presentation = Presentation.of(
+        KotlinBundle.message("convert.to.anonymous.function"),
+    )
 
-    context(KtAnalysisSession)
+    context(KaSession)
     override fun prepareContext(element: KtLambdaExpression): LambdaToFunctionContext? {
-        val declarationSymbol = element.functionLiteral.getSymbol() as? KtAnonymousFunctionSymbol ?: return null
-        if (declarationSymbol.valueParameters.any { it.returnType is KtErrorType }) return null
+        val declarationSymbol = element.functionLiteral.symbol as? KaAnonymousFunctionSymbol ?: return null
+        if (declarationSymbol.valueParameters.any { it.returnType is KaErrorType }) return null
 
         // anonymous suspend functions are forbidden in Kotlin
-        if ((element.functionLiteral.getKtType() as? KtFunctionalType)?.isSuspend == true) return null
+        if ((element.functionLiteral.expressionType as? KaFunctionType)?.isSuspend == true) return null
 
         val signature = LambdaToAnonymousFunctionUtil.prepareFunctionText(element) ?: return null
         val parent = element.functionLiteral.parent

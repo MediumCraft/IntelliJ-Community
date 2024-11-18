@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.java.psi
 
 import com.intellij.openapi.command.WriteCommandAction
@@ -13,6 +13,7 @@ import com.intellij.psi.util.InheritanceUtil
 import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.testFramework.PsiTestUtil
 import com.intellij.testFramework.fixtures.LightJavaCodeInsightFixtureTestCase
+import com.intellij.testFramework.rethrowLoggedErrorsIn
 import com.intellij.util.IdempotenceChecker
 import com.intellij.util.ThrowableRunnable
 import junit.framework.TestCase
@@ -166,7 +167,7 @@ class JavaPsiTest : LightJavaCodeInsightFixtureTestCase() {
     assert(values[10] == "\n\t\"\'\\")
   }
 
-  fun testIdempotenceCheckerUnderstandsTypeEquivalence() {
+  fun testIdempotenceCheckerUnderstandsTypeEquivalence(): Unit = rethrowLoggedErrorsIn {
     val immediate = elementFactory.createType(myFixture.findClass(String::class.java.name), PsiSubstitutor.EMPTY)
     val ref = elementFactory.createTypeFromText(String::class.java.name, null)
     assert(immediate == ref)
@@ -378,7 +379,6 @@ class B {}"""
         int field;
       """.trimIndent())
     val implicitClass = file.classes.single() as PsiImplicitClass
-    TestCase.assertNull(implicitClass.name)
     val method = implicitClass.methods.single()
     TestCase.assertEquals("myMethod", method.name)
     val aClass = implicitClass.innerClasses.single()

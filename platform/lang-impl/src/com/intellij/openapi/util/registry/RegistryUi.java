@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.util.registry;
 
 import com.intellij.icons.AllIcons;
@@ -12,6 +12,7 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ApplicationNamesInfo;
 import com.intellij.openapi.application.ExperimentalFeature;
 import com.intellij.openapi.application.Experiments;
+import com.intellij.openapi.ide.CopyPasteManager;
 import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.ui.ComboBox;
 import com.intellij.openapi.ui.DialogWrapper;
@@ -27,11 +28,10 @@ import com.intellij.openapi.wm.impl.IdeBackgroundUtil;
 import com.intellij.ui.*;
 import com.intellij.ui.speedSearch.SpeedSearchUtil;
 import com.intellij.ui.table.JBTable;
+import com.intellij.util.ArrayUtil;
 import com.intellij.util.containers.ContainerUtil;
-import com.intellij.util.ui.JBFont;
-import com.intellij.util.ui.JBUI;
-import com.intellij.util.ui.NamedColorUtil;
-import com.intellij.util.ui.UIUtil;
+import com.intellij.util.ui.*;
+import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -40,6 +40,8 @@ import javax.swing.event.ListSelectionEvent;
 import javax.swing.event.ListSelectionListener;
 import javax.swing.table.*;
 import java.awt.*;
+import java.awt.datatransfer.DataFlavor;
+import java.awt.datatransfer.Transferable;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.KeyEvent;
@@ -73,18 +75,22 @@ public class RegistryUi implements Disposable {
     myTable.setShowGrid(false);
     myTable.setVisibleRowCount(15);
     myTable.setEnableAntialiasing(true);
-    final MyRenderer r = new MyRenderer();
+    MyRenderer r = new MyRenderer();
 
-    final TableColumn c1 = myTable.getColumnModel().getColumn(0);
+    TableColumn c1 = myTable.getColumnModel().getColumn(0);
     c1.setPreferredWidth(JBUI.scale(400));
     c1.setCellRenderer(r);
     c1.setHeaderValue("Key");
 
-    final TableColumn c2 = myTable.getColumnModel().getColumn(1);
+    TableColumn c2 = myTable.getColumnModel().getColumn(1);
     c2.setPreferredWidth(JBUI.scale(100));
     c2.setCellRenderer(r);
     c2.setHeaderValue("Value");
     c2.setCellEditor(new MyEditor());
+
+    TableColumn c3 = myTable.getColumnModel().getColumn(2);
+    c3.setPreferredWidth(JBUI.scale(100));
+    c3.setHeaderValue("Source");
 
     myDescriptionLabel = new JTextArea(3, 50);
     myDescriptionLabel.setMargin(JBUI.insets(2));
@@ -93,8 +99,9 @@ public class RegistryUi implements Disposable {
     myDescriptionLabel.setEditable(false);
     myDescriptionLabel.setBackground(UIUtil.getPanelBackground());
     myDescriptionLabel.setFont(JBFont.label());
-    final JScrollPane label = ScrollPaneFactory.createScrollPane(myDescriptionLabel, SideBorder.NONE);
-    final JPanel descriptionPanel = new JPanel(new BorderLayout());
+
+    JScrollPane label = ScrollPaneFactory.createScrollPane(myDescriptionLabel, SideBorder.NONE);
+    JPanel descriptionPanel = new JPanel(new BorderLayout());
     descriptionPanel.add(label, BorderLayout.CENTER);
     descriptionPanel.setBorder(JBUI.Borders.emptyTop(8));
 
@@ -135,6 +142,9 @@ public class RegistryUi implements Disposable {
     myContent.add(tb.getComponent(), BorderLayout.NORTH);
     final TableSpeedSearch search = TableSpeedSearch.installOn(myTable);
     search.setFilteringMode(true);
+
+    myTable.setTransferHandler(new RegistryTransferHandler(search));
+
     myTable.setRowSorter(new TableRowSorter<>(myTable.getModel()));
     myTable.registerKeyboardAction(
       new ActionListener() {
@@ -150,6 +160,7 @@ public class RegistryUi implements Disposable {
               keyChanged(rv.getKey());
               myModel.fireTableCellUpdated(modelRow, 0);
               myModel.fireTableCellUpdated(modelRow, 1);
+              myModel.fireTableCellUpdated(modelRow, 2);
             }
           }
           invalidateActions();
@@ -160,7 +171,6 @@ public class RegistryUi implements Disposable {
   }
 
   private final class RevertAction extends AnAction implements DumbAware {
-
     private RevertAction() {
       new ShadowAction(this, "EditorDelete", myTable, RegistryUi.this);
     }
@@ -262,7 +272,7 @@ public class RegistryUi implements Disposable {
 
     @Override
     public int getColumnCount() {
-      return 2;
+      return 3;
     }
 
     @Override
@@ -271,6 +281,10 @@ public class RegistryUi implements Disposable {
       return switch (columnIndex) {
         case 0 -> value.getKey();
         case 1 -> value.asString();
+        case 2 -> {
+          RegistryValueSource source = value.getSource();
+          yield source != null ? source.name() : "";
+        }
         default -> value;
       };
     }
@@ -308,9 +322,8 @@ public class RegistryUi implements Disposable {
 
       private AbstractAction myCloseAction;
 
-      @Nullable
       @Override
-      protected JComponent createNorthPanel() {
+      protected @Nullable JComponent createNorthPanel() {
         if (ApplicationManager.getApplication().isInternal()) {
           return null;
         }
@@ -340,7 +353,6 @@ public class RegistryUi implements Disposable {
       protected String getDimensionServiceKey() {
         return "Registry";
       }
-
 
       @Override
       public JComponent getPreferredFocusedComponent() {
@@ -374,6 +386,11 @@ public class RegistryUi implements Disposable {
         processClose();
         super.doCancelAction();
       }
+
+      @Override
+      public @NotNull Dimension getInitialSize() {
+        return new JBDimension(800, 600, false);
+      }
     };
 
     return dialog.showAndGet();
@@ -402,7 +419,7 @@ public class RegistryUi implements Disposable {
       // remove stored value if it is equals to the new value
       myModifiedValues.remove(key);
     }
-    registryValue.setValue(value);
+    registryValue.setValue(value, RegistryValueSource.USER);
   }
 
   private void restoreDefaults() {
@@ -422,11 +439,9 @@ public class RegistryUi implements Disposable {
   @Override
   public void dispose() { }
 
-  private static String[] getOptions(@NotNull RegistryValue value) {
-    String[] options = value.getOptions();
-    for (int i = 0; i < options.length; i++) {
-      options[i] = Strings.trimEnd(options[i], "*");
-    }
+  private static @NotNull List<String> getOptions(@NotNull RegistryValue value) {
+    List<String> options = new ArrayList<>(value.asOptions());
+    options.replaceAll(s -> Strings.trimEnd(s, "*"));
     return options;
   }
 
@@ -434,14 +449,13 @@ public class RegistryUi implements Disposable {
     private final JLabel myLabel = new JLabel();
     private final SimpleColoredComponent myComponent = new SimpleColoredComponent();
 
-    @NotNull
     @Override
-    public Component getTableCellRendererComponent(@NotNull JTable table,
-                                                   Object value,
-                                                   boolean isSelected,
-                                                   boolean hasFocus,
-                                                   int row,
-                                                   int column) {
+    public @NotNull Component getTableCellRendererComponent(@NotNull JTable table,
+                                                            Object value,
+                                                            boolean isSelected,
+                                                            boolean hasFocus,
+                                                            int row,
+                                                            int column) {
       int modelRow = table.convertRowIndexToModel(row);
       RegistryValue v = ((MyTableModel)table.getModel()).getRegistryValue(modelRow);
 
@@ -478,8 +492,8 @@ public class RegistryUi implements Disposable {
               return box;
             }
             else if (v.isMultiValue()) {
-              String[] options = getOptions(v);
-              ComboBox<String> combo = new ComboBox<>(options);
+              List<String> options = getOptions(v);
+              ComboBox<String> combo = new ComboBox<>(ArrayUtil.toStringArray(options));
               combo.setSelectedItem(v.getSelectedOption());
               return combo;
             }
@@ -504,8 +518,7 @@ public class RegistryUi implements Disposable {
       return myLabel;
     }
 
-    @NotNull
-    private static SimpleTextAttributes getAttributes(RegistryValue value, boolean isSelected) {
+    private static @NotNull SimpleTextAttributes getAttributes(RegistryValue value, boolean isSelected) {
       boolean changedFromDefault = value.isChangedFromDefault();
       if (isSelected) {
         return new SimpleTextAttributes(changedFromDefault ? SimpleTextAttributes.STYLE_BOLD : SimpleTextAttributes.STYLE_PLAIN,
@@ -547,8 +560,7 @@ public class RegistryUi implements Disposable {
     }
 
     @Override
-    @Nullable
-    public Component getTableCellEditorComponent(JTable table, Object value, boolean isSelected, int row, int column) {
+    public @Nullable Component getTableCellEditorComponent(JTable table, Object value, boolean isSelected, int row, int column) {
       int modelRow = table.convertRowIndexToModel(row);
       myValue = ((MyTableModel)table.getModel()).getRegistryValue(modelRow);
       if (myValue.asColor(null) != null) {
@@ -565,7 +577,7 @@ public class RegistryUi implements Disposable {
         return myCheckBox;
       }
       else if (myValue.isMultiValue()) {
-        myComboBox = new ComboBox<>(getOptions(myValue));
+        myComboBox = new ComboBox<>(ArrayUtil.toStringArray(getOptions(myValue)));
         myComboBox.setSelectedItem(myValue.getSelectedOption());
         return myComboBox;
       }
@@ -585,7 +597,7 @@ public class RegistryUi implements Disposable {
         }
         else if (myValue.isMultiValue()) {
           String selected = (String)myComboBox.getSelectedItem();
-          myValue.setSelectedOption(selected);
+          myValue.setSelectedOption(selected, RegistryValueSource.USER);
         }
         else {
           setValue(myValue, myField.getText().trim());
@@ -610,6 +622,85 @@ public class RegistryUi implements Disposable {
     @Override
     public void actionPerformed(@NotNull ActionEvent e) {
       restoreDefaults();
+    }
+  }
+
+  private static class RegistryTransferHandler extends TransferHandler {
+    private final @NotNull TableSpeedSearch mySearch;
+
+    private RegistryTransferHandler(@NotNull TableSpeedSearch search) {
+      mySearch = search;
+    }
+
+    @Override
+    public boolean importData(@NotNull TransferSupport support) {
+      String pastedText = CopyPasteManager.getInstance().getContents(DataFlavor.stringFlavor);
+      if (pastedText == null || mySearch.isPopupActive()) {
+        return false;
+      }
+      mySearch.showPopup(pastedText);
+      return true;
+    }
+
+    @Override
+    public int getSourceActions(JComponent c) {
+      return COPY;
+    }
+
+    @Override
+    protected @Nullable Transferable createTransferable(JComponent c) {
+      JTable table = (JTable)c;
+
+      int[] selectedRows = table.getSelectedRows();
+      if (selectedRows == null || selectedRows.length == 0) {
+        return null;
+      }
+
+      String htmlText = buildHtmlText(table, selectedRows);
+      String plainText = buildPlainText(table, selectedRows);
+
+      return new TextTransferable(htmlText, plainText);
+    }
+
+    private static @NotNull String buildPlainText(@NotNull JTable table, int[] rows) {
+      StringBuilder stringBuilder = new StringBuilder();
+      int lastRow = rows[rows.length - 1];
+
+      int columnCount = table.getColumnCount();
+      for (int row : rows) {
+        for (int col = 0; col < columnCount; col++) {
+          String text = getItemAsString(table, row, col);
+          stringBuilder.append(text);
+          if (col + 1 != columnCount) {
+            stringBuilder.append('\t');
+          }
+        }
+        if (lastRow != row) {
+          stringBuilder.append('\n');
+        }
+      }
+
+      return stringBuilder.toString();
+    }
+
+    private static @NotNull String buildHtmlText(@NotNull JTable table, int[] rows) {
+      HtmlBuilder builder = new HtmlBuilder();
+      int columnCount = table.getColumnCount();
+      for (int row : rows) {
+        HtmlBuilder rowItem = new HtmlBuilder();
+        for (int col = 0; col < columnCount; col++) {
+          @NonNls String text = getItemAsString(table, row, col);
+          HtmlChunk.Element item = new HtmlBuilder().append(text).wrapWith("td");
+          rowItem.append(item);
+        }
+        builder.append(rowItem.wrapWith("tr"));
+      }
+      return builder.wrapWith("table").wrapWith("body").wrapWith("html").toString();
+    }
+
+    private static String getItemAsString(@NonNls JTable table, int row, int col) {
+      Object obj = table.getValueAt(row, col);
+      return (obj == null) ? "" : obj.toString();
     }
   }
 }

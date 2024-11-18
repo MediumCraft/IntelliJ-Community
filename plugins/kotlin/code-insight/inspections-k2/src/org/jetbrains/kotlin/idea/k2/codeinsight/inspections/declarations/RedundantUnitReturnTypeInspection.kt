@@ -7,7 +7,7 @@ import com.intellij.codeInspection.ProblemsHolder
 import com.intellij.modcommand.ModPsiUpdater
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.TextRange
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
+import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.codeinsight.api.applicable.inspections.KotlinApplicableInspectionBase
 import org.jetbrains.kotlin.idea.codeinsight.api.applicable.inspections.KotlinModCommandQuickFix
@@ -41,11 +41,11 @@ internal class RedundantUnitReturnTypeInspection :
         return element.hasBlockBody() && element.typeReference != null
     }
 
-    context(KtAnalysisSession)
+    context(KaSession)
     override fun prepareContext(element: KtNamedFunction): TypeInfo? {
-        val returnType = element.getFunctionLikeSymbol().returnType.fullyExpandedType
+        val returnType = element.symbol.returnType.fullyExpandedType
 
-        if (!returnType.isMarkedNullable && returnType.isUnit) {
+        if (!returnType.isMarkedNullable && returnType.isUnitType) {
             return TypeInfo(TypeInfo.UNIT)
         }
 
@@ -65,7 +65,7 @@ internal class RedundantUnitReturnTypeInspection :
             element: KtNamedFunction,
             updater: ModPsiUpdater,
         ) {
-            updateType(element, context, project, updater = updater)
+            updateType(element, context, project, updater)
         }
     }
 }

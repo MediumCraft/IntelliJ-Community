@@ -25,17 +25,17 @@ import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.Processor;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.MultiMap;
-import com.jetbrains.python.PyElementTypes;
-import com.jetbrains.python.PyNames;
-import com.jetbrains.python.PyStubElementTypes;
-import com.jetbrains.python.PythonDialectsTokenSetProvider;
+import com.jetbrains.python.*;
 import com.jetbrains.python.ast.PyAstFunction.Modifier;
+import com.jetbrains.python.ast.impl.PyUtilCore;
 import com.jetbrains.python.codeInsight.controlflow.ControlFlowCache;
 import com.jetbrains.python.codeInsight.controlflow.ScopeOwner;
 import com.jetbrains.python.codeInsight.dataflow.scope.ScopeUtil;
+import com.jetbrains.python.codeInsight.typing.PyTypingTypeProvider;
 import com.jetbrains.python.documentation.docstrings.DocStringUtil;
 import com.jetbrains.python.psi.*;
 import com.jetbrains.python.psi.impl.stubs.PyClassElementType;
+import com.jetbrains.python.psi.impl.stubs.PyVersionSpecificStubBaseKt;
 import com.jetbrains.python.psi.resolve.PyResolveContext;
 import com.jetbrains.python.psi.resolve.PyResolveUtil;
 import com.jetbrains.python.psi.resolve.QualifiedNameFinder;
@@ -56,6 +56,7 @@ import java.util.*;
 import static com.intellij.openapi.util.text.StringUtil.join;
 import static com.intellij.openapi.util.text.StringUtil.notNullize;
 import static com.jetbrains.python.psi.PyUtil.as;
+import static com.jetbrains.python.psi.impl.PyDeprecationUtilKt.extractDeprecationMessageFromDecorator;
 
 
 public class PyClassImpl extends PyBaseElementImpl<PyClassStub> implements PyClass {
@@ -256,7 +257,16 @@ public class PyClassImpl extends PyBaseElementImpl<PyClassStub> implements PyCla
       return stub.getSlots();
     }
 
-    return PyClass.super.getOwnSlots();
+    final PyTargetExpression slots = ContainerUtil.find(getClassAttributes(), target -> PyNames.SLOTS.equals(target.getName()));
+    if (slots != null) {
+      final PyExpression value = slots.findAssignedValue();
+
+      return value instanceof PyStringLiteralExpression
+             ? Collections.singletonList(((PyStringLiteralExpression)value).getStringValue())
+             : PyUtilCore.strListValue(value);
+    }
+
+    return null;
   }
 
   @Override
@@ -310,7 +320,7 @@ public class PyClassImpl extends PyBaseElementImpl<PyClassStub> implements PyCla
       // filter blank sequences
       final List<List<PyClassLikeType>> nonBlankSequences = new ArrayList<>(sequences.size());
       for (List<PyClassLikeType> item : sequences) {
-        if (item.size() > 0) nonBlankSequences.add(item);
+        if (!item.isEmpty()) nonBlankSequences.add(item);
       }
       if (nonBlankSequences.isEmpty()) return result;
       // find a clean head
@@ -371,7 +381,7 @@ public class PyClassImpl extends PyBaseElementImpl<PyClassStub> implements PyCla
     cache.put(type, Ref.create());
     List<PyClassLikeType> result = null;
     try {
-      final List<PyClassLikeType> bases = removeNotNullDuplicates(type.getSuperClassTypes(context));
+      final List<PyClassLikeType> bases = moveTypingGenericToTheEnd(removeNotNullDuplicates(type.getSuperClassTypes(context)));
       final List<List<PyClassLikeType>> lines = new ArrayList<>();
       for (PyClassLikeType base : bases) {
         if (base != null) {
@@ -412,6 +422,20 @@ public class PyClassImpl extends PyBaseElementImpl<PyClassStub> implements PyCla
     return result;
   }
 
+  private static @NotNull List<PyClassLikeType> moveTypingGenericToTheEnd(@NotNull List<PyClassLikeType> bases) {
+    int genericPos = ContainerUtil.indexOf(bases,
+                                           base -> base instanceof PyCustomType customType &&
+                                                   PyTypingTypeProvider.GENERIC.equals(customType.getClassQName()));
+    if (genericPos >= 0) {
+      List<PyClassLikeType> reorderedBases = new ArrayList<>(bases.size());
+      reorderedBases.addAll(bases.subList(0, genericPos));
+      reorderedBases.addAll(bases.subList(genericPos + 1, bases.size()));
+      reorderedBases.add(bases.get(genericPos));
+      return reorderedBases;
+    }
+    return bases;
+  }
+
   @NotNull
   private static <T> List<T> removeNotNullDuplicates(@NotNull List<T> list) {
     final Set<T> distinct = new HashSet<>();
@@ -426,6 +450,16 @@ public class PyClassImpl extends PyBaseElementImpl<PyClassStub> implements PyCla
       result.add(elem);
     }
     return result;
+  }
+
+  @Override
+  public PyFunction @NotNull [] getMethodsInherited(@Nullable TypeEvalContext context) {
+    List<PyFunction> collectedMethods = new ArrayList<>(Arrays.asList(getMethods()));
+
+    for (PyClass superClass : getAncestorClasses(context)) {
+      collectedMethods.addAll(Arrays.asList(superClass.getMethods()));
+    }
+    return collectedMethods.toArray(PyFunction.EMPTY_ARRAY);
   }
 
   @Override
@@ -713,7 +747,7 @@ public class PyClassImpl extends PyBaseElementImpl<PyClassStub> implements PyCla
   private Property processStubProperties(@Nullable Processor<? super Property> filter) {
     final PyClassStub stub = getStub();
     if (stub != null) {
-      for (StubElement subStub : stub.getChildrenStubs()) {
+      for (StubElement<?> subStub : getVersionSpecificChildrenStubs(stub)) {
         if (subStub.getStubType() == PyElementTypes.TARGET_EXPRESSION) {
           final PyTargetExpressionStub targetStub = (PyTargetExpressionStub)subStub;
           final PropertyStubStorage prop = targetStub.getCustomStub(PropertyStubStorage.class);
@@ -891,7 +925,7 @@ public class PyClassImpl extends PyBaseElementImpl<PyClassStub> implements PyCla
         if (!(callable instanceof StubBasedPsiElement) && !context.maySwitchToAST(callable)) {
           return null;
         }
-        return callable.getCallType(receiver, buildArgumentsToParametersMap(receiver, callable, context), context);
+        return callable.getCallType(receiver, null, buildArgumentsToParametersMap(receiver, callable, context), context);
       }
       return null;
     }
@@ -1003,12 +1037,38 @@ public class PyClassImpl extends PyBaseElementImpl<PyClassStub> implements PyCla
 
   @Override
   public List<PyTargetExpression> getClassAttributes() {
+    final List<PyTargetExpression> result = new ArrayList<>();
     PyClassStub stub = getStub();
     if (stub != null) {
-      final PyTargetExpression[] children = stub.getChildrenByType(PyElementTypes.TARGET_EXPRESSION, PyTargetExpression.EMPTY_ARRAY);
-      return Arrays.asList(children);
+      for (StubElement<?> element : getVersionSpecificChildrenStubs(stub)) {
+        if (element.getStubType() == PyElementTypes.TARGET_EXPRESSION) {
+          result.add((PyTargetExpression)element.getPsi());
+        }
+      }
     }
-    return PyClass.super.getClassAttributes();
+    else {
+      getStatementList().acceptChildren(
+        new PyVersionAwareTopLevelElementVisitor(PythonLanguageLevelPusher.getLanguageLevelForFile(getContainingFile())) {
+          @Override
+          protected void checkAddElement(PsiElement psiElement) {
+            if (psiElement instanceof PyAssignmentStatement assignmentStatement) {
+              final PyExpression[] targets = assignmentStatement.getTargets();
+              for (PyExpression target : targets) {
+                if (target instanceof PyTargetExpression) {
+                  result.add((PyTargetExpression)target);
+                }
+              }
+            }
+            else if (psiElement instanceof PyTypeDeclarationStatement) {
+              final PyExpression target = ((PyTypeDeclarationStatement)psiElement).getTarget();
+              if (target instanceof PyTargetExpression) {
+                result.add((PyTargetExpression)target);
+              }
+            }
+          }
+        });
+    }
+    return result;
   }
 
   @Override
@@ -1205,8 +1265,7 @@ public class PyClassImpl extends PyBaseElementImpl<PyClassStub> implements PyCla
   public boolean processClassLevelDeclarations(@NotNull PsiScopeProcessor processor) {
     final PyClassStub stub = getStub();
     if (stub != null) {
-      final List<StubElement> children = stub.getChildrenStubs();
-      for (StubElement child : children) {
+      for (StubElement<?> child : getVersionSpecificChildrenStubs(stub)) {
         if (!processor.execute(child.getPsi(), ResolveState.initial())) {
           return false;
         }
@@ -1216,6 +1275,10 @@ public class PyClassImpl extends PyBaseElementImpl<PyClassStub> implements PyCla
       PyResolveUtil.scopeCrawlUp(processor, this, null, this);
     }
     return true;
+  }
+
+  private @NotNull Iterable<@NotNull StubElement<?>> getVersionSpecificChildrenStubs(@NotNull PyClassStub stub) {
+    return PyVersionSpecificStubBaseKt.getChildrenStubs(stub, PythonLanguageLevelPusher.getLanguageLevelForFile(getContainingFile()));
   }
 
   @Override
@@ -1303,6 +1366,15 @@ public class PyClassImpl extends PyBaseElementImpl<PyClassStub> implements PyCla
       return stub.getDocString();
     }
     return PyClass.super.getDocStringValue();
+  }
+
+  @Override
+  public @Nullable String getDeprecationMessage() {
+    PyClassStub stub = getStub();
+    if (stub != null) {
+      return stub.getDeprecationMessage();
+    }
+    return extractDeprecationMessageFromDecorator(this);
   }
 
   @Nullable

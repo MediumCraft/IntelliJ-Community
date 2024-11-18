@@ -12,7 +12,6 @@ import org.gradle.tooling.model.build.BuildEnvironment
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.plugins.gradle.model.GradleLightBuild
 import org.jetbrains.plugins.gradle.util.GradleObjectTraverser
-import org.jetbrains.plugins.gradle.util.telemetry.GradleOpenTelemetryTraceService
 import java.io.File
 
 /**
@@ -20,7 +19,6 @@ import java.io.File
  */
 @ApiStatus.Internal
 class GradleIdeaModelHolder(
-  useCustomSerialization: Boolean = false,
   private val pathMapper: PathMapper? = null,
   private var buildEnvironment: BuildEnvironment? = null
 ) {
@@ -31,7 +29,7 @@ class GradleIdeaModelHolder(
   private val models: MutableMap<GradleModelId, Any> = LinkedHashMap()
   private val buildIdMapping: MutableMap<String, String> = LinkedHashMap()
 
-  private val serializer = if (useCustomSerialization) ToolingSerializer() else null
+  private val serializer = ToolingSerializer()
   private val modelPathConverter = GradleObjectTraverser(
     classesToSkip = setOf(String::class.java),
     classesToSkipChildren = setOf(Object::class.java, File::class.java)
@@ -108,7 +106,7 @@ class GradleIdeaModelHolder(
   }
 
   private fun <T : Any> deserializeModel(model: Any, modelId: GradleModelId, modelClass: Class<T>): T? {
-    if (serializer == null || model !is ByteArray) {
+    if (model !is ByteArray) {
       return null
     }
     val deserializedModel = try {
@@ -124,15 +122,6 @@ class GradleIdeaModelHolder(
     return deserializedModel
   }
 
-  fun <T : Any> addModel(modelClass: Class<T>, model: T) {
-    addBuildModel(getRootBuild(), modelClass, model)
-  }
-
-  private fun <T : Any> addBuildModel(build: BuildModel, modelClass: Class<T>, model: T) {
-    val modelId = getBuildModelId(build, modelClass)
-    models[modelId] = model
-  }
-
   fun <T : Any> addProjectModel(project: ProjectModel, modelClass: Class<T>, model: T) {
     val modelId = getProjectModelId(project, modelClass)
     models[modelId] = model
@@ -142,7 +131,6 @@ class GradleIdeaModelHolder(
     val rootBuild = state.rootBuild
     val nestedBuilds = state.nestedBuilds
     val buildEnvironment = state.buildEnvironment
-    val openTelemetryTraces = state.openTelemetryTraces
     val models = state.models
 
     if (rootBuild != null) {
@@ -158,8 +146,6 @@ class GradleIdeaModelHolder(
       this.buildEnvironment = buildEnvironment
     }
     this.models.putAll(models)
-
-    GradleOpenTelemetryTraceService.exportOpenTelemetryTraces(openTelemetryTraces)
   }
 
   private fun convertModelPathsInPlace(model: Any) {

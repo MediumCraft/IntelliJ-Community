@@ -1,4 +1,4 @@
-// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.folding.impl;
 
 import com.intellij.codeHighlighting.*;
@@ -10,12 +10,12 @@ import org.jetbrains.annotations.NotNull;
 final class InjectedCodeFoldingPassFactory implements TextEditorHighlightingPassFactory, TextEditorHighlightingPassFactoryRegistrar {
   @Override
   public void registerHighlightingPassFactory(@NotNull TextEditorHighlightingPassRegistrar registrar, @NotNull Project project) {
-    registrar.registerTextEditorHighlightingPass(this, new int[]{Pass.UPDATE_ALL}, null, false, -1);
+    // run injected folding pass after completion of InjectedGeneralHighlightingPass to take advantage of completed injections there
+    registrar.registerTextEditorHighlightingPass(this, new int[]{Pass.INJECTED_GENERAL}, null, false, -1);
   }
 
   @Override
-  @NotNull
-  public TextEditorHighlightingPass createHighlightingPass(@NotNull PsiFile file, @NotNull Editor editor) {
-    return new InjectedCodeFoldingPass(file.getProject(), editor, file);
+  public @NotNull TextEditorHighlightingPass createHighlightingPass(@NotNull PsiFile psiFile, @NotNull Editor editor) {
+    return new InjectedCodeFoldingPass(psiFile.getProject(), editor, psiFile);
   }
 }

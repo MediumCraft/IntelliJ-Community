@@ -19,6 +19,9 @@ import javax.swing.*;
 import java.util.Map;
 import java.util.Objects;
 
+import static com.intellij.concurrency.ThreadContext.currentThreadContext;
+import static com.intellij.openapi.application.CoroutinesKt.isBackgroundWriteAction;
+
 public final class TransactionGuardImpl extends TransactionGuard {
   private static final Logger LOG = Logger.getInstance(TransactionGuardImpl.class);
 
@@ -120,7 +123,11 @@ public final class TransactionGuardImpl extends TransactionGuard {
 
   @Override
   public boolean isWritingAllowed() {
-    ApplicationManager.getApplication().assertWriteIntentLockAcquired();
+    Application app = ApplicationManager.getApplication();
+    // Check to suppress LOG.error() about implicit lock
+    if (!app.isWriteIntentLockAcquired()) {
+      ApplicationManager.getApplication().assertWriteIntentLockAcquired();
+    }
     return myWritingAllowed;
   }
 
@@ -130,7 +137,11 @@ public final class TransactionGuardImpl extends TransactionGuard {
   }
 
   public void assertWriteActionAllowed() {
-    ApplicationManager.getApplication().assertWriteIntentLockAcquired();
+    Application app = ApplicationManager.getApplication();
+    if (isBackgroundWriteAction(currentThreadContext()) && app.isWriteAccessAllowed()) {
+      return;
+    }
+    app.assertWriteIntentLockAcquired();
     if (!myWritingAllowed && areAssertionsEnabled() && !myErrorReported) {
       // please assign exceptions here to Peter
       LOG.error(reportWriteUnsafeContext(ModalityState.current()));
@@ -188,6 +199,26 @@ public final class TransactionGuardImpl extends TransactionGuard {
       public void run() {
         if (isWriteSafeModality(modalityState)) {
           ApplicationManager.getApplication().assertWriteIntentLockAcquired();
+          runWithWritingAllowed(runnable);
+        }
+        else {
+          runnable.run();
+        }
+      }
+
+      @Override
+      public String toString() {
+        return runnable.toString();
+      }
+    };
+  }
+
+  @ApiStatus.Internal
+  public @NotNull Runnable wrapCoroutineInvocation(final @NotNull Runnable runnable, @NotNull ModalityState modalityState) {
+    return new Runnable() {
+      @Override
+      public void run() {
+        if (isWriteSafeModality(modalityState)) {
           runWithWritingAllowed(runnable);
         }
         else {

@@ -1,16 +1,17 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.kotlin.idea.k2.codeinsight.hints
 
+import com.intellij.codeInsight.hints.declarative.HintFormat
 import com.intellij.codeInsight.hints.declarative.InlayTreeSink
 import com.intellij.codeInsight.hints.declarative.InlineInlayPosition
 import com.intellij.psi.PsiElement
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
+import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.analyze
-import org.jetbrains.kotlin.analysis.api.calls.singleFunctionCallOrNull
-import org.jetbrains.kotlin.analysis.api.calls.symbol
 import org.jetbrains.kotlin.analysis.api.components.DefaultTypeClassIds
-import org.jetbrains.kotlin.analysis.api.symbols.KtCallableSymbol
-import org.jetbrains.kotlin.analysis.api.types.KtNonErrorClassType
+import org.jetbrains.kotlin.analysis.api.resolution.singleFunctionCallOrNull
+import org.jetbrains.kotlin.analysis.api.resolution.symbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaCallableSymbol
+import org.jetbrains.kotlin.analysis.api.types.KaClassType
 import org.jetbrains.kotlin.builtins.StandardNames
 import org.jetbrains.kotlin.idea.codeInsight.hints.getRangeLeftAndRightSigns
 import org.jetbrains.kotlin.idea.references.mainReference
@@ -38,19 +39,19 @@ class KtValuesHintsProvider : AbstractKtInlayHintsProvider() {
         }
         if (!applicable) return
 
-        sink.addPresentation(InlineInlayPosition(leftExp.endOffset, true), hasBackground = true) {
+        sink.addPresentation(InlineInlayPosition(leftExp.endOffset, true), hintFormat = HintFormat.default) {
             text(leftText)
         }
         rightText?.let {
-            sink.addPresentation(InlineInlayPosition(rightExp.startOffset, true), hasBackground = true) {
+            sink.addPresentation(InlineInlayPosition(rightExp.startOffset, true), hintFormat = HintFormat.default) {
                 text(it)
             }
         }
     }
 
-    context(KtAnalysisSession)
+    context(KaSession)
     private fun isApplicable(binaryExpression: KtBinaryExpression, leftExp: KtExpression, rightExp: KtExpression): Boolean {
-        val functionCallOrNull = binaryExpression.resolveCall()?.singleFunctionCallOrNull()
+        val functionCallOrNull = binaryExpression.resolveToCall()?.singleFunctionCallOrNull()
         functionCallOrNull?.symbol?.takeIf {
             val packageName = it.callableId?.packageName
             packageName == StandardNames.RANGES_PACKAGE_FQ_NAME || packageName == StandardNames.BUILT_INS_PACKAGE_FQ_NAME
@@ -59,18 +60,18 @@ class KtValuesHintsProvider : AbstractKtInlayHintsProvider() {
         return leftExp.isComparable() && rightExp.isComparable()
     }
 
-    context(KtAnalysisSession)
+    context(KaSession)
     private fun KtExpression.isComparable(): Boolean =
         when (this) {
             is KtConstantExpression -> true
             is KtBinaryExpression -> left?.isComparable() == true && right?.isComparable() == true
             else -> {
-                val type = resolveCall()?.singleFunctionCallOrNull()?.symbol?.returnType
-                    ?: ((this as? KtNameReferenceExpression)?.mainReference?.resolveToSymbol() as? KtCallableSymbol)?.returnType
-                (type is KtNonErrorClassType) && (
+                val type = resolveToCall()?.singleFunctionCallOrNull()?.symbol?.returnType
+                    ?: ((this as? KtNameReferenceExpression)?.mainReference?.resolveToSymbol() as? KaCallableSymbol)?.returnType
+                (type is KaClassType) && (
                         type.classId in DefaultTypeClassIds.PRIMITIVES ||
-                                type.getAllSuperTypes(true).any {
-                                    val classTypeWithClassId = it.isClassTypeWithClassId(StandardClassIds.Comparable)
+                                type.allSupertypes(true).any {
+                                    val classTypeWithClassId = it.isClassType(StandardClassIds.Comparable)
                                     classTypeWithClassId
                                 })
             }

@@ -1001,6 +1001,45 @@ public abstract class SharedK1IntentionTestGenerated extends AbstractSharedK1Int
     }
 
     @RunWith(JUnit3RunnerWithInners.class)
+    @TestMetadata("../testData/intentions/mergeElseIf")
+    public static class MergeElseIf extends AbstractSharedK1IntentionTest {
+        @java.lang.Override
+        @org.jetbrains.annotations.NotNull
+        public final KotlinPluginMode getPluginMode() {
+            return KotlinPluginMode.K1;
+        }
+
+        private void runTest(String testDataFilePath) throws Exception {
+            KotlinTestUtils.runTest(this::doTest, this, testDataFilePath);
+        }
+
+        @TestMetadata("comments.kt")
+        public void testComments() throws Exception {
+            runTest("../testData/intentions/mergeElseIf/comments.kt");
+        }
+
+        @TestMetadata("else.kt")
+        public void testElse() throws Exception {
+            runTest("../testData/intentions/mergeElseIf/else.kt");
+        }
+
+        @TestMetadata("expression.kt")
+        public void testExpression() throws Exception {
+            runTest("../testData/intentions/mergeElseIf/expression.kt");
+        }
+
+        @TestMetadata("ifNotSingle.kt")
+        public void testIfNotSingle() throws Exception {
+            runTest("../testData/intentions/mergeElseIf/ifNotSingle.kt");
+        }
+
+        @TestMetadata("simple.kt")
+        public void testSimple() throws Exception {
+            runTest("../testData/intentions/mergeElseIf/simple.kt");
+        }
+    }
+
+    @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("../testData/intentions/operatorToFunction")
     public static class OperatorToFunction extends AbstractSharedK1IntentionTest {
         @java.lang.Override
@@ -2118,6 +2157,150 @@ public abstract class SharedK1IntentionTestGenerated extends AbstractSharedK1Int
         @TestMetadata("startWithLowerCase.kt")
         public void testStartWithLowerCase() throws Exception {
             runTest("../testData/intentions/renameClassToContainingFileName/startWithLowerCase.kt");
+        }
+    }
+
+    @RunWith(JUnit3RunnerWithInners.class)
+    @TestMetadata("../testData/intentions/specifyAllRemainingArgumentsByName")
+    public static class SpecifyAllRemainingArgumentsByName extends AbstractSharedK1IntentionTest {
+        @java.lang.Override
+        @org.jetbrains.annotations.NotNull
+        public final KotlinPluginMode getPluginMode() {
+            return KotlinPluginMode.K1;
+        }
+
+        private void runTest(String testDataFilePath) throws Exception {
+            KotlinTestUtils.runTest(this::doTest, this, testDataFilePath);
+        }
+
+        @TestMetadata("class.kt")
+        public void testClass() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/class.kt");
+        }
+
+        @TestMetadata("conflictingSignatures.kt")
+        public void testConflictingSignatures() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/conflictingSignatures.kt");
+        }
+
+        @TestMetadata("existingNamedArguments.kt")
+        public void testExistingNamedArguments() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/existingNamedArguments.kt");
+        }
+
+        @TestMetadata("existingNamedArgumentsWithLambda.kt")
+        public void testExistingNamedArgumentsWithLambda() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/existingNamedArgumentsWithLambda.kt");
+        }
+
+        @TestMetadata("existingNewline.kt")
+        public void testExistingNewline() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/existingNewline.kt");
+        }
+
+        @TestMetadata("existingNewlineAndArgument.kt")
+        public void testExistingNewlineAndArgument() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/existingNewlineAndArgument.kt");
+        }
+
+        @TestMetadata("incorrectSignature.kt")
+        public void testIncorrectSignature() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/incorrectSignature.kt");
+        }
+
+        @TestMetadata("insideFunctionLambda.kt")
+        public void testInsideFunctionLambda() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/insideFunctionLambda.kt");
+        }
+
+        @TestMetadata("insideFunctionLastLambda.kt")
+        public void testInsideFunctionLastLambda() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/insideFunctionLastLambda.kt");
+        }
+
+        @TestMetadata("javaFunction.kt")
+        public void testJavaFunction() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/javaFunction.kt");
+        }
+
+        @TestMetadata("multipleArguments.kt")
+        public void testMultipleArguments() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/multipleArguments.kt");
+        }
+
+        @TestMetadata("multipleOverloads.kt")
+        public void testMultipleOverloads() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/multipleOverloads.kt");
+        }
+
+        @TestMetadata("nested.kt")
+        public void testNested() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/nested.kt");
+        }
+
+        @TestMetadata("nestedFullySpecified.kt")
+        public void testNestedFullySpecified() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/nestedFullySpecified.kt");
+        }
+
+        @TestMetadata("noArguments.kt")
+        public void testNoArguments() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/noArguments.kt");
+        }
+
+        @TestMetadata("noArgumentsWithReceiver.kt")
+        public void testNoArgumentsWithReceiver() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/noArgumentsWithReceiver.kt");
+        }
+
+        @TestMetadata("noNameProvided.kt")
+        public void testNoNameProvided() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/noNameProvided.kt");
+        }
+
+        @TestMetadata("onlyVararg.kt")
+        public void testOnlyVararg() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/onlyVararg.kt");
+        }
+
+        @TestMetadata("partiallySpecified.kt")
+        public void testPartiallySpecified() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/partiallySpecified.kt");
+        }
+
+        @TestMetadata("quotedName.kt")
+        public void testQuotedName() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/quotedName.kt");
+        }
+
+        @TestMetadata("receiverArgument.kt")
+        public void testReceiverArgument() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/receiverArgument.kt");
+        }
+
+        @TestMetadata("sameLineAsArgument.kt")
+        public void testSameLineAsArgument() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/sameLineAsArgument.kt");
+        }
+
+        @TestMetadata("simpleFunctionOverload.kt")
+        public void testSimpleFunctionOverload() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/simpleFunctionOverload.kt");
+        }
+
+        @TestMetadata("singleArgument.kt")
+        public void testSingleArgument() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/singleArgument.kt");
+        }
+
+        @TestMetadata("trailingComma.kt")
+        public void testTrailingComma() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/trailingComma.kt");
+        }
+
+        @TestMetadata("vararg.kt")
+        public void testVararg() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/vararg.kt");
         }
     }
 

@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.refactoring.move.moveClassesOrPackages;
 
 import com.intellij.CommonBundle;
@@ -155,7 +155,11 @@ public class JavaMoveClassesOrPackagesHandler extends MoveHandlerDelegate {
     if (targetContainer instanceof PsiDirectory) {
       if (CommonRefactoringUtil.checkReadOnlyStatusRecursively(project, Arrays.asList(adjustedElements), true)) {
         if (!packageHasMultipleDirectoriesInModule(project, (PsiDirectory)targetContainer)) {
-          createMoveClassesOrPackagesToNewDirectoryDialog((PsiDirectory)targetContainer, adjustedElements, callback).show();
+          var dialogue = createMoveClassesOrPackagesToNewDirectoryDialog((PsiDirectory)targetContainer, adjustedElements, callback);
+          if (Boolean.getBoolean("ide.performance.skip.refactoring.dialogs"))
+            dialogue.performOKAction();
+          else
+            dialogue.show();
           return;
         }
       }
@@ -215,8 +219,8 @@ public class JavaMoveClassesOrPackagesHandler extends MoveHandlerDelegate {
         new MoveClassesOrPackagesToNewDirectoryDialog(directories[0], directories, false, callback) {
           @Override
           protected BaseRefactoringProcessor createRefactoringProcessor(Project project,
-                                                                        final PsiDirectory targetDirectory,
-                                                                        PsiPackage aPackage,
+                                                                        @NotNull final PsiDirectory targetDirectory,
+                                                                        @NotNull PsiPackage aPackage,
                                                                         boolean searchInComments,
                                                                         boolean searchForTextOccurences) {
             final MoveDestination destination = createDestination(aPackage, targetDirectory);

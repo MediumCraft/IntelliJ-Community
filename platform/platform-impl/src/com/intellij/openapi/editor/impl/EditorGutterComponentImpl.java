@@ -8,7 +8,7 @@ import com.intellij.codeInsight.folding.impl.FoldingUtil;
 import com.intellij.codeInsight.hint.TooltipController;
 import com.intellij.codeInsight.hint.TooltipGroup;
 import com.intellij.codeInsight.hint.TooltipRenderer;
-import com.intellij.icons.ExpUiIcons;
+import com.intellij.icons.AllIcons;
 import com.intellij.ide.DataManager;
 import com.intellij.ide.IdeBundle;
 import com.intellij.ide.IdeEventQueue;
@@ -25,7 +25,8 @@ import com.intellij.internal.inspector.UiInspectorUtil;
 import com.intellij.internal.statistic.collectors.fus.PluginInfoValidationRule;
 import com.intellij.internal.statistic.eventLog.EventLogGroup;
 import com.intellij.internal.statistic.eventLog.events.EventFields;
-import com.intellij.internal.statistic.eventLog.events.EventId3;
+import com.intellij.internal.statistic.eventLog.events.StringEventField;
+import com.intellij.internal.statistic.eventLog.events.VarargEventId;
 import com.intellij.internal.statistic.service.fus.collectors.CounterUsagesCollector;
 import com.intellij.internal.statistic.service.fus.collectors.UIEventLogger;
 import com.intellij.internal.statistic.utils.PluginInfo;
@@ -34,7 +35,6 @@ import com.intellij.lang.Language;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.actionSystem.ex.ActionUtil;
-import com.intellij.openapi.actionSystem.remoting.ActionRemoteBehavior;
 import com.intellij.openapi.actionSystem.remoting.ActionRemoteBehaviorSpecification;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ReadAction;
@@ -87,16 +87,18 @@ import com.intellij.ui.scale.JBUIScale;
 import com.intellij.ui.scale.ScaleContext;
 import com.intellij.util.*;
 import com.intellij.util.animation.AlphaAnimationContext;
-import com.intellij.util.concurrency.EdtScheduledExecutorService;
+import com.intellij.util.concurrency.EdtScheduler;
 import com.intellij.util.concurrency.annotations.RequiresEdt;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.*;
 import com.intellij.util.ui.JBValue.JBValueGroup;
 import com.intellij.util.ui.accessibility.ScreenReader;
-import it.unimi.dsi.fastutil.ints.*;
+import it.unimi.dsi.fastutil.ints.Int2IntRBTreeMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectMaps;
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ObjectIterable;
 import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
-import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.VisibleForTesting;
@@ -116,7 +118,6 @@ import java.awt.geom.Rectangle2D;
 import java.util.List;
 import java.util.*;
 import java.util.concurrent.Callable;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 
@@ -153,8 +154,10 @@ import static com.intellij.openapi.ui.ex.lineNumber.LineNumberConvertersKt.getSt
  * </ul>
  */
 @DirtyUI
-final class EditorGutterComponentImpl extends EditorGutterComponentEx implements MouseListener, MouseMotionListener, DataProvider,
-                                                                                 Accessible, UiInspectorPreciseContextProvider {
+final class EditorGutterComponentImpl extends EditorGutterComponentEx
+  implements MouseListener, MouseMotionListener, UiCompatibleDataProvider,
+             Accessible, UiInspectorPreciseContextProvider {
+
   static final String DISTRACTION_FREE_MARGIN = "editor.distraction.free.margin";
   private static final Logger LOG = Logger.getInstance(EditorGutterComponentImpl.class);
 
@@ -248,8 +251,7 @@ final class EditorGutterComponentImpl extends EditorGutterComponentEx implements
     Disposer.register(editor.getDisposable(), myAlphaContext.getDisposable());
   }
 
-  @NotNull
-  EditorImpl getEditor() {
+  public @NotNull EditorImpl getEditor() {
     return myEditor;
   }
 
@@ -841,24 +843,13 @@ final class EditorGutterComponentImpl extends EditorGutterComponentEx implements
   }
 
   @Override
-  public @Nullable Object getData(@NotNull @NonNls String dataId) {
-    if (myEditor.isDisposed()) return null;
+  public void uiDataSnapshot(@NotNull DataSink sink) {
+    if (myEditor.isDisposed()) return;
 
-    if (EditorGutter.KEY.is(dataId)) {
-      return this;
-    }
-    if (CommonDataKeys.EDITOR.is(dataId)) {
-      return myEditor;
-    }
-    if (EditorGutterComponentEx.LOGICAL_LINE_AT_CURSOR.is(dataId)) {
-      if (myLastActionableClick == null) return null;
-      return myLastActionableClick.myLogicalLineAtCursor;
-    }
-    if (EditorGutterComponentEx.ICON_CENTER_POSITION.is(dataId)) {
-      if (myLastActionableClick == null) return null;
-      return myLastActionableClick.myIconCenterPosition;
-    }
-    return null;
+    sink.set(KEY, this);
+    sink.set(CommonDataKeys.EDITOR, myEditor);
+    sink.set(LOGICAL_LINE_AT_CURSOR, myLastActionableClick == null ? null : myLastActionableClick.myLogicalLineAtCursor);
+    sink.set(ICON_CENTER_POSITION, myLastActionableClick == null ? null : myLastActionableClick.myIconCenterPosition);
   }
 
   boolean isShowGapAfterAnnotations() {
@@ -1057,9 +1048,9 @@ final class EditorGutterComponentImpl extends EditorGutterComponentEx implements
     myLineToGutterRenderers = null;
   }
 
-  private void buildGutterRenderersCache() {
+  private Int2ObjectMap<List<GutterMark>> buildGutterRenderersCache() {
     myLineToGutterRenderersCacheForLogicalLines = logicalLinesMatchVisualOnes();
-    myLineToGutterRenderers = new Int2ObjectOpenHashMap<>();
+    Int2ObjectMap<List<GutterMark>> lineToGutterRenderers = new Int2ObjectOpenHashMap<>();
     processRangeHighlighters(0, myEditor.getDocument().getTextLength(), highlighter -> {
       GutterMark renderer = highlighter.getGutterIconRenderer();
       if (!shouldBeShown(renderer)) {
@@ -1069,10 +1060,10 @@ final class EditorGutterComponentImpl extends EditorGutterComponentEx implements
         return;
       }
       int line = myEditor.offsetToVisualLine(highlighter.getStartOffset());
-      List<GutterMark> renderers = myLineToGutterRenderers.get(line);
+      List<GutterMark> renderers = lineToGutterRenderers.get(line);
       if (renderers == null) {
         renderers = new SmartList<>();
-        myLineToGutterRenderers.put(line, renderers);
+        lineToGutterRenderers.put(line, renderers);
       }
 
       renderers.add(renderer);
@@ -1085,17 +1076,17 @@ final class EditorGutterComponentImpl extends EditorGutterComponentEx implements
           GutterIconRenderer renderer = ((CustomFoldRegion)region).getGutterIconRenderer();
           int line = myEditor.offsetToVisualLine(region.getStartOffset());
           if (shouldBeShown(renderer)) {
-            myLineToGutterRenderers.put(line, List.of(renderer));
+            lineToGutterRenderers.put(line, List.of(renderer));
           }
           else {
-            myLineToGutterRenderers.remove(line);
+            lineToGutterRenderers.remove(line);
           }
         }
       }
     }
 
     List<GutterMarkPreprocessor> gutterMarkPreprocessors = GutterMarkPreprocessor.EP_NAME.getExtensionList();
-    for (Int2ObjectMap.Entry<List<GutterMark>> entry : Int2ObjectMaps.fastIterable(myLineToGutterRenderers)) {
+    for (Int2ObjectMap.Entry<List<GutterMark>> entry : Int2ObjectMaps.fastIterable(lineToGutterRenderers)) {
       List<GutterMark> newValue = entry.getValue();
       for (GutterMarkPreprocessor preprocessor : gutterMarkPreprocessors) {
         newValue = preprocessor.processMarkers(newValue);
@@ -1103,6 +1094,7 @@ final class EditorGutterComponentImpl extends EditorGutterComponentEx implements
       // don't allow more than 4 icons per line
       entry.setValue(ContainerUtil.getFirstItems(newValue, 4));
     }
+    return lineToGutterRenderers;
   }
 
   private boolean shouldBeShown(@Nullable GutterMark gutterIconRenderer) {
@@ -1178,7 +1170,7 @@ final class EditorGutterComponentImpl extends EditorGutterComponentEx implements
   @Override
   public @NotNull List<GutterMark> getGutterRenderers(int line) {
     if (myLineToGutterRenderers == null || myLineToGutterRenderersCacheForLogicalLines != logicalLinesMatchVisualOnes()) {
-      buildGutterRenderersCache();
+      myLineToGutterRenderers = buildGutterRenderersCache();
     }
 
     Segment focusModeRange = myEditor.getFocusModeRange();
@@ -1204,7 +1196,7 @@ final class EditorGutterComponentImpl extends EditorGutterComponentEx implements
 
   private @NotNull ObjectIterable<Int2ObjectMap.Entry<List<GutterMark>>> processGutterRenderers() {
     if (myLineToGutterRenderers == null || myLineToGutterRenderersCacheForLogicalLines != logicalLinesMatchVisualOnes()) {
-      buildGutterRenderersCache();
+      myLineToGutterRenderers = buildGutterRenderersCache();
     }
     return Int2ObjectMaps.fastIterable(myLineToGutterRenderers);
   }
@@ -1671,7 +1663,7 @@ final class EditorGutterComponentImpl extends EditorGutterComponentEx implements
         return;
       }
       myAlphaContext.paintWithComposite(g, () -> {
-        Icon icon = scaleIcon(height > 0 ? ExpUiIcons.Gutter.Fold : ExpUiIcons.Gutter.FoldBottom);
+        Icon icon = scaleIcon(height > 0 ? AllIcons.Gutter.Fold : AllIcons.Gutter.FoldBottom);
         icon.paintIcon(this, g, getFoldingAreaOffset(), getFoldingIconY(visualLine, icon));
       });
       return;
@@ -1707,7 +1699,7 @@ final class EditorGutterComponentImpl extends EditorGutterComponentEx implements
                                                 EnumSet.of(LinePainter2D.Align.CENTER_X, LinePainter2D.Align.CENTER_Y),
                                                 centerX, centerY, width, width, StrokeType.CENTERED, sw);
     if (ExperimentalUI.isNewUI()) {
-      Icon icon = scaleIcon(ExpUiIcons.Gutter.Unfold);
+      Icon icon = scaleIcon(AllIcons.Gutter.Unfold);
       icon.paintIcon(this, g, getFoldingAreaOffset(), getFoldingIconY(visualLine, icon));
       return;
     }
@@ -1762,7 +1754,7 @@ final class EditorGutterComponentImpl extends EditorGutterComponentEx implements
 
   private double getFoldingAnchorWidth2D() {
     if (ExperimentalUI.isNewUI()) {
-      return scale(ExpUiIcons.Gutter.Fold.getIconWidth());
+      return scale(AllIcons.Gutter.Fold.getIconWidth());
     }
     return Math.min(scale(4f), myEditor.getLineHeight() / 2f - JBUIScale.scale(2f)) * 2;
   }
@@ -2084,18 +2076,19 @@ final class EditorGutterComponentImpl extends EditorGutterComponentEx implements
   }
 
   private GutterIconRenderer myCalculatingInBackground;
-  private ProgressIndicator myBackgroundIndicator = new EmptyProgressIndicator();
+  private volatile ProgressIndicator myBackgroundIndicator = new EmptyProgressIndicator();
 
   private void computeTooltipInBackground(@NotNull PointInfo pointInfo) {
+    ApplicationManager.getApplication().assertIsDispatchThread();
     GutterIconRenderer renderer = pointInfo.renderer;
     if (myCalculatingInBackground == renderer && !myBackgroundIndicator.isCanceled()) return; // not yet calculated
     myCalculatingInBackground = renderer;
     myBackgroundIndicator.cancel();
-    myBackgroundIndicator = new ProgressIndicatorBase();
+    ProgressIndicatorBase newIndicator = new ProgressIndicatorBase();
+    myBackgroundIndicator = newIndicator;
     myBackgroundIndicator.setModalityProgress(null);
     Point point = pointInfo.iconCenterPosition;
-    Balloon.Position relativePosition = pointInfo.renderersInLine > 1 && pointInfo.rendererPosition == 0 ? Balloon.Position.below
-                                                                                                         : Balloon.Position.atRight;
+    Balloon.Position relativePosition = pointInfo.renderersInLine > 1 && pointInfo.rendererPosition == 0 ? Balloon.Position.below : Balloon.Position.atRight;
     AtomicReference<@NlsContexts.Tooltip String> tooltip = new AtomicReference<>();
     ProgressManager.getInstance().runProcessWithProgressAsynchronously(
       new Task.Backgroundable(myEditor.getProject(), IdeBundle.message("progress.title.constructing.tooltip")) {
@@ -2109,7 +2102,7 @@ final class EditorGutterComponentImpl extends EditorGutterComponentEx implements
         public void onSuccess() {
           showToolTip(tooltip.get(), point, relativePosition);
         }
-      }, myBackgroundIndicator);
+      }, newIndicator);
   }
 
   void showToolTip(@Nullable @NlsContexts.Tooltip String toolTip, @NotNull Point location, @NotNull Balloon.Position relativePosition) {
@@ -2350,7 +2343,7 @@ final class EditorGutterComponentImpl extends EditorGutterComponentEx implements
       }
     }
 
-    GutterIconClickCollectors.CLICKED.log(project, language, renderer.getFeatureId(), pluginInfo);
+    GutterIconClickCollectors.logClick(project, language, renderer.getFeatureId(), isDumbMode(), pluginInfo);
   }
 
   private boolean isDumbMode() {
@@ -2463,16 +2456,9 @@ final class EditorGutterComponentImpl extends EditorGutterComponentEx implements
     updateSize();
   }
 
-  private final class CloseAnnotationsAction extends DumbAwareAction implements ActionRemoteBehaviorSpecification {
+  private final class CloseAnnotationsAction extends DumbAwareAction implements ActionRemoteBehaviorSpecification.BackendOnly {
     CloseAnnotationsAction() {
       super(EditorBundle.messagePointer("close.editor.annotations.action.name"));
-    }
-
-    @NotNull
-    @Override
-    public ActionRemoteBehavior getBehavior() {
-      if (PlatformUtils.isRider()) return ActionRemoteBehavior.FrontendThenBackend;
-      else return ActionRemoteBehavior.BackendOnly;
     }
 
     @Override
@@ -2692,12 +2678,12 @@ final class EditorGutterComponentImpl extends EditorGutterComponentEx implements
     ClickInfo clickInfo = myLastActionableClick;
     if (clickInfo == null) return;
     boolean[] removed = {false};
-    EdtScheduledExecutorService.getInstance().schedule(() -> {
+    EdtScheduler.getInstance().schedule(Registry.intValue("actionSystem.popup.progress.icon.delay", 500), () -> {
       if (myLastActionableClick != clickInfo || removed[0]) return;
       clickInfo.myProgressVisualLine = info.visualLine;
       clickInfo.myProgressGutterMark = info.renderer;
       repaint();
-    }, Registry.intValue("actionSystem.popup.progress.icon.delay", 500), TimeUnit.MILLISECONDS);
+    });
     myLastActionableClick.myProgressRemover = () -> {
       EDT.assertIsEdt();
       removed[0] = true;
@@ -2917,16 +2903,35 @@ final class EditorGutterComponentImpl extends EditorGutterComponentEx implements
   };
 
   private static final class GutterIconClickCollectors extends CounterUsagesCollector {
-    private static final EventLogGroup GROUP = new EventLogGroup("gutter.icon.click", 4);
-    private static final EventId3<Language, String, PluginInfo> CLICKED =
-      GROUP.registerEvent("clicked",
-                          EventFields.Language,
-                          EventFields.StringValidatedByCustomRule("icon_id", PluginInfoValidationRule.class),
-                          EventFields.PluginInfo);
+    private static final EventLogGroup GROUP = new EventLogGroup("gutter.icon.click", 5);
+
+    private static final StringEventField ICON = EventFields.StringValidatedByCustomRule("icon_id", PluginInfoValidationRule.class);
+
+    private static final VarargEventId CLICKED = GROUP.registerVarargEvent(
+      "clicked",
+      EventFields.Language,
+      ICON,
+      EventFields.Dumb,
+      EventFields.PluginInfo
+    );
 
     @Override
     public EventLogGroup getGroup() {
       return GROUP;
+    }
+
+    public static void logClick(@Nullable Project project,
+                                @Nullable Language language,
+                                @NotNull String icon,
+                                boolean isDumb,
+                                @Nullable PluginInfo pluginInfo) {
+      CLICKED.log(
+        project,
+        EventFields.Language.with(language),
+        ICON.with(icon),
+        EventFields.Dumb.with(isDumb),
+        EventFields.PluginInfo.with(pluginInfo)
+      );
     }
   }
 

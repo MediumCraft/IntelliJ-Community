@@ -2,6 +2,7 @@
 
 package org.jetbrains.kotlin.nj2k.printing
 
+import com.intellij.psi.PsiReferenceExpression
 import org.jetbrains.kotlin.builtins.StandardNames
 import org.jetbrains.kotlin.idea.base.plugin.KotlinPluginModeProvider
 import org.jetbrains.kotlin.idea.base.plugin.KotlinPluginModeProvider.Companion.isK1Mode
@@ -112,7 +113,7 @@ class JKCodeBuilder(private val context: NewJ2kConverterContext) {
 
         override fun visitForInStatementRaw(forInStatement: JKForInStatement) {
             printer.print("for (")
-            forInStatement.variable.accept(this)
+            forInStatement.parameter.accept(this)
             printer.printWithSurroundingSpaces("in")
             forInStatement.iterationExpression.accept(this)
             printer.print(") ")
@@ -325,18 +326,18 @@ class JKCodeBuilder(private val context: NewJ2kConverterContext) {
             printer.print("]")
         }
 
-        override fun visitForLoopVariableRaw(forLoopVariable: JKForLoopVariable) {
-            forLoopVariable.annotationList.accept(this)
-            forLoopVariable.name.accept(this)
-            if (!forLoopVariable.type.isPresent() || forLoopVariable.type.type is JKContextType) return
+        override fun visitForLoopParameterRaw(forLoopParameter: JKForLoopParameter) {
+            forLoopParameter.annotationList.accept(this)
+            forLoopParameter.name.accept(this)
+            if (!forLoopParameter.type.isPresent() || forLoopParameter.type.type is JKContextType) return
 
             val needExplicitType = isK1Mode() || // for K1 nullability inference
                     settings.specifyLocalVariableTypeByDefault ||
-                    forLoopVariable.type.annotationList.annotations.isNotEmpty()
+                    forLoopParameter.type.annotationList.annotations.isNotEmpty()
 
             if (needExplicitType) {
                 printer.print(": ")
-                forLoopVariable.type.accept(this)
+                forLoopParameter.type.accept(this)
             }
         }
 
@@ -540,7 +541,15 @@ class JKCodeBuilder(private val context: NewJ2kConverterContext) {
         override fun visitCallExpressionRaw(callExpression: JKCallExpression) {
             printer.renderSymbol(callExpression.identifier, callExpression)
             if (callExpression.identifier.isAnnotationMethod()) return
-            callExpression.typeArgumentList.accept(this)
+
+            val methodName = callExpression.identifier.fqName
+            if (isK1Mode() ||
+                (methodName != "java.util.stream.Stream.collect" && !methodName.startsWith("java.util.stream.Collectors"))) {
+                // Type arguments for Stream.collect calls cannot be explicitly specified in Kotlin.
+                // This is a K2 counterpart to the K1 `RemoveJavaStreamsCollectCallTypeArgumentsProcessing`.
+                callExpression.typeArgumentList.accept(this)
+            }
+
             callExpression.arguments.accept(this)
         }
 
@@ -733,7 +742,13 @@ class JKCodeBuilder(private val context: NewJ2kConverterContext) {
         }
 
         override fun visitFieldAccessExpressionRaw(fieldAccessExpression: JKFieldAccessExpression) {
-            printer.renderSymbol(fieldAccessExpression.identifier, fieldAccessExpression)
+            try {
+                printer.renderSymbol(fieldAccessExpression.identifier, fieldAccessExpression)
+            } catch (ignored: UninitializedPropertyAccessException) {
+                // This should only happen on copy-pasting broken (incomplete) code
+                val psi = fieldAccessExpression.psi as? PsiReferenceExpression ?: return
+                printer.print(psi.text)
+            }
         }
 
         override fun visitPackageAccessExpressionRaw(packageAccessExpression: JKPackageAccessExpression) {
@@ -807,7 +822,8 @@ class JKCodeBuilder(private val context: NewJ2kConverterContext) {
         override fun visitLambdaExpressionRaw(lambdaExpression: JKLambdaExpression) {
             if (lambdaExpression.functionalType.isPresent()) {
                 // print SAM constructor
-                printer.renderType(lambdaExpression.functionalType.type, lambdaExpression)
+                val renderTypeParameters = isK1Mode()
+                printer.renderType(lambdaExpression.functionalType.type, lambdaExpression, renderTypeParameters)
                 printer.print(" ")
             }
 

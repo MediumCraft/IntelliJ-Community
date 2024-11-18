@@ -89,8 +89,8 @@ public final class CollectionBreakpointUtils {
       public void processClassPrepare(DebugProcess debuggerProcess, ReferenceType referenceType) {
         try {
           requestsManager.deleteRequest(this);
-          Field field = referenceType.fieldByName(fieldName);
-          Value trueValue = debugProcess.getVirtualMachineProxy().mirrorOf(value);
+          Field field = DebuggerUtils.findField(referenceType, fieldName);
+          Value trueValue = referenceType.virtualMachine().mirrorOf(value);
           ((ClassType)referenceType).setValue(field, trueValue);
         }
         catch (Exception e) {
@@ -167,13 +167,13 @@ public final class CollectionBreakpointUtils {
                                                      String message,
                                                      VirtualMachineProxyImpl virtualMachineProxy) {
     List<StackFrameItem> items = new ArrayList<>();
-    ClassesByNameProvider classesByName = ClassesByNameProvider.createCache(virtualMachineProxy.allClasses());
     try (DataInputStream dis = new DataInputStream(new ByteArrayInputStream(message.getBytes(StandardCharsets.ISO_8859_1)))) {
       while (dis.available() > 0) {
         String className = dis.readUTF();
         String methodName = dis.readUTF();
         int line = dis.readInt();
-        Location location = DebuggerUtilsEx.findOrCreateLocation(debugProcess, classesByName, className, methodName, line);
+        Location location =
+          DebuggerUtilsEx.findOrCreateLocation(virtualMachineProxy.getVirtualMachine(), className, methodName, line);
         StackFrameItem item = new StackFrameItem(location, null);
         items.add(item);
       }

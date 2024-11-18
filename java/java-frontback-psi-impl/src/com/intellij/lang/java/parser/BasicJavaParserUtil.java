@@ -74,7 +74,7 @@ public final class BasicJavaParserUtil {
 
   @Nullable
   public static IElementType exprType(@Nullable final PsiBuilder.Marker marker) {
-    return marker != null ? ((LighterASTNode)marker).getTokenType() : null;
+    return marker != null ? marker.getTokenType() : null;
   }
 
   // used instead of PsiBuilder.error() as it keeps all subsequent error messages
@@ -193,7 +193,7 @@ public final class BasicJavaParserUtil {
                                       final boolean eatAll,
                                       final LanguageLevel level,
                                       Function<LanguageLevel, JavaDocLexer> javaDocLexer,
-                                      Function<LanguageLevel, BasicJavaLexer> javaLexer) {
+                                      Function<LanguageLevel, ? extends Lexer> javaLexer) {
     final PsiElement psi = chameleon.getTreeParent() != null ? chameleon.getTreeParent().getPsi() : chameleon.getPsi();
     assert psi != null : chameleon;
     final Project project = psi.getProject();

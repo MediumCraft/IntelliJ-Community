@@ -1,6 +1,7 @@
 // Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInspection.reflectiveAccess;
 
+import com.intellij.codeInsight.AnnotationUtil;
 import com.intellij.codeInsight.daemon.JavaErrorBundle;
 import com.intellij.codeInsight.intention.preview.IntentionPreviewInfo;
 import com.intellij.codeInsight.lookup.*;
@@ -24,6 +25,7 @@ import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -37,6 +39,7 @@ public final class JavaLangInvokeHandleSignatureInspection extends AbstractBaseJ
   public static final Key<ReflectiveSignature> DEFAULT_SIGNATURE = Key.create("DEFAULT_SIGNATURE");
   public static final Key<List<LookupElement>> POSSIBLE_SIGNATURES = Key.create("POSSIBLE_SIGNATURES");
 
+  @Unmodifiable
   static final Set<String> KNOWN_METHOD_NAMES =
     ContainerUtil.union(Arrays.asList(HANDLE_FACTORY_METHOD_NAMES), Collections.singletonList(FIND_CONSTRUCTOR));
 
@@ -225,6 +228,10 @@ public final class JavaLangInvokeHandleSignatureInspection extends AbstractBaseJ
         return;
       }
     }
+    PsiMethod onlyMethod = ContainerUtil.getOnlyItem(filteredMethods);
+    if (onlyMethod != null && AnnotationUtil.isAnnotated(onlyMethod, CommonClassNames.JAVA_LANG_INVOKE_MH_POLYMORPHIC, 0)) {
+      return;
+    }
 
     final ReflectiveSignature methodSignature = composeMethodSignature(methodTypeExpression);
     if (methodSignature == null) return;
@@ -253,7 +260,6 @@ public final class JavaLangInvokeHandleSignatureInspection extends AbstractBaseJ
       }
     }
   }
-
 
   private static void checkSpecial(@NotNull ReflectiveClass ownerClass,
                                    @NotNull PsiExpression callerClassExpression,

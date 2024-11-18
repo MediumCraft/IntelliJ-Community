@@ -1,6 +1,8 @@
 package com.intellij.tools.launch.ide
 
 import com.intellij.openapi.util.SystemInfo
+import com.intellij.platform.ijent.community.buildConstants.MULTI_ROUTING_FILE_SYSTEM_VMOPTIONS
+import com.intellij.platform.ijent.community.buildConstants.isIjentWslFsEnabledByDefaultForProduct
 import com.intellij.platform.runtime.product.ProductMode
 import com.intellij.tools.launch.PathsProvider
 import com.intellij.tools.launch.environments.LaunchCommand
@@ -57,7 +59,6 @@ object IdeLauncher {
         add("-Drsch.send.usage.stat=false")
         add("-Duse.linux.keychain=false")
         add("-Didea.initially.ask.config=never")
-        add("-Dide.show.tips.on.startup.default.value=false")
         add("-Didea.home.path=${environmentPaths.sourcesRootFolder}")
         add("-Didea.config.path=${environmentPaths.configFolder}")
         add("-Didea.system.path=${environmentPaths.systemFolder}")
@@ -68,7 +69,7 @@ object IdeLauncher {
         add("-Djdk.attach.allowAttachSelf")
         add("-Djdk.module.illegalAccess.silent=true")
         add("-Djava.system.class.loader=com.intellij.util.lang.PathClassLoader")
-        add("-Dkotlinx.coroutines.debug=off")
+        add("-Dkotlinx.coroutines.debug=on")
         add("-Dsun.awt.disablegrab=true")
         add("-Dsun.io.useCanonCaches=false")
         add("-Dteamcity.build.tempDir=${environmentPaths.tempFolder}")
@@ -84,6 +85,10 @@ object IdeLauncher {
         add("-XX:+UnlockDiagnosticVMOptions")
         add("-XX:+BytecodeVerificationLocal")
         add("-Dshared.indexes.download.auto.consent=true")
+
+        if (isIjentWslFsEnabledByDefaultForProduct(context.platformPrefix)) {
+          addAll(MULTI_ROUTING_FILE_SYSTEM_VMOPTIONS)
+        }
 
         if (context.specifyUserHomeExplicitly) {
           /* the module-based loader adds JARs from Maven repository (${user.home}/.m2/repository) to the classpath, so we need to ensure that

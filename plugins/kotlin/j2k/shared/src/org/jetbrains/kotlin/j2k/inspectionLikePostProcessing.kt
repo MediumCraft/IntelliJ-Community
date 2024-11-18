@@ -4,12 +4,13 @@ package org.jetbrains.kotlin.j2k
 
 import com.intellij.openapi.application.runReadAction
 import com.intellij.openapi.editor.RangeMarker
+import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.TextRange
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiRecursiveElementVisitor
 import com.intellij.psi.SmartPsiElementPointer
+import com.intellij.psi.codeStyle.CodeStyleManager
 import com.intellij.psi.createSmartPointer
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
 import org.jetbrains.kotlin.j2k.InspectionLikeProcessingGroup.RangeFilterResult.*
 import org.jetbrains.kotlin.nj2k.NewJ2kConverterContext
 import org.jetbrains.kotlin.nj2k.runUndoTransparentActionInEdt
@@ -58,7 +59,6 @@ class InspectionLikeProcessingGroup(
         } while (modificationStamp != runReadAction { file.modificationStamp } && elementToActions.isNotEmpty())
     }
 
-    context(KtAnalysisSession)
     override fun computeApplier(
         file: KtFile,
         allFiles: List<KtFile>,
@@ -66,14 +66,16 @@ class InspectionLikeProcessingGroup(
         converterContext: NewJ2kConverterContext
     ): PostProcessingApplier {
         val processingDataList = collectAvailableActions(file, converterContext, rangeMarker)
-        return Applier(processingDataList)
+        return Applier(processingDataList, file.project)
     }
 
-    private class Applier(private val processingDataList: List<ProcessingData>) : PostProcessingApplier {
+    private class Applier(private val processingDataList: List<ProcessingData>, private val project: Project) : PostProcessingApplier {
         override fun apply() {
-            for ((processing, pointer, _) in processingDataList) {
-                val element = pointer.element ?: continue
-                processing.applyToElement(element)
+            CodeStyleManager.getInstance(project).performActionWithFormatterDisabled {
+                for ((processing, pointer, _) in processingDataList) {
+                    val element = pointer.element ?: continue
+                    processing.applyToElement(element)
+                }
             }
         }
     }

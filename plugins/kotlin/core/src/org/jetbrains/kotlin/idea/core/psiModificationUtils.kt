@@ -229,6 +229,7 @@ private fun deleteElementWithDelimiters(element: PsiElement) {
     parent.deleteChildRange(from, to)
 }
 
+@ApiStatus.ScheduledForRemoval
 @Deprecated(
     "Use 'org.jetbrains.kotlin.idea.base.psi.KotlinPsiModificationUtils' instead",
     ReplaceWith("this.getOrCreateCompanionObject()", "org.jetbrains.kotlin.idea.base.psi.getOrCreateCompanionObject")
@@ -465,15 +466,6 @@ private fun KtDeclaration.predictImplicitModality(): KtModifierKeywordToken {
         return if (hasBody()) KtTokens.OPEN_KEYWORD else KtTokens.ABSTRACT_KEYWORD
     }
     return KtTokens.FINAL_KEYWORD
-}
-
-fun KtSecondaryConstructor.getOrCreateBody(): KtBlockExpression {
-    bodyExpression?.let { return it }
-
-    val delegationCall = getDelegationCall()
-    val anchor = if (delegationCall.isImplicit) valueParameterList else delegationCall
-    val newBody = KtPsiFactory(project).createEmptyBody()
-    return addAfter(newBody, anchor) as KtBlockExpression
 }
 
 fun KtParameter.dropDefaultValue() {

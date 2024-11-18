@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.kotlin.jpsGraph.test;
 
 
@@ -11,9 +11,9 @@ import org.jetbrains.kotlin.idea.compiler.configuration.KotlinPluginLayout;
 import org.jetbrains.kotlin.jps.build.AbstractIncrementalK2JvmJpsTest;
 import org.jetbrains.kotlin.test.JUnit3RunnerWithInners;
 import org.jetbrains.kotlin.test.KotlinTestUtils;
-import org.jetbrains.kotlin.test.util.KtTestUtil;
 import org.jetbrains.kotlin.test.TargetBackend;
 import org.jetbrains.kotlin.test.TestMetadata;
+import org.jetbrains.kotlin.test.util.KtTestUtil;
 import org.junit.runner.RunWith;
 
 import java.io.File;
@@ -110,22 +110,20 @@ public class IncrementalK2JvmJpsTestGenerated extends AbstractIncrementalK2JvmJp
             runTest("pureKotlin/anonymousObjectChanged/");
         }
 
-        // TODO: Unmute to reproduce KT-28233 (1/2)
-        //@TestMetadata("changeTypealiasTypeWithHierarhy")
-        //public void testChangeTypealiasTypeWithHierarhy() throws Exception {
-        //    runTest("pureKotlin/changeTypealiasTypeWithHierarhy/");
-        //}
+        @TestMetadata("changeTypealiasTypeWithHierarhy")
+        public void testChangeTypealiasTypeWithHierarhy() throws Exception {
+            runTest("pureKotlin/changeTypealiasTypeWithHierarhy/");
+        }
 
         @TestMetadata("changeTypeImplicitlyWithCircularDependency")
         public void testChangeTypeImplicitlyWithCircularDependency() throws Exception {
             runTest("pureKotlin/changeTypeImplicitlyWithCircularDependency/");
         }
 
-        // TODO: Unmute to reproduce KT-28233 (2/2)
-        //@TestMetadata("changeTypeWithHierarhyDependency")
-        //public void testChangeTypeWithHierarhyDependency() throws Exception {
-        //    //runTest("pureKotlin/changeTypeWithHierarhyDependency/");
-        //}
+        @TestMetadata("changeTypeWithHierarhyDependency")
+        public void testChangeTypeWithHierarhyDependency() throws Exception {
+            runTest("pureKotlin/changeTypeWithHierarhyDependency/");
+        }
 
         @TestMetadata("changeWithRemovingUsage")
         public void testChangeWithRemovingUsage() throws Exception {
@@ -904,6 +902,11 @@ public class IncrementalK2JvmJpsTestGenerated extends AbstractIncrementalK2JvmJp
         @TestMetadata("methodRemoved")
         public void testMethodRemoved() throws Exception {
             runTest("classHierarchyAffected/methodRemoved/");
+        }
+
+        @TestMetadata("syntheticMethodRemoved")
+        public void testSyntheticMethodRemoved() throws Exception {
+            runTest("classHierarchyAffected/syntheticMethodRemoved/");
         }
 
         @TestMetadata("overrideExplicit")

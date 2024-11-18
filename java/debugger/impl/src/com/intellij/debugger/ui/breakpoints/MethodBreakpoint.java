@@ -179,7 +179,7 @@ public class MethodBreakpoint extends BreakpointWithHighlighter<JavaMethodBreakp
                                                     @NotNull DebugProcessImpl debugProcess,
                                                     @NotNull ReferenceType classType,
                                                     boolean base) {
-    createRequestForPreparedClassEmulated(breakpoint, debugProcess, classType, debugProcess.getVirtualMachineProxy().getClassesByNameProvider(), base);
+    createRequestForPreparedClassEmulated(breakpoint, debugProcess, classType, classType.virtualMachine()::classesByName, base);
   }
 
   static void createRequestForPreparedClassEmulated(@NotNull MethodBreakpointBase breakpoint,
@@ -187,7 +187,7 @@ public class MethodBreakpoint extends BreakpointWithHighlighter<JavaMethodBreakp
                                                     @NotNull ReferenceType classType,
                                                     @NotNull ClassesByNameProvider classesByName,
                                                     boolean base) {
-    if (breakpoint.isWatchExit() && !MethodBreakpointBase.canBeWatchExitEmulated(debugProcess)) {
+    if (breakpoint.isWatchExit() && !MethodBreakpointBase.canBeWatchExitEmulated(classType.virtualMachine())) {
       breakpoint.disableEmulation();
       return;
     }
@@ -705,6 +705,14 @@ public class MethodBreakpoint extends BreakpointWithHighlighter<JavaMethodBreakp
     @Override
     public String sourcePath(String stratum) throws AbsentInformationException {
       throw new AbsentInformationException();
+    }
+
+    @Override
+    public String toString() {
+      return "LocationCodeIndexOnly{" +
+             "method=" + method +
+             ", codeIndex=" + codeIndex +
+             '}';
     }
     // endregion
   }

@@ -14,10 +14,10 @@ import com.intellij.openapi.fileEditor.impl.LoadTextUtil
 import com.intellij.openapi.util.buildNsUnawareJdom
 import com.intellij.openapi.util.io.BufferExposingByteArrayOutputStream
 import com.intellij.openapi.util.io.FileAttributes
-import com.intellij.openapi.util.io.FileUtilRt
 import com.intellij.openapi.util.io.NioFiles
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.openapi.vfs.isTooLarge
 import com.intellij.openapi.vfs.newvfs.events.VFileContentChangeEvent
 import com.intellij.openapi.vfs.newvfs.events.VFileCreateEvent
 import com.intellij.openapi.vfs.newvfs.events.VFileDeleteEvent
@@ -26,6 +26,7 @@ import com.intellij.util.ArrayUtil
 import com.intellij.util.LineSeparator
 import org.jdom.Element
 import org.jdom.JDOMException
+import org.jetbrains.annotations.ApiStatus
 import java.io.IOException
 import java.io.StringReader
 import java.nio.file.Files
@@ -37,6 +38,7 @@ import javax.xml.stream.XMLStreamException
 @JvmField
 internal val XML_PROLOG: ByteArray = """<?xml version="1.0" encoding="UTF-8"?>""".toByteArray()
 
+@ApiStatus.Internal
 abstract class FileBasedStorage(
   file: Path,
   fileSpec: String,
@@ -76,6 +78,7 @@ abstract class FileBasedStorage(
 
   override fun createSaveSession(states: StateMap) = FileSaveSessionProducer(storageData = states, storage = this)
 
+  @ApiStatus.Internal
   protected open class FileSaveSessionProducer(storageData: StateMap, storage: FileBasedStorage) :
     XmlElementStorageSaveSessionProducer<FileBasedStorage>(originalStates = storageData, storage = storage) {
 
@@ -250,7 +253,7 @@ internal fun writeFile(
 ): VirtualFile {
   val file = if (cachedFile == null || virtualFile?.isValid == true) virtualFile!! else getOrCreateVirtualFile(cachedFile, requestor)
 
-  if ((LOG.isDebugEnabled || ApplicationManager.getApplication().isUnitTestMode) && !FileUtilRt.isTooLarge(file.length)) {
+  if ((LOG.isDebugEnabled || ApplicationManager.getApplication().isUnitTestMode) && !file.isTooLarge()) {
     fun isEqualContent(file: VirtualFile,
                        lineSeparator: LineSeparator,
                        content: BufferExposingByteArrayOutputStream,

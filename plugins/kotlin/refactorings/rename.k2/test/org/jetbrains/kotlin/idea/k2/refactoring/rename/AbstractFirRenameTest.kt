@@ -5,9 +5,9 @@ import com.intellij.psi.PsiElement
 import org.jetbrains.kotlin.analysis.api.analyze
 import org.jetbrains.kotlin.analysis.api.permissions.KaAllowAnalysisOnEdt
 import org.jetbrains.kotlin.analysis.api.permissions.allowAnalysisOnEdt
-import org.jetbrains.kotlin.analysis.api.symbols.KtFunctionSymbol
-import org.jetbrains.kotlin.analysis.api.symbols.KtPropertySymbol
-import org.jetbrains.kotlin.analysis.api.symbols.markers.KtSymbolWithMembers
+import org.jetbrains.kotlin.analysis.api.symbols.KaNamedFunctionSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaPropertySymbol
+import org.jetbrains.kotlin.analysis.api.symbols.markers.KaDeclarationContainerSymbol
 import org.jetbrains.kotlin.idea.base.analysis.api.utils.getSymbolContainingMemberDeclarations
 import org.jetbrains.kotlin.idea.fir.invalidateCaches
 import org.jetbrains.kotlin.idea.refactoring.rename.AbstractRenameTest
@@ -38,13 +38,13 @@ abstract class AbstractFirRenameTest : AbstractRenameTest() {
     override fun checkForUnexpectedErrors(ktFile: KtFile) {}
 
     override fun findPsiDeclarationToRename(contextFile: KtFile, target: KotlinTarget): PsiElement = analyze(contextFile) {
-        fun getContainingMemberSymbol(classId: ClassId): KtSymbolWithMembers {
-            getClassOrObjectSymbolByClassId(classId)?.let { return it }
-            val parentSymbol = getClassOrObjectSymbolByClassId(classId.parentClassId!!)!!
+        fun getContainingMemberSymbol(classId: ClassId): KaDeclarationContainerSymbol {
+            findClass(classId)?.let { return it }
+            val parentSymbol = findClass(classId.parentClassId!!)!!
 
-            // The function supports getting a `KtEnumEntrySymbol`'s initializer via the enum entry's "class ID". Despite not being 100%
+            // The function supports getting a `KaEnumEntrySymbol`'s initializer via the enum entry's "class ID". Despite not being 100%
             // semantically correct in FIR (enum entries aren't classes), it simplifies referring to the initializing object.
-            val declarationSymbol = parentSymbol.getStaticDeclaredMemberScope().getCallableSymbols(classId.shortClassName).first()
+            val declarationSymbol = parentSymbol.staticDeclaredMemberScope.callables(classId.shortClassName).first()
             return declarationSymbol.getSymbolContainingMemberDeclarations() ?:
                 error("Unexpected declaration symbol `$classId` of type `${declarationSymbol.javaClass.simpleName}`.")
         }
@@ -55,14 +55,14 @@ abstract class AbstractFirRenameTest : AbstractRenameTest() {
             is KotlinTarget.Callable -> {
                 val callableId = target.callableId
                 val scope = callableId.classId
-                    ?.let { classId -> getContainingMemberSymbol(classId).getMemberScope() }
-                    ?: getPackageSymbolIfPackageExists(callableId.packageName)!!.getPackageScope()
+                    ?.let { classId -> getContainingMemberSymbol(classId).memberScope }
+                    ?: findPackage(callableId.packageName)!!.packageScope
 
-                val callablesOfProperType = scope.getCallableSymbols(callableId.callableName)
+                val callablesOfProperType = scope.callables(callableId.callableName)
                     .mapNotNull {
                         when (target.type) {
-                            KotlinTarget.CallableType.FUNCTION -> it as? KtFunctionSymbol
-                            KotlinTarget.CallableType.PROPERTY -> it as? KtPropertySymbol
+                            KotlinTarget.CallableType.FUNCTION -> it as? KaNamedFunctionSymbol
+                            KotlinTarget.CallableType.PROPERTY -> it as? KaPropertySymbol
                         }
                     }
 
@@ -71,8 +71,8 @@ abstract class AbstractFirRenameTest : AbstractRenameTest() {
 
             is KotlinTarget.EnumEntry -> {
                 val callableId = target.callableId
-                val containingScope = getContainingMemberSymbol(callableId.classId!!).getStaticDeclaredMemberScope()
-                containingScope.getCallableSymbols(callableId.callableName).singleOrNull()?.psi!!
+                val containingScope = getContainingMemberSymbol(callableId.classId!!).staticDeclaredMemberScope
+                containingScope.callables(callableId.callableName).singleOrNull()?.psi!!
             }
         }
     }

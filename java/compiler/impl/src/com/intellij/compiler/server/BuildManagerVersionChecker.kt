@@ -11,7 +11,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.ui.configuration.ProjectSettingsService
 import com.intellij.platform.backend.workspace.workspaceModel
 import com.intellij.platform.workspace.jps.entities.SdkEntity
-import com.intellij.platform.workspace.jps.entities.modifyEntity
+import com.intellij.platform.workspace.jps.entities.modifySdkEntity
 import com.intellij.util.system.CpuArch
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -39,7 +39,11 @@ internal class BuildManagerVersionChecker(val project: Project, val scope: Corou
       if (jdkArch != CpuArch.CURRENT) {
         NotificationGroupManager.getInstance()
           .getNotificationGroup("JDK Arch Check")
-          .createNotification(JavaBundle.message("arch.checker.notification.title"), JavaBundle.message("arch.checker.notification.content"), NotificationType.WARNING)
+          .createNotification(
+            JavaBundle.message("arch.checker.notification.title"),
+            JavaBundle.message("arch.checker.notification.content", versionInfo.displayVersionString(), jdkArch.name, CpuArch.CURRENT.name),
+            NotificationType.WARNING
+          )
           .apply {
             addAction(NotificationAction.createSimpleExpiring(JavaBundle.message("arch.checker.notification.project.structure")) {
               ProjectSettingsService.getInstance(project).openProjectSettings()
@@ -57,7 +61,7 @@ internal class BuildManagerVersionChecker(val project: Project, val scope: Corou
       .filter { it.homePath?.url == home && it.version != versionString }
       .forEach { sdkEntity ->
         project.workspaceModel.update("Updating JDK versions string") { storage ->
-          storage.modifyEntity(sdkEntity) {
+          storage.modifySdkEntity(sdkEntity) {
             this.version = versionString
           }
         }

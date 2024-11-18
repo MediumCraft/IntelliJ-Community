@@ -17,10 +17,12 @@ import com.jetbrains.python.packaging.management.PythonPackageManager
 import com.jetbrains.python.packaging.management.PythonPackageManagerProvider
 import com.jetbrains.python.packaging.ui.PyPackageManagementService
 import com.jetbrains.python.sdk.PythonSdkAdditionalData
+import com.jetbrains.python.sdk.getOrCreateAdditionalData
+import com.jetbrains.python.statistics.PyPackagesUsageCollector
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
-import java.util.UUID
+import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 
 @Service(Service.Level.PROJECT)
@@ -33,10 +35,10 @@ class PackageManagerHolder : Disposable {
    * Requires Sdk to be Python Sdk and have PythonSdkAdditionalData.
    */
   fun forSdk(project: Project, sdk: Sdk): PythonPackageManager {
-    val cacheKey = (sdk.sdkAdditionalData as PythonSdkAdditionalData).uuid
+    val cacheKey = (sdk.getOrCreateAdditionalData()).uuid
 
     return cache.computeIfAbsent(cacheKey) {
-     PythonPackageManagerProvider.EP_NAME.extensionList
+      PythonPackageManagerProvider.EP_NAME.extensionList
         .firstNotNullOf { it.createPackageManagerForSdk(project, sdk) }
     }
   }
@@ -75,22 +77,34 @@ class PythonRankingAwarePackageNameComparator : Comparator<String> {
 }
 
 
-suspend fun <T> runPackagingOperationOrShowErrorDialog(sdk: Sdk,
-                                                       @NlsContexts.DialogTitle title: String,
-                                                       packageName: String? = null,
-                                                       operation: suspend (() -> Result<T>)): Result<T> {
+suspend fun <T> runPackagingOperationOrShowErrorDialog(
+  sdk: Sdk,
+  @NlsContexts.DialogTitle title: String,
+  packageName: String? = null,
+  operation: suspend (() -> Result<T>),
+): Result<T> {
   try {
-    return operation.invoke()
+    val result = operation.invoke()
+    result.exceptionOrNull()?.let { throw it }
+    return result
   }
   catch (ex: PyExecutionException) {
     val description = PyPackageManagementService.toErrorDescription(listOf(ex), sdk, packageName)
     if (!PythonPackageManagementServiceBridge.runningUnderOldUI) {
       // todo[akniazev] this check is used for legacy package management only, remove when it's not needed anymore
       withContext(Dispatchers.Main) {
-        if (packageName != null) PyPackagesNotificationPanel.showPackageInstallationError(title, description!!)
-        else PackagesNotificationPanel.showError(title, description!!)
+        if (packageName != null) {
+          PyPackagesUsageCollector.failInstallSingleEvent.log()
+          PyPackagesNotificationPanel.showPackageInstallationError(title, description!!)
+        }
+        else {
+          PackagesNotificationPanel.showError(title, description!!)
+        }
       }
     }
+    return Result.failure(ex)
+  }
+  catch (ex: Throwable) {
     return Result.failure(ex)
   }
 }

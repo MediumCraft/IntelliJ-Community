@@ -20,7 +20,7 @@ import com.intellij.xdebugger.impl.XDebuggerManagerImpl
 import com.intellij.xdebugger.impl.XDebuggerUtilImpl
 import com.intellij.xdebugger.impl.breakpoints.BreakpointsUsageCollector.TYPE_FIELD
 
-class BreakpointsStatisticsCollector : ProjectUsagesCollector() {
+private class BreakpointsStatisticsCollector : ProjectUsagesCollector() {
   private val GROUP = EventLogGroup("debugger.breakpoints", 4)
   private val SUSPEND_POLICY_FIELD = EventFields.Enum("suspendPolicy", SuspendPolicy::class.java)
   private val NOT_DEFAULT_SUSPEND = GROUP.registerVarargEvent("not.default.suspend", EventFields.Enabled,
@@ -97,7 +97,7 @@ class BreakpointsStatisticsCollector : ProjectUsagesCollector() {
   }
 }
 
-fun getType(type: XBreakpointType<*, *>) : List<EventPair<*>> {
+internal fun getType(type: XBreakpointType<*, *>) : List<EventPair<*>> {
   val data = mutableListOf<EventPair<*>>()
   val info = getPluginInfo(type.javaClass)
   data.add(EventFields.PluginInfo.with(info))
@@ -105,7 +105,7 @@ fun getType(type: XBreakpointType<*, *>) : List<EventPair<*>> {
   return data
 }
 
-class BreakpointsUtilValidator : CustomValidationRule() {
+internal class BreakpointsUtilValidator : CustomValidationRule() {
   override fun getRuleId(): String {
     return "breakpoint"
   }

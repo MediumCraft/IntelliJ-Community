@@ -48,6 +48,7 @@ class JBHtmlPaneConfiguration private constructor(builder: Builder) {
   internal val iconResolver: (String) -> Icon? = builder.iconResolver
   internal val customStyleSheetProviders: List<(backgroundColor: Color) -> StyleSheet> = builder.customStyleSheetProviders.toList()
   internal val fontResolver: CSSFontResolver? = builder.fontResolver
+  internal val underlinedHoveredHyperlink = builder.underlinedHoveredHyperlink
   internal val extensions: List<ExtendableHTMLViewFactory.Extension> = builder.extensions.toList()
 
   constructor() : this(builder())
@@ -98,6 +99,17 @@ class JBHtmlPaneConfiguration private constructor(builder: Builder) {
     var fontResolver: CSSFontResolver? = null
 
     /**
+     * Toggle whether hyperlinks are underlined when hovered.
+     *
+     * This is useful if another implementation needs to apply a different style
+     * to hyperlinks when hovered (this can be done by adding an [javax.swing.event.HyperlinkListener]
+     * to the [JBHtmlPane]).
+     *
+     * Default is true.
+     */
+    var underlinedHoveredHyperlink: Boolean = true
+
+    /**
      * Provide a list of additional extensions for the [ExtendableHTMLViewFactory]
      */
     val extensions: MutableList<ExtendableHTMLViewFactory.Extension> = mutableListOf()
@@ -118,7 +130,8 @@ class JBHtmlPaneConfiguration private constructor(builder: Builder) {
 
     /**
      * Provide additional resolve for images. The [JBHtmlPane] context can be used to
-     * properly scale the image for HiDpi resolutions.
+     * properly scale the image for HiDpi resolutions. For SVG support, use [com.intellij.util.ui.JBImageToolkit]
+     * to create images.
      */
     fun imageResolverFactory(imageResolverFactory: (JBHtmlPane) -> Dictionary<URL, Image>?): Builder =
       apply { this.imageResolverFactory = imageResolverFactory }

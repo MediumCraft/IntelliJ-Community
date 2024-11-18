@@ -4,10 +4,10 @@ package org.jetbrains.kotlin.idea.k2.codeinsight.inspections.expressions
 import com.intellij.codeInspection.ProblemsHolder
 import com.intellij.modcommand.ModPsiUpdater
 import com.intellij.openapi.project.Project
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
-import org.jetbrains.kotlin.analysis.api.symbols.KtFunctionSymbol
+import org.jetbrains.kotlin.analysis.api.KaSession
+import org.jetbrains.kotlin.analysis.api.symbols.KaNamedFunctionSymbol
 import org.jetbrains.kotlin.analysis.api.symbols.receiverType
-import org.jetbrains.kotlin.analysis.api.types.KtNonErrorClassType
+import org.jetbrains.kotlin.analysis.api.types.KaClassType
 import org.jetbrains.kotlin.builtins.StandardNames
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.codeinsight.api.applicable.asUnit
@@ -45,10 +45,10 @@ internal class ReplaceCollectionCountWithSizeInspection : KotlinApplicableInspec
     override fun isApplicableByPsi(element: KtCallExpression): Boolean =
         element.calleeExpression?.text == "count" && element.valueArguments.isEmpty()
 
-    context(KtAnalysisSession)
+    context(KaSession)
     override fun prepareContext(element: KtCallExpression): Unit? {
         val functionSymbol = element.resolveToFunctionSymbol() ?: return null
-        val receiverClassId = (functionSymbol.receiverType as? KtNonErrorClassType)?.classId ?: return null
+        val receiverClassId = (functionSymbol.receiverType as? KaClassType)?.classId ?: return null
         return (functionSymbol.callableId == COLLECTION_COUNT_CALLABLE_ID
                 && receiverClassId in COLLECTION_CLASS_IDS).asUnit
     }
@@ -71,6 +71,6 @@ internal class ReplaceCollectionCountWithSizeInspection : KotlinApplicableInspec
     }
 }
 
-context(KtAnalysisSession)
-private fun KtCallExpression.resolveToFunctionSymbol(): KtFunctionSymbol? =
-    calleeExpression?.mainReference?.resolveToSymbol() as? KtFunctionSymbol
+context(KaSession)
+private fun KtCallExpression.resolveToFunctionSymbol(): KaNamedFunctionSymbol? =
+    calleeExpression?.mainReference?.resolveToSymbol() as? KaNamedFunctionSymbol

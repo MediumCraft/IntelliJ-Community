@@ -1,7 +1,6 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.workspace.jps.serialization.impl
 
-import com.intellij.openapi.util.registry.Registry
 import com.intellij.platform.workspace.jps.JpsProjectConfigLocation
 import com.intellij.platform.workspace.jps.JpsProjectFileEntitySource
 import com.intellij.platform.workspace.jps.entities.LibraryTableId
@@ -13,25 +12,45 @@ import org.jetbrains.annotations.TestOnly
 import java.nio.file.Path
 
 object JpsProjectEntitiesLoader {
-
   @TestOnly
-  suspend fun loadProject(configLocation: JpsProjectConfigLocation,
-                          builder: MutableEntityStorage,
-                          orphanage: MutableEntityStorage,
-                          externalStoragePath: Path,
-                          errorReporter: ErrorReporter,
-                          unloadedModulesNameHolder: com.intellij.platform.workspace.jps.UnloadedModulesNameHolder = com.intellij.platform.workspace.jps.UnloadedModulesNameHolder.DUMMY,
-                          unloadedEntitiesBuilder: MutableEntityStorage = MutableEntityStorage.create(),
-                          context: SerializationContext): JpsProjectSerializers {
-    val data = createProjectSerializers(configLocation, externalStoragePath, context)
-    data.loadAll(context.fileContentReader, builder, orphanage, unloadedEntitiesBuilder, unloadedModulesNameHolder, errorReporter)
+  suspend fun loadProject(
+    configLocation: JpsProjectConfigLocation,
+    builder: MutableEntityStorage,
+    orphanage: MutableEntityStorage,
+    externalStoragePath: Path,
+    errorReporter: ErrorReporter,
+    unloadedModulesNameHolder: com.intellij.platform.workspace.jps.UnloadedModulesNameHolder = com.intellij.platform.workspace.jps.UnloadedModulesNameHolder.DUMMY,
+    unloadedEntitiesBuilder: MutableEntityStorage = MutableEntityStorage.create(),
+    context: SerializationContext,
+  ): JpsProjectSerializers {
+    val data = createProjectSerializers(configLocation = configLocation, externalStoragePath = externalStoragePath, context = context)
+    data.loadAll(
+      reader = context.fileContentReader,
+      builder = builder,
+      orphanageBuilder = orphanage,
+      unloadedEntityBuilder = unloadedEntitiesBuilder,
+      unloadedModuleNames = unloadedModulesNameHolder,
+      errorReporter = errorReporter,
+    )
     return data
   }
   
-  fun loadModule(moduleFile: Path, configLocation: JpsProjectConfigLocation, builder: MutableEntityStorage,
-                 errorReporter: ErrorReporter, context: SerializationContext) {
+  fun loadModule(
+    moduleFile: Path,
+    configLocation: JpsProjectConfigLocation,
+    builder: MutableEntityStorage,
+    errorReporter: ErrorReporter,
+    context: SerializationContext,
+  ) {
     val source = JpsProjectFileEntitySource.FileInDirectory(moduleFile.parent.toVirtualFileUrl(context.virtualFileUrlManager), configLocation)
-    loadModule(moduleFile, source, builder, builder, errorReporter, context)
+    loadModule(
+      moduleFile = moduleFile,
+      source = source,
+      builder = builder,
+      orphanage = builder,
+      errorReporter = errorReporter,
+      context = context,
+    )
   }
 
   internal fun loadModule(moduleFile: Path,

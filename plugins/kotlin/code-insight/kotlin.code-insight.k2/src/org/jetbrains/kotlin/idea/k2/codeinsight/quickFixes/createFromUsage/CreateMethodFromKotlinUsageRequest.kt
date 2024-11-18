@@ -7,10 +7,10 @@ import com.intellij.lang.jvm.actions.ExpectedType
 import com.intellij.openapi.util.NlsSafe
 import com.intellij.psi.PsiElement
 import org.jetbrains.kotlin.analysis.api.analyze
-import org.jetbrains.kotlin.analysis.api.symbols.KtClassLikeSymbol
-import org.jetbrains.kotlin.analysis.api.types.KtType
-import org.jetbrains.kotlin.idea.k2.codeinsight.quickFixes.createFromUsage.K2CreateFromUsageUtil.getExpectedKotlinType
-import org.jetbrains.kotlin.idea.k2.codeinsight.quickFixes.createFromUsage.K2CreateFromUsageUtil.resolveExpression
+import org.jetbrains.kotlin.analysis.api.symbols.KaClassLikeSymbol
+import org.jetbrains.kotlin.analysis.api.types.KaType
+import org.jetbrains.kotlin.idea.k2.codeinsight.quickFixes.createFromUsage.K2CreateFunctionFromUsageUtil.getExpectedKotlinType
+import org.jetbrains.kotlin.idea.k2.codeinsight.quickFixes.createFromUsage.K2CreateFunctionFromUsageUtil.resolveExpression
 import org.jetbrains.kotlin.psi.KtCallExpression
 import org.jetbrains.kotlin.psi.KtExpression
 import org.jetbrains.kotlin.psi.KtSimpleNameExpression
@@ -22,7 +22,7 @@ internal class CreateMethodFromKotlinUsageRequest (
     functionCall: KtCallExpression,
     modifiers: Collection<JvmModifier>,
     val receiverExpression: KtExpression?,
-    val receiverType: KtType?, // (in case receiverExpression is null) it can be notnull when there's implicit receiver: `blah { unknownFunc() }`
+    val receiverType: KaType?, // (in case receiverExpression is null) it can be notnull when there's implicit receiver: `blah { unknownFunc() }`
     val isExtension: Boolean,
     val isAbstractClassOrInterface: Boolean,
     val isForCompanion: Boolean,
@@ -31,7 +31,7 @@ internal class CreateMethodFromKotlinUsageRequest (
 
     private fun initializeTargetClass(receiverExpression: KtExpression?, functionCall: KtCallExpression): PsiElement? {
         return analyze(functionCall) {
-            (receiverExpression?.resolveExpression() as? KtClassLikeSymbol)?.psi
+            (receiverExpression?.resolveExpression() as? KaClassLikeSymbol)?.psi
         }
     }
 

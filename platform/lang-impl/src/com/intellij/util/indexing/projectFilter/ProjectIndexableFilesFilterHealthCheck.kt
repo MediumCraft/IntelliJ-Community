@@ -4,16 +4,21 @@ package com.intellij.util.indexing.projectFilter
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ex.ApplicationManagerEx
 import com.intellij.openapi.application.readAction
-import com.intellij.openapi.application.smartReadAction
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.serviceAsync
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.diagnostic.runAndLogException
 import com.intellij.openapi.extensions.ExtensionNotApplicableException
+import com.intellij.openapi.observable.util.plus
+import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.progress.ProgressManager
+import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.ContentIterator
+import com.intellij.openapi.roots.ProjectRootModificationTracker
 import com.intellij.openapi.startup.ProjectActivity
+import com.intellij.openapi.util.ModificationTracker
+import com.intellij.openapi.util.registry.Registry
 import com.intellij.openapi.vfs.VirtualFileFilter
 import com.intellij.openapi.vfs.VirtualFileWithId
 import com.intellij.openapi.vfs.newvfs.persistent.PersistentFS
@@ -22,6 +27,7 @@ import com.intellij.util.SystemProperties
 import com.intellij.util.indexing.FileBasedIndex
 import com.intellij.util.indexing.FileBasedIndexImpl
 import com.intellij.util.indexing.IndexInfrastructure
+import com.intellij.util.indexing.dependencies.ProjectIndexingDependenciesService
 import com.intellij.util.indexing.roots.IndexableFilesIterator
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
@@ -102,14 +108,7 @@ class ProjectIndexableFilesFilterHealthCheck(private val project: Project, priva
       val startTime = System.currentTimeMillis()
 
       Observation.awaitConfiguration(project) // wait for project import IDEA-348501
-      val res: HealthCheckResult = smartReadActionWithDelays(5.seconds, 20) {
-        try {
-          runHealthCheck(project, filter)
-        }
-        catch (e: FilterActionCancelledException) {
-          HealthCheckCancelled(e.reason)
-        }
-      }
+      val res: HealthCheckResult = runHealthCheck(project, filter)
       when (res) {
         is HealthCheckFinished -> {
           res.nonIndexableFilesInFilter.fix(filter)
@@ -140,34 +139,27 @@ class ProjectIndexableFilesFilterHealthCheck(private val project: Project, priva
     }
   }
 
-  private suspend fun smartReadActionWithDelays(delay: Duration, attemptsAtATime: Int, action: () -> HealthCheckResult): HealthCheckResult {
-    while (true) {
-      val res = smartReadActionWithMaxAttempts(attemptsAtATime, action)
-      if (res != null) {
+  private suspend fun runHealthCheck(project: Project, filter: ProjectIndexableFilesFilter): HealthCheckResult {
+    // We cannot use NBRA here because computation is too long and will be canceled too many times by write actions
+    // Instead we cancel computation manually less often when we detected relevant change: change in filter, dumb mode or project roots
+    val trackers = listOf(DumbService.getInstance(project).modificationTracker, ProjectRootModificationTracker.getInstance(project))
+    val computation = object : Computation<HealthCheckResult> {
+      override fun compute(checkCancelled: () -> Unit): HealthCheckResult {
+        checkCancelled()
+        val res =  doRunHealthCheck(project, checkCancelled, filter.checkAllExpectedIndexableFilesDuringHealthcheck, filter.getFileStatuses())
+        checkCancelled()
         return res
       }
-      delay(delay) // allow a batch of write actions to finish
     }
-  }
 
-  private suspend fun smartReadActionWithMaxAttempts(maxAttemptsCount: Int, action: () -> HealthCheckResult): HealthCheckResult? {
-    val attemptsCount = AtomicInteger(0)
-
-    return smartReadAction(project) {
-      if (attemptsCount.getAndIncrement() > maxAttemptsCount) null
-      else action()
-    }
-  }
-
-  private fun runHealthCheck(project: Project, filter: ProjectIndexableFilesFilter): HealthCheckResult {
-    return filter.runAndCheckThatNoChangesHappened {
-      runIfScanningScanningIsCompleted(project) {
-        // It is possible that scanning will start and finish while we are performing healthcheck,
-        // but then healthcheck will be terminated by the fact that filter was update.
-        // If it was not updated, then we don't care that scanning happened, and we can trust healthcheck result
-        doRunHealthCheck(project, filter.checkAllExpectedIndexableFilesDuringHealthcheck, filter.getFileStatuses())
-      }
-    }
+    return computation
+      .takeIfInSmartMode(project)
+      .takeIfScanningIsCompleted(project)
+      .takeIfNoChange(trackers)
+      .takeIfNoChange(filter)
+      .execute(delayBetweenAttempts = 10.seconds,
+               maxAttempts = Registry.intValue("index.files.filter.health.check.max.attempts"),
+               valueIfUnsuccessful = HealthCheckCancelled(FilterActionCancellationReason.MAX_ATTEMPTS_REACHED))
   }
 
   /**
@@ -180,16 +172,20 @@ class ProjectIndexableFilesFilterHealthCheck(private val project: Project, priva
    * between [com.intellij.util.indexing.roots.IndexableFilesIterator] and [com.intellij.util.indexing.IndexableFilesIndex].
    */
   private fun doRunHealthCheck(project: Project,
+                               checkCancelled: () -> Unit,
                                checkAllExpectedIndexableFiles: Boolean,
                                fileStatuses: Sequence<Pair<FileId, Boolean>>): HealthCheckFinished {
     val nonIndexableFilesInFilter = mutableListOf<FileId>()
     val indexableFilesNotInFilter = mutableListOf<FileId>()
 
-    val shouldBeIndexable = getFilesThatShouldBeIndexable(project)
+    val shouldBeIndexable = getFilesThatShouldBeIndexable(project, checkCancelled)
     val filesInFilter = BitSet()
 
-    for ((fileId, isInFilter) in fileStatuses) { // Sequence instead of BitSet because we need to distinguish false and null
+    fileStatuses.forEachIndexed { index, (fileId, isInFilter) -> // Sequence instead of BitSet because we need to distinguish false and null
       ProgressManager.checkCanceled()
+      if (index % 10000 == 0) {
+        checkCancelled()
+      }
       filesInFilter[fileId] = isInFilter
       if (shouldBeIndexable[fileId]) {
         if (!isInFilter) {
@@ -213,13 +209,13 @@ class ProjectIndexableFilesFilterHealthCheck(private val project: Project, priva
                                IndexableFilesNotInFilterGroup(indexableFilesNotInFilter, shouldBeIndexable))
   }
 
-  private fun getFilesThatShouldBeIndexable(project: Project): IndexableFiles {
+  private fun getFilesThatShouldBeIndexable(project: Project, checkCancelled: () -> Unit): IndexableFiles {
     val indexableFiles = IndexableFiles()
-    getFilesThatShouldBeIndexable(project, if (shouldLogProviders) IndexableFilesSetWithProvidersHandler(indexableFiles) else IndexableFilesSetHandler(indexableFiles))
+    getFilesThatShouldBeIndexable(project, checkCancelled, if (shouldLogProviders) IndexableFilesSetWithProvidersHandler(indexableFiles) else IndexableFilesSetHandler(indexableFiles))
     return indexableFiles
   }
 
-  private fun <T> getFilesThatShouldBeIndexable(project: Project, handler: FilesSetHandler<T>) {
+  private fun <T> getFilesThatShouldBeIndexable(project: Project, checkCancelled: () -> Unit, handler: FilesSetHandler<T>) {
     val index = FileBasedIndex.getInstance() as FileBasedIndexImpl
     val providers = index.getIndexableFilesProviders(project)
     for (provider in providers) {
@@ -231,7 +227,7 @@ class ProjectIndexableFilesFilterHealthCheck(private val project: Project, priva
         }
         true
       }
-      ProgressManager.checkCanceled()
+      checkCancelled()
       provider.iterateFiles(project, outerProcessor, VirtualFileFilter.ALL)
       handler.flushState(state, provider)
     }
@@ -341,3 +337,74 @@ sealed interface HealthCheckResult
 
 private class HealthCheckFinished(val nonIndexableFilesInFilter: NonIndexableFilesInFilterGroup, val indexableFilesNotInFilter: IndexableFilesNotInFilterGroup) : HealthCheckResult
 private class HealthCheckCancelled(val reason: FilterActionCancellationReason) : HealthCheckResult
+
+internal interface Computation<T> {
+  fun compute(checkCancelled: () -> Unit): T
+}
+
+private suspend fun <T> Computation<T>.execute(delayBetweenAttempts: Duration, maxAttempts: Int, valueIfUnsuccessful: T): T {
+  (0 until maxAttempts).forEach { attempt ->
+    try {
+      return this.compute {
+        ProgressManager.checkCanceled() // this one should cancel coroutine
+      }
+    }
+    catch (_: ProcessCanceledException) {
+    }
+    delay(delayBetweenAttempts)
+  }
+  return valueIfUnsuccessful
+}
+
+private fun <T> Computation<T>.takeIfInSmartMode(project: Project): Computation<T> {
+  val outerCompute = this::compute
+
+  return object : Computation<T> {
+    override fun compute(checkCancelled: () -> Unit): T {
+      return outerCompute {
+        checkCancelled()
+        if (DumbService.getInstance(project).isDumb) {
+          throw ProcessCanceledException()
+        }
+      }
+    }
+  }
+}
+
+private fun <T> Computation<T>.takeIfNoChange(trackers: List<ModificationTracker>): Computation<T> {
+  val outerCompute = this::compute
+
+  return object : Computation<T> {
+    override fun compute(checkCancelled: () -> Unit): T {
+      val tracker = trackers.drop(1).fold(trackers.firstOrNull()) { t1, t2 -> t1?.plus(t2) }
+      val modCount = tracker?.modificationCount
+
+      return outerCompute {
+        checkCancelled()
+        if (tracker?.modificationCount != modCount) {
+          throw ProcessCanceledException()
+        }
+      }
+    }
+  }
+}
+
+private fun <T> Computation<T>.takeIfNoChange(filter: ProjectIndexableFilesFilter): Computation<T> {
+  return filter.takeIfNoChangesHappened(this)
+}
+
+private fun <T> Computation<T>.takeIfScanningIsCompleted(project: Project): Computation<T> {
+  val outerCompute = this::compute
+
+  return object : Computation<T> {
+    override fun compute(checkCancelled: () -> Unit): T {
+      val service = project.getService(ProjectIndexingDependenciesService::class.java)
+      return outerCompute {
+        checkCancelled()
+        if (!service.isScanningAndIndexingCompleted()) {
+          throw ProcessCanceledException()
+        }
+      }
+    }
+  }
+}

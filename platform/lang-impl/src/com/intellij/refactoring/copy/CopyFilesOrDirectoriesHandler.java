@@ -1,12 +1,14 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.refactoring.copy;
 
 import com.intellij.CommonBundle;
 import com.intellij.codeInspection.InspectionsBundle;
 import com.intellij.ide.CopyPasteDelegator;
+import com.intellij.ide.IdeBundle;
 import com.intellij.ide.scratch.ScratchUtil;
 import com.intellij.ide.util.EditorHelper;
 import com.intellij.ide.util.PlatformPackageUtil;
+import com.intellij.openapi.actionSystem.ex.ActionUtil;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.application.ex.ApplicationEx;
@@ -24,6 +26,7 @@ import com.intellij.openapi.project.ProjectUtil;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.NlsSafe;
+import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.ThrowableComputable;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.vfs.VfsUtil;
@@ -92,8 +95,7 @@ public class CopyFilesOrDirectoriesHandler extends CopyHandlerDelegateBase imple
     copyAsFiles(elements, defaultTargetDirectory, project);
   }
 
-  @Nullable
-  private static PsiDirectory tryNotNullizeDirectory(@NotNull Project project, @Nullable PsiDirectory defaultTargetDirectory) {
+  private static @Nullable PsiDirectory tryNotNullizeDirectory(@NotNull Project project, @Nullable PsiDirectory defaultTargetDirectory) {
     if (defaultTargetDirectory == null) {
       VirtualFile root = FileChooserUtil.getLastOpenedFile(project);
       if (root == null) root = project.isDefault() ? null : ProjectUtil.guessProjectDir(project);
@@ -181,8 +183,7 @@ public class CopyFilesOrDirectoriesHandler extends CopyHandlerDelegateBase imple
     }
   }
 
-  @Nullable
-  private static PsiDirectory getCommonParentDirectory(PsiElement[] elements){
+  private static @Nullable PsiDirectory getCommonParentDirectory(PsiElement[] elements){
     PsiDirectory result = null;
 
     for (PsiElement element : elements) {
@@ -218,8 +219,8 @@ public class CopyFilesOrDirectoriesHandler extends CopyHandlerDelegateBase imple
    * @param newName can be not null only if elements.length == 1
    */
   private static void copyImpl(final VirtualFile @NotNull [] files,
-                               @Nullable final String newName,
-                               @NotNull final PsiDirectory targetDirectory,
+                               final @Nullable String newName,
+                               final @NotNull PsiDirectory targetDirectory,
                                final boolean doClone,
                                final boolean openInEditor) {
     if (doClone && files.length != 1) {
@@ -275,10 +276,10 @@ public class CopyFilesOrDirectoriesHandler extends CopyHandlerDelegateBase imple
    */
   @Deprecated
   public static void updateAddedFiles(List<? extends PsiFile> added) {
-    updateAddedFiles(added, null);
+    updateAddedFiles(added, ContainerUtil.emptyList());
   }
 
-  public static void updateAddedFiles(List<? extends PsiFile> added, @Nullable List<? extends PsiFile> originals) {
+  public static void updateAddedFiles(List<? extends PsiFile> added, @NotNull List<? extends PsiFile> originals) {
     if (added.isEmpty()) return;
     Project project = added.get(0).getProject();
     DumbService dumbService = DumbService.getInstance(project);
@@ -296,8 +297,7 @@ public class CopyFilesOrDirectoriesHandler extends CopyHandlerDelegateBase imple
    * @param newName can be not null only if elements.length == 1
    * @return first copied PsiFile (recursively); null if no PsiFiles copied
    */
-  @Nullable
-  public static PsiFile copyToDirectory(@NotNull PsiFileSystemItem elementToCopy,
+  public static @Nullable PsiFile copyToDirectory(@NotNull PsiFileSystemItem elementToCopy,
                                         @Nullable String newName,
                                         @NotNull PsiDirectory targetDirectory) throws IncorrectOperationException, IOException {
     return copyToDirectory(elementToCopy, newName, targetDirectory, null, null);
@@ -309,8 +309,7 @@ public class CopyFilesOrDirectoriesHandler extends CopyHandlerDelegateBase imple
    * @param choice a horrible way to pass/keep user preference
    * @return first copied PsiFile (recursively); null if no PsiFiles copied
    */
-  @Nullable
-  public static PsiFile copyToDirectory(@NotNull PsiFileSystemItem elementToCopy,
+  public static @Nullable PsiFile copyToDirectory(@NotNull PsiFileSystemItem elementToCopy,
                                         @Nullable String newName,
                                         @NotNull PsiDirectory targetDirectory,
                                         int @Nullable [] choice,
@@ -338,16 +337,27 @@ public class CopyFilesOrDirectoriesHandler extends CopyHandlerDelegateBase imple
     if (Registry.is("run.refactorings.under.progress")) {
       AtomicReference<Throwable> thrown = new AtomicReference<>();
       Consumer<ProgressIndicator> copyAction = pi -> {
+        Project project = targetDirectory.getProject();
+        int fileCount = ActionUtil.underModalProgress(
+          project,
+          IdeBundle.message("progress.counting.files"),
+          () -> countFiles(elementsToCopy)
+        );
+        pi.setIndeterminate(fileCount <= 1); // don't show progression when copy-pasting a single file
         try {
           for (PsiFileSystemItem elementToCopy : elementsToCopy) {
-            copyToDirectoryUnderProgress(elementToCopy, newName, targetDirectory, added, originals, existingFiles, pi);
+            copyToDirectoryUnderProgress(elementToCopy, newName, targetDirectory, added, originals, existingFiles,
+                                         Ref.create(0), fileCount, pi);
           }
         }
         catch (Throwable e) {
           thrown.set(e);
         }
       };
-      CommandProcessor.getInstance().executeCommand(targetDirectory.getProject(), () -> app.runWriteActionWithCancellableProgressInDispatchThread(ObjectUtils.notNull(title, RefactoringBundle.message("command.name.copy")), targetDirectory.getProject(), null, copyAction), title, null);
+      CommandProcessor.getInstance().executeCommand(targetDirectory.getProject(),
+                                                    () -> app.runWriteActionWithCancellableProgressInDispatchThread(
+                                                      ObjectUtils.notNull(title, RefactoringBundle.message("command.name.copy")),
+                                                      targetDirectory.getProject(), null, copyAction), title, null);
       Throwable throwable = thrown.get();
       if (throwable instanceof ProcessCanceledException) {
         //process was canceled, don't proceed with existing files
@@ -360,12 +370,27 @@ public class CopyFilesOrDirectoriesHandler extends CopyHandlerDelegateBase imple
         .withName(title)
         .run(() -> {
           for (PsiFileSystemItem elementToCopy : elementsToCopy) {
-            copyToDirectoryUnderProgress(elementToCopy, newName, targetDirectory, added, originals, existingFiles, null);
+            copyToDirectoryUnderProgress(elementToCopy, newName, targetDirectory, added, originals, existingFiles, Ref.create(0), -1, null);
           }
         });
     }
 
     handleExistingFiles(newName, targetDirectory, choice, title, existingFiles, added);
+  }
+
+  private static int countFiles(List<? extends PsiFileSystemItem> elements) {
+    int fileCount = 0;
+    for (PsiFileSystemItem child : elements) {
+      fileCount += countFiles(child);
+    }
+    return fileCount;
+  }
+
+  private static int countFiles(PsiFileSystemItem element) {
+    if (element instanceof PsiDirectory) {
+      return countFiles(ContainerUtil.filterIsInstance(element.getChildren(), PsiFileSystemItem.class));
+    }
+    return 1;
   }
 
   private static void rethrow(Throwable throwable) throws IOException {
@@ -456,12 +481,14 @@ public class CopyFilesOrDirectoriesHandler extends CopyHandlerDelegateBase imple
   }
 
   /**
-   * @param elementToCopy PsiFile or PsiDirectory
-   * @param newName       can be not null only if elements.length == 1
-   * @param added         a collection of files to be updated
-   * @param originals     a collection of files which were updated
-   * @param existingFiles a collection of files which already exist in the target
-   * @param pi            progress indicator if any
+   * @param elementToCopy    PsiFile or PsiDirectory
+   * @param newName          can be not null only if elements.length == 1
+   * @param added            a collection of files to be updated
+   * @param originals        a collection of files which were updated
+   * @param existingFiles    a collection of files which already exist in the target
+   * @param currentFileCount the number of files that are already copied
+   * @param totalFileCount   the total file count or -1 if the copy isn't called under progress
+   * @param pi               progress indicator if any
    */
   private static void copyToDirectoryUnderProgress(PsiFileSystemItem elementToCopy,
                                                    @Nullable String newName,
@@ -469,13 +496,17 @@ public class CopyFilesOrDirectoriesHandler extends CopyHandlerDelegateBase imple
                                                    @NotNull List<? super PsiFile> added,
                                                    List<? super PsiFile> originals,
                                                    MultiMap<PsiDirectory, PsiFile> existingFiles,
+                                                   Ref<Integer> currentFileCount,
+                                                   int totalFileCount,
                                                    @Nullable ProgressIndicator pi) throws IncorrectOperationException, IOException {
+
     if (pi != null) {
+      pi.setFraction((double) currentFileCount.get() / totalFileCount);
       pi.setText2(InspectionsBundle.message("processing.progress.text", elementToCopy.getName()));
     }
+    currentFileCount.set(currentFileCount.get() + 1);
     
-    if (elementToCopy instanceof PsiFile) {
-      PsiFile file = (PsiFile)elementToCopy;
+    if (elementToCopy instanceof PsiFile file) {
       String name = newName == null ? file.getName() : newName;
       final PsiFile existing = targetDirectory.findFile(name);
       if (existing != null && !existing.equals(file)) {
@@ -510,7 +541,7 @@ public class CopyFilesOrDirectoriesHandler extends CopyHandlerDelegateBase imple
           LOG.info("invalid file: " + file.getExtension());
           continue;
         }
-        copyToDirectoryUnderProgress(item, null, subdirectory, added, originals, existingFiles, pi);
+        copyToDirectoryUnderProgress(item, null, subdirectory, added, originals, existingFiles, currentFileCount, totalFileCount, pi);
       }
     }
     else {
@@ -548,8 +579,7 @@ public class CopyFilesOrDirectoriesHandler extends CopyHandlerDelegateBase imple
     return false;
   }
 
-  @Nullable
-  public static PsiDirectory resolveDirectory(@NotNull PsiDirectory defaultTargetDirectory) {
+  public static @Nullable PsiDirectory resolveDirectory(@NotNull PsiDirectory defaultTargetDirectory) {
     final Project project = defaultTargetDirectory.getProject();
     final Boolean showDirsChooser = defaultTargetDirectory.getCopyableUserData(CopyPasteDelegator.SHOW_CHOOSER_KEY);
     if (showDirsChooser != null && showDirsChooser.booleanValue()) {
@@ -563,9 +593,8 @@ public class CopyFilesOrDirectoriesHandler extends CopyHandlerDelegateBase imple
     return defaultTargetDirectory;
   }
 
-  @Nullable
   @Override
-  public String getActionName(PsiElement[] elements) {
+  public @Nullable String getActionName(PsiElement[] elements) {
     int fileCount = 0, directoryCount = 0;
     for (PsiElement element : elements) {
       if (element instanceof PsiFile) {

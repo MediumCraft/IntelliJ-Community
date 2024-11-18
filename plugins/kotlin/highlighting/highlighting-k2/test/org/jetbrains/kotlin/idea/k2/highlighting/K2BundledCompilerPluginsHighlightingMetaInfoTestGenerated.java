@@ -2,6 +2,7 @@
 
 package org.jetbrains.kotlin.idea.k2.highlighting;
 
+import com.intellij.idea.IJIgnore;
 import com.intellij.testFramework.TestDataPath;
 import org.jetbrains.kotlin.idea.base.plugin.KotlinPluginMode;
 import org.jetbrains.kotlin.idea.base.test.TestRoot;
@@ -43,6 +44,11 @@ public class K2BundledCompilerPluginsHighlightingMetaInfoTestGenerated extends A
     @TestMetadata("allOpen_oldRegistrar.kt")
     public void testAllOpen_oldRegistrar() throws Exception {
         runTest("../../idea/tests/testData/highlighterMetaInfoWithBundledCompilerPlugins/allOpen_oldRegistrar.kt");
+    }
+
+    @TestMetadata("compose.kt")
+    public void testCompose() throws Exception {
+        runTest("../../idea/tests/testData/highlighterMetaInfoWithBundledCompilerPlugins/compose.kt");
     }
 
     @TestMetadata("lombok.kt")

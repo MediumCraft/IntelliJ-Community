@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.idea.devkit.kotlin.inspections
 
 import com.intellij.codeInsight.FileModificationService
@@ -24,15 +24,14 @@ import org.jetbrains.idea.devkit.inspections.DevKitInspectionUtil
 import org.jetbrains.idea.devkit.inspections.ExtensionUtil
 import org.jetbrains.idea.devkit.kotlin.DevKitKotlinBundle
 import org.jetbrains.kotlin.analysis.api.analyze
-import org.jetbrains.kotlin.analysis.api.components.buildClassType
 import org.jetbrains.kotlin.analysis.api.permissions.KaAllowAnalysisOnEdt
 import org.jetbrains.kotlin.analysis.api.permissions.allowAnalysisOnEdt
-import org.jetbrains.kotlin.analysis.api.types.KtNonErrorClassType
-import org.jetbrains.kotlin.analysis.api.types.KtTypeNullability
+import org.jetbrains.kotlin.analysis.api.types.KaClassType
+import org.jetbrains.kotlin.analysis.api.types.KaTypeNullability
 import org.jetbrains.kotlin.asJava.toLightClass
 import org.jetbrains.kotlin.idea.base.codeInsight.KotlinNameSuggester
 import org.jetbrains.kotlin.idea.base.codeInsight.KotlinNameSuggestionProvider
-import org.jetbrains.kotlin.idea.base.fe10.codeInsight.newDeclaration.Fe10KotlinNewDeclarationNameValidator
+import org.jetbrains.kotlin.idea.base.codeInsight.KotlinNameValidatorProvider
 import org.jetbrains.kotlin.idea.refactoring.KotlinRefactoringEventListener
 import org.jetbrains.kotlin.idea.refactoring.move.*
 import org.jetbrains.kotlin.idea.refactoring.move.moveDeclarations.MoveKotlinDeclarationsProcessor
@@ -106,14 +105,14 @@ private val KtProperty.isLoggerInstance: Boolean
     val property = this
 
     analyze(property) {
-      val propertyReturnType = property.getReturnKtType().withNullability(KtTypeNullability.NON_NULLABLE)
+      val propertyReturnType = property.returnType.withNullability(KaTypeNullability.NON_NULLABLE)
 
       // FIXME: buildClassType(LOGGER_CLASS_ID) should also work, does not work in tests for some reason
-      val loggerType = getClassOrObjectSymbolByClassId(LOGGER_CLASS_ID)?.let(::buildClassType)
+      val loggerType = findClass(LOGGER_CLASS_ID)?.let(::buildClassType)
 
-      if (propertyReturnType !is KtNonErrorClassType || loggerType !is KtNonErrorClassType) return false
+      if (propertyReturnType !is KaClassType || loggerType !is KaClassType) return false
 
-      propertyReturnType.isSubTypeOf(loggerType)
+      propertyReturnType.isSubtypeOf(loggerType)
     }
   }
 
@@ -195,7 +194,7 @@ private class CreateObjectAndMoveProhibitedDeclarationsQuickFix(
       analyze(containingClass) {
         return KotlinNameSuggester.suggestNameByName(
           DEFAULT_OBJECT_NAME,
-          Fe10KotlinNewDeclarationNameValidator(containingClass, null, KotlinNameSuggestionProvider.ValidatorTarget.CLASS)
+          KotlinNameValidatorProvider.getInstance().createNameValidator(containingClass, KotlinNameSuggestionProvider.ValidatorTarget.CLASS)
         )
       }
     }

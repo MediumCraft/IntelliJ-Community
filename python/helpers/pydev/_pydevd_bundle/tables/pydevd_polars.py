@@ -6,6 +6,7 @@ MAX_COLWIDTH = 100000
 pl_version_major, pl_version_minor, _ = pl.__version__.split(".")
 pl_version_major, pl_version_minor = int(pl_version_major), int(pl_version_minor)
 COUNT_COL_NAME = "counts" if pl_version_major == 0 and pl_version_minor < 20 else "count"
+CSV_FORMAT_SEPARATOR = '~'
 
 
 def get_type(table):
@@ -21,7 +22,7 @@ def get_shape(table):
 def get_head(table):
     # type: (pl.DataFrame) -> str
     with __create_config():
-        return table.head()._repr_html_()
+        return table.head(1)._repr_html_()
 
 
 def get_column_types(table):
@@ -32,25 +33,68 @@ def get_column_types(table):
         return TABLE_TYPE_NEXT_VALUE_SEPARATOR.join([str(t) for t in table.dtypes])
 
 
-# used by pydevd, isDisplaySupported equals false
-def get_data(table, start_index=None, end_index=None):
+def __write_to_csv(table, null_value="null", float_precision=None):
+    def serialize_nested(value, null_value="null", float_precision=None):
+        if value is None:
+            return null_value
+        elif isinstance(value, float) and float_precision is not None:
+            return "{:.{}f}".format(value, float_precision)
+        elif isinstance(value, dict):
+            return "{" + ", ".join("{}: {}".format(k, serialize_nested(v, null_value, float_precision)) for k, v in value.items()) + "}"
+        elif isinstance(value, list):
+            return "[" + ", ".join(serialize_nested(v, null_value, float_precision) for v in value) + "]"
+        else:
+            return str(value)
+
+    lines = []
+    lines.append(CSV_FORMAT_SEPARATOR.join(table.columns))
+    for row in table.rows():
+        line = []
+        for value in row:
+            line.append(serialize_nested(value, null_value, float_precision))
+        lines.append(CSV_FORMAT_SEPARATOR.join(line))
+    return "\n".join(lines)
+
+
+
+# used by pydevd
+def get_data(table, use_csv_serialization, start_index=None, end_index=None, format=None):
     # type: (pl.DataFrame, int, int) -> str
-    with __create_config():
+    with __create_config(format):
+        if use_csv_serialization:
+            float_precision = _get_float_precision(format)
+            return __write_to_csv(__get_df_slice(table, start_index, end_index), float_precision=float_precision)
         return table[start_index:end_index]._repr_html_()
 
 
-# used by DSTableCommands isDisplaySupported equals true
-def display_data(table, start, end):
+# used by DSTableCommands
+def display_data_html(table, start, end):
     # type: (pl.DataFrame, int, int) -> None
     with __create_config():
         print(table[start:end]._repr_html_())
 
 
-def __create_config():
-    # type: () -> pl.Config
+def display_data_csv(table, start, end):
+    # type: (pl.DataFrame, int, int) -> None
+    with __create_config():
+        print(__write_to_csv(__get_df_slice(table, start, end)))
+
+
+def __get_df_slice(table, start_index, end_index):
+    if 'Series' in str(type(table)):
+        return table[start_index:end_index].to_frame()
+    return table[start_index:end_index]
+
+
+def __create_config(format=None):
+    # type: (Union[str, None]) -> pl.Config
     cfg = pl.Config()
     cfg.set_tbl_cols(-1)  # Unlimited
+    cfg.set_tbl_rows(-1)  # Unlimited
     cfg.set_fmt_str_lengths(MAX_COLWIDTH)  # No option to set unlimited, so it's 100_000
+    float_precision = _get_float_precision(format)
+    if float_precision is not None:
+        cfg.set_float_precision(float_precision)
     return cfg
 
 
@@ -62,12 +106,6 @@ def get_column_descriptions(table):
         return get_data(described_results, None, None)
     else:
         return ""
-
-
-# Polars compute NaN-s in describe. So, we don't need get_value_counts for Polars
-def get_value_counts(table):
-    # type: (Union[pl.DataFrame, pl.Series]) -> str
-    return ""
 
 
 class ColumnVisualisationType:
@@ -203,3 +241,20 @@ def __get_describe(table):
     # then Polars will raise TypeError exception. We should catch them.
     except:
         return
+
+
+def _get_float_precision(format):
+    # type: (Union[str, None]) -> Union[int, None]
+    if isinstance(format, str):
+        if format.startswith("%") and format.endswith("f"):
+            start = format.find('%.') + 2
+            end = format.find('f')
+
+            if start < end:
+                try:
+                    precision = int(format[start:end])
+                    return precision
+                except:
+                    pass
+
+    return None

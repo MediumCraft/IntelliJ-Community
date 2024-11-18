@@ -11,12 +11,13 @@ import com.intellij.refactoring.changeSignature.OverriderUsageInfo
 import com.intellij.refactoring.util.CommonRefactoringUtil
 import com.intellij.usageView.UsageInfo
 import com.intellij.util.containers.MultiMap
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
+import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
+import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.analyze
-import org.jetbrains.kotlin.analysis.api.symbols.KtDeclarationSymbol
-import org.jetbrains.kotlin.analysis.api.symbols.KtFunctionLikeSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaDeclarationSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaFunctionSymbol
 import org.jetbrains.kotlin.analysis.api.symbols.receiverType
-import org.jetbrains.kotlin.analysis.api.types.KtType
+import org.jetbrains.kotlin.analysis.api.types.KaType
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.k2.refactoring.changeSignature.usages.KotlinByConventionCallUsage
 import org.jetbrains.kotlin.idea.k2.refactoring.changeSignature.usages.KotlinChangeSignatureConflictingUsageInfo
@@ -139,12 +140,13 @@ class KotlinChangeSignatureConflictSearcher(
         return result
     }
 
-    context(KtAnalysisSession)
-    private fun KtPsiFactory.createContextType(text: String, context: KtElement): KtType? {
-        return createTypeCodeFragment(text, context).getContentElement()?.getKtType()
+    context(KaSession)
+    private fun KtPsiFactory.createContextType(text: String, context: KtElement): KaType? {
+        return createTypeCodeFragment(text, context).getContentElement()?.type
     }
-    context(KtAnalysisSession)
-    private fun filterCandidates(function: KtCallableDeclaration, candidateSymbol: KtDeclarationSymbol): Boolean {
+    context(KaSession)
+    @OptIn(KaExperimentalApi::class)
+    private fun filterCandidates(function: KtCallableDeclaration, candidateSymbol: KaDeclarationSymbol): Boolean {
         val factory = KtPsiFactory(function.project)
         val newReceiverType = originalInfo.receiverParameterInfo?.currentType?.text?.let {
             factory.createContextType(it, function)
@@ -154,13 +156,13 @@ class KotlinChangeSignatureConflictSearcher(
                 factory.createContextType(it, function)
             }
         }
-        return candidateSymbol is KtFunctionLikeSymbol &&
+        return candidateSymbol is KaFunctionSymbol &&
                 areSameSignatures(
                     newReceiverType,
                     candidateSymbol.receiverType,
                     newParameterTypes,
                     candidateSymbol.valueParameters.map { it.returnType }, //todo currently context receiver can't be changed
-                    (function.getSymbol() as? KtFunctionLikeSymbol)?.contextReceivers ?: emptyList(),
+                    (function.symbol as? KaFunctionSymbol)?.contextReceivers ?: emptyList(),
                     candidateSymbol.contextReceivers
                 )
     }
@@ -249,6 +251,8 @@ class KotlinChangeSignatureConflictSearcher(
         if (ReferencesSearch.search(element).filtering { ref ->
                 val refElement = ref.element
                 !(refElement is KtSimpleNameExpression && refElement.parent is KtValueArgumentName)
+            }.filtering { ref ->
+                KotlinChangeSignatureConflictFilter.EP_NAME.extensionList.none { it.skipUsage(element, ref) }
             }.findFirst() != null) {
             result.putValue(element, KotlinBundle.message("parameter.used.in.declaration.body.warning", element.name.toString()))
         }

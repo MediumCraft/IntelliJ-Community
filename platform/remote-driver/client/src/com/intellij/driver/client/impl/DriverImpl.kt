@@ -1,15 +1,9 @@
 package com.intellij.driver.client.impl
 
-import com.intellij.driver.client.Driver
-import com.intellij.driver.client.ProjectRef
-import com.intellij.driver.client.Remote
-import com.intellij.driver.client.Timed
-import com.intellij.driver.model.LockSemantics
-import com.intellij.driver.model.OnDispatcher
-import com.intellij.driver.model.ProductVersion
-import com.intellij.driver.model.RdTarget
+import com.intellij.driver.client.*
+import com.intellij.driver.model.*
 import com.intellij.driver.model.transport.*
-import java.lang.IllegalStateException
+import java.awt.IllegalComponentStateException
 import java.lang.reflect.Method
 import java.lang.reflect.ParameterizedType
 import java.lang.reflect.Proxy
@@ -26,6 +20,8 @@ open class DriverImpl(host: JmxHost?, override val isRemoteIdeMode: Boolean) : D
   private val appServices: MutableMap<AppServiceId, Any> = ConcurrentHashMap()
   private val projectServices: MutableMap<ProjectServiceId, Any> = ConcurrentHashMap()
   private val utils: MutableMap<UtilityId, Any> = ConcurrentHashMap()
+
+  protected open val polymorphRegistry: PolymorphRefRegistry? = null
 
   override val isConnected: Boolean
     get() {
@@ -88,8 +84,8 @@ open class DriverImpl(host: JmxHost?, override val isRemoteIdeMode: Boolean) : D
       dispatcher,
       semantics,
       remote.value,
-      if (rdTarget == RdTarget.DEFAULT) RdTarget.FRONTEND else rdTarget,
-      convertArgsToPass(args)
+      rdTarget,
+      convertArgsToPass(rdTarget, args)
     )
     val callResult = makeCall(call)
     return convertResult(callResult, clazz.java, getPluginId(remote)) as T
@@ -107,10 +103,11 @@ open class DriverImpl(host: JmxHost?, override val isRemoteIdeMode: Boolean) : D
     return refBridge(clazz.java, ref, refPluginId) as T
   }
 
-  private fun convertArgsToPass(args: Array<out Any?>?): Array<Any?> {
+  private fun convertArgsToPass(rdTarget: RdTarget, args: Array<out Any?>?): Array<Any?> {
     if (args == null) return emptyArray()
 
     return args
+      .map { if (it is PolymorphRef && polymorphRegistry != null) polymorphRegistry?.convert(it, rdTarget) else it }
       .map { if (it is RefWrapper) it.getRef() else it }
       .toTypedArray()
   }
@@ -187,7 +184,7 @@ open class DriverImpl(host: JmxHost?, override val isRemoteIdeMode: Boolean) : D
             semantics,
             remote.value,
             method.name,
-            convertArgsToPass(args),
+            convertArgsToPass(rdTarget, args),
             (project as? RefWrapper?)?.getRef(),
             remote.serviceInterface.takeIf { it.isNotBlank() },
             rdTarget
@@ -202,6 +199,12 @@ open class DriverImpl(host: JmxHost?, override val isRemoteIdeMode: Boolean) : D
   private fun makeCall(call: RemoteCall): RemoteCallResult {
     return try {
       invoker.invoke(call)
+    }
+    catch (ise: IllegalComponentStateException) {
+      throw ise
+    }
+    catch (ed: DriverIllegalStateException) {
+      throw ed
     }
     catch (e: Exception) {
       throw DriverCallException("Error on remote driver call", e)
@@ -228,7 +231,7 @@ open class DriverImpl(host: JmxHost?, override val isRemoteIdeMode: Boolean) : D
             remote.value,
             method.name,
             rdTarget,
-            convertArgsToPass(args),
+            convertArgsToPass(rdTarget, args),
           )
           val callResult = makeCall(call)
           convertResult(callResult, method, getPluginId(remote))
@@ -258,7 +261,7 @@ open class DriverImpl(host: JmxHost?, override val isRemoteIdeMode: Boolean) : D
             semantics,
             remote.value,
             method.name,
-            convertArgsToPass(args),
+            convertArgsToPass(ref.rdTarget(), args),
             ref
           )
           val callResult = makeCall(call)
@@ -330,19 +333,20 @@ private fun findRemoteMeta(clazz: Class<*>): Remote? {
 }
 
 private fun mergeRdTargets(
-  rdTarget: RdTarget,
+  forceRdTarget: RdTarget,
   remote: Remote,
   vararg args: Any?
 ): RdTarget {
-  val rdTargets = args.filterIsInstance<RefWrapper>()
+  val argsRdTargets = args.filterIsInstance<RefWrapper>().filter { it !is PolymorphRef }
     .map { it.getRef().rdTarget() }
 
-  return (rdTargets + rdTarget + remote.rdTarget).reduce { acc, b ->
+  return (argsRdTargets + forceRdTarget + remote.rdTarget).reduce { acc, b ->
     if (acc == RdTarget.DEFAULT) b
     else if (b == RdTarget.DEFAULT) acc
     else if (acc == b) acc
-    else throw IllegalStateException("Inconsistent rdTargets. " +
-                                     "ForceRdTarget=$rdTarget " +
+    else throw IllegalStateException("Inconsistent rdTargets. Use can not request service with non default RtTarget as service of another non default RtTarget." +
+                                     "Consider introducing a separate service or changing type of the service to RdDefault." +
+                                     "ForceRdTarget=$forceRdTarget " +
                                      "Remote(value=${remote.value}, rdTarget=${remote.rdTarget}), " +
                                      "Args: [${args.filterIsInstance<RefWrapper>().map { "${it.getRef().rdTarget()} -> $it" }.joinToString()}]"
     )

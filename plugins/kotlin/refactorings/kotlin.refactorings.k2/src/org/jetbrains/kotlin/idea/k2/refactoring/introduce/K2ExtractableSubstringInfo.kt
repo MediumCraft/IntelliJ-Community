@@ -1,10 +1,9 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.kotlin.idea.k2.refactoring.introduce
 
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
+import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.analyze
-import org.jetbrains.kotlin.analysis.api.components.KtConstantEvaluationMode
-import org.jetbrains.kotlin.analysis.api.types.KtType
+import org.jetbrains.kotlin.analysis.api.types.KaType
 import org.jetbrains.kotlin.idea.refactoring.introduce.ExtractableSubstringInfo
 import org.jetbrains.kotlin.psi.KtLiteralStringTemplateEntry
 import org.jetbrains.kotlin.psi.KtPsiFactory
@@ -21,9 +20,9 @@ class K2ExtractableSubstringInfo(
     isStr: Boolean? = null
 ) : ExtractableSubstringInfo(startEntry, endEntry, prefix, suffix) {
 
-    context(KtAnalysisSession)
-    fun guessLiteralType(): KtType {
-        val stringType = builtinTypes.STRING
+    context(KaSession)
+    fun guessLiteralType(): KaType {
+        val stringType = builtinTypes.string
 
         if (startEntry != endEntry || startEntry !is KtLiteralStringTemplateEntry) return stringType
 
@@ -35,14 +34,14 @@ class K2ExtractableSubstringInfo(
 
         val expr = factory.createExpressionCodeFragment(content, startEntry).getContentElement() ?: return stringType
 
-        val value = expr.evaluate(KtConstantEvaluationMode.CONSTANT_EXPRESSION_EVALUATION)
+        val value = expr.evaluate()
 
         if (value == null) return stringType
 
-        return expr.getKtType() ?: stringType
+        return expr.expressionType ?: stringType
     }
 
-    override val isString: Boolean = isStr ?: analyze(startEntry) { guessLiteralType().isString }
+    override val isString: Boolean = isStr ?: analyze(startEntry) { guessLiteralType().isStringType }
 
     override fun copy(
         newStartEntry: KtStringTemplateEntry,

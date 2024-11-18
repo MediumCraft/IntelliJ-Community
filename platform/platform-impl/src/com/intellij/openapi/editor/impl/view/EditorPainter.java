@@ -37,6 +37,7 @@ import it.unimi.dsi.fastutil.floats.FloatArrayList;
 import it.unimi.dsi.fastutil.floats.FloatList;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -48,17 +49,32 @@ import java.util.List;
 import java.util.*;
 import java.util.function.Consumer;
 
-
+//@ApiStatus.Internal
 public final class EditorPainter implements TextDrawingCallback {
+
   private static final Color CARET_LIGHT = Gray._255;
   private static final Color CARET_DARK = Gray._0;
-  public static final Stroke IME_COMPOSED_TEXT_UNDERLINE_STROKE = new BasicStroke(1, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND, 0,
-                                                                                   new float[]{0, 2, 0, 2}, 0);
   private static final int CARET_DIRECTION_MARK_SIZE = 3;
   private static final char IDEOGRAPHIC_SPACE = '\u3000';
   private static final String WHITESPACE_CHARS = " \t" + IDEOGRAPHIC_SPACE;
   private static final Object ourCachedDot = ObjectUtils.sentinel("space symbol");
+
+  @ApiStatus.Internal
+  public static final Stroke IME_COMPOSED_TEXT_UNDERLINE_STROKE = new BasicStroke(1, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND, 0, new float[]{0, 2, 0, 2}, 0);
+
+  @ApiStatus.Internal
   public static final String EDITOR_TAB_PAINTING = "editor.tab.painting";
+
+  public static int getIndentGuideShift(@NotNull Editor editor) {
+    return - Session.getTabGap(Session.getWhiteSpaceScale(editor)) / 2;
+  }
+
+  @ApiStatus.Internal
+  public static boolean isMarginShown(@NotNull Editor editor) {
+    return editor.getSettings().isRightMarginShown() &&
+           editor.getColorsScheme().getColor(EditorColors.RIGHT_MARGIN_COLOR) != null &&
+           (Registry.is("editor.show.right.margin.in.read.only.files") || editor.getDocument().isWritable());
+  }
 
   private final EditorView myView;
 
@@ -93,16 +109,6 @@ public final class EditorPainter implements TextDrawingCallback {
     g.drawChars(data, start, end - start, x, y);
   }
 
-  public static boolean isMarginShown(@NotNull Editor editor) {
-    return editor.getSettings().isRightMarginShown() &&
-           editor.getColorsScheme().getColor(EditorColors.RIGHT_MARGIN_COLOR) != null &&
-           (Registry.is("editor.show.right.margin.in.read.only.files") || editor.getDocument().isWritable());
-  }
-
-  public static int getIndentGuideShift(@NotNull Editor editor) {
-    return - Session.getTabGap(Session.getWhiteSpaceScale(editor)) / 2;
-  }
-
   private static final class Session {
     private final EditorView myView;
     private final EditorImpl myEditor;
@@ -122,7 +128,7 @@ public final class EditorPainter implements TextDrawingCallback {
     private final int mySeparatorHighlightersStartOffset;
     private final int mySeparatorHighlightersEndOffset;
     private final ClipDetector myClipDetector;
-    private final IterationState.CaretData myCaretData;
+    private final CaretData myCaretData;
     private final Int2ObjectMap<IntPair> myVirtualSelectionMap;
     private final Int2ObjectMap<List<LineExtensionData>> myExtensionData = new Int2ObjectOpenHashMap<>(); // key is visual line
     private final Int2ObjectMap<TextAttributes> myBetweenLinesAttributes = new Int2ObjectOpenHashMap<>(); // key is bottom visual line
@@ -158,7 +164,7 @@ public final class EditorPainter implements TextDrawingCallback {
       mySeparatorHighlightersStartOffset = DocumentUtil.getLineStartOffset(myView.visualLineToOffset(myStartVisualLine - 1), myDocument);
       mySeparatorHighlightersEndOffset = DocumentUtil.getLineEndOffset(myView.visualLineToOffset(myEndVisualLine + 2), myDocument);
       myClipDetector = new ClipDetector(myEditor, myClip);
-      myCaretData = myEditor.isPaintSelection() ? IterationState.createCaretData(myEditor) : null;
+      myCaretData = myEditor.isPaintSelection() ? CaretData.createCaretData(myEditor) : null;
       myVirtualSelectionMap = createVirtualSelectionMap(myEditor, myStartVisualLine, myEndVisualLine);
       myLineHeight = myView.getLineHeight();
       myAscent = myView.getAscent();
@@ -1310,7 +1316,7 @@ public final class EditorPainter implements TextDrawingCallback {
         float x = (float)location.myPoint.getX();
         int y = (int)location.myPoint.getY() - topOverhang + myYShift;
         Caret caret = location.myCaret;
-        CaretVisualAttributes attr = caret == null ? CaretVisualAttributes.DEFAULT : caret.getVisualAttributes();
+        CaretVisualAttributes attr = caret == null ? CaretVisualAttributes.getDefault() : caret.getVisualAttributes();
         g.setColor(attr.getColor() != null ? attr.getColor() : caretColor);
         boolean isRtl = location.myIsRtl;
         float width = location.myWidth;
@@ -1542,7 +1548,7 @@ public final class EditorPainter implements TextDrawingCallback {
                                 visualLineEndOffset == offset ? visualLineEndOffset
                                                               : DocumentUtil.getPreviousCodePointOffset(myDocument, visualLineEndOffset),
                                 visualLineEndOffset,
-                                IterationState.CaretData.copyOf(myCaretData, visLineIterator.isCustomFoldRegionLine() &&
+                                CaretData.copyOf(myCaretData, visLineIterator.isCustomFoldRegionLine() &&
                                                                              !Registry.is("highlight.caret.line.at.custom.fold")),
                                 false, false, false, false);
       }

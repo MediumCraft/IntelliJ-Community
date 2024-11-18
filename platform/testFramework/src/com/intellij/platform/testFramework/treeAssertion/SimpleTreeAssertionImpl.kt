@@ -1,11 +1,10 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.testFramework.treeAssertion
 
-import org.junit.jupiter.api.AssertionFailureBuilder
+import org.assertj.core.api.Assertions.assertThat
 
 internal class SimpleTreeAssertionImpl<T> private constructor() : SimpleTreeAssertion.Node<T> {
-
-  private val expectedChildren = ArrayList<SimpleTree.Node<NodeAssertionOptions<T>>>()
+  private val expectedChildren = ArrayList<SimpleMutableTree.Node<NodeAssertionOptions<T>>>()
 
   private var valueAssertions = ArrayList<(T) -> Unit>()
 
@@ -30,7 +29,7 @@ internal class SimpleTreeAssertionImpl<T> private constructor() : SimpleTreeAsse
       return
     }
     val displayName = options.matcher.displayName
-    val expectedChild = SimpleTree.Node(displayName, options)
+    val expectedChild = SimpleTreeImpl.Node(displayName, options)
     val childAssertion = buildTreeAssertion(assert)
     expectedChild.children.addAll(childAssertion.expectedChildren)
     expectedChild.value.valueAssertions = childAssertion.valueAssertions
@@ -42,7 +41,7 @@ internal class SimpleTreeAssertionImpl<T> private constructor() : SimpleTreeAsse
     val flattenIf: Boolean,
     val skipIf: Boolean,
     val isUnordered: Boolean,
-    var valueAssertions: List<(T) -> Unit> = ArrayList()
+    var valueAssertions: List<(T) -> Unit> = ArrayList(),
   )
 
   private sealed interface NodeMatcher<T> {
@@ -78,9 +77,23 @@ internal class SimpleTreeAssertionImpl<T> private constructor() : SimpleTreeAsse
 
     fun <T> assertTree(actualTree: SimpleTree<T>, isUnordered: Boolean, assert: SimpleTreeAssertion<T>.() -> Unit) {
       val actualMutableTree = actualTree.deepCopyTree()
-      val expectedMutableTree = SimpleTree<NodeAssertionOptions<T>>()
       val assertion = buildTreeAssertion(assert)
-      expectedMutableTree.roots.addAll(assertion.expectedChildren)
+      val expectedMutableTree = SimpleTreeImpl(assertion.expectedChildren)
+      sortTree(expectedMutableTree, actualMutableTree, isUnordered)
+      assertTree(expectedMutableTree, actualMutableTree)
+    }
+
+    fun <T> assertTree(expectedTree: SimpleTree<T>, actualTree: SimpleTree<T>, isUnordered: Boolean) {
+      val actualMutableTree = actualTree.deepCopyTree()
+      val expectedMutableTree = expectedTree.mapTreeValues { node ->
+        NodeAssertionOptions<T>(
+          matcher = NodeMatcher.Name(node.name),
+          flattenIf = false,
+          skipIf = false,
+          isUnordered = false,
+          valueAssertions = listOf { assertThat(it).isEqualTo(node.value) }
+        )
+      }
       sortTree(expectedMutableTree, actualMutableTree, isUnordered)
       assertTree(expectedMutableTree, actualMutableTree)
     }
@@ -99,11 +112,11 @@ internal class SimpleTreeAssertionImpl<T> private constructor() : SimpleTreeAsse
       while (queue.isNotEmpty()) {
         val (expectedNodes, actualNodes) = queue.removeFirst()
         if (expectedNodes.size != actualNodes.size) {
-          throwTreeAssertionError(expectedTree, actualTree)
+          assertThat(actualTree.getTreeString()).isEqualTo(expectedTree.getTreeString())
         }
         for ((expectedNode, actualNode) in expectedNodes.zip(actualNodes)) {
           if (!expectedNode.value.matcher.matches(actualNode)) {
-            throwTreeAssertionError(expectedTree, actualTree)
+            assertThat(actualTree.getTreeString()).isEqualTo(expectedTree.getTreeString())
           }
           for (valueAssertion in expectedNode.value.valueAssertions) {
             valueAssertion.invoke(actualNode.value)
@@ -113,21 +126,14 @@ internal class SimpleTreeAssertionImpl<T> private constructor() : SimpleTreeAsse
       }
     }
 
-    private fun <T> throwTreeAssertionError(expectedTree: SimpleTree<NodeAssertionOptions<T>>, actualTree: SimpleTree<T>): Nothing {
-      throw AssertionFailureBuilder.assertionFailure()
-        .expected(expectedTree.getTreeString())
-        .actual(actualTree.getTreeString())
-        .build()
-    }
-
     private fun <T> sortTree(
-      expectedTree: SimpleTree<NodeAssertionOptions<T>>,
-      actualTree: SimpleTree<T>,
+      expectedTree: SimpleMutableTree<NodeAssertionOptions<T>>,
+      actualTree: SimpleMutableTree<T>,
       isUnordered: Boolean
     ) {
       val queue = ArrayDeque<Pair<
-        MutableList<SimpleTree.Node<NodeAssertionOptions<T>>>,
-        MutableList<SimpleTree.Node<T>>
+        MutableList<SimpleMutableTree.Node<NodeAssertionOptions<T>>>,
+        MutableList<SimpleMutableTree.Node<T>>
         >>()
       queue.add(expectedTree.roots to actualTree.roots)
       while (queue.isNotEmpty()) {
@@ -138,7 +144,7 @@ internal class SimpleTreeAssertionImpl<T> private constructor() : SimpleTreeAsse
           expectedNodes.partition { isUnordered || it.value.isUnordered }
 
         // Partition actual nodes in order of expected nodes
-        val actualUnorderedNodes = ArrayList<SimpleTree.Node<T>>()
+        val actualUnorderedNodes = ArrayList<SimpleMutableTree.Node<T>>()
         val actualOrderedNodes = ArrayList(actualNodes)
         for (expectedUnorderedNode in expectedUnorderedNodes) {
           val index = actualOrderedNodes.indexOfFirst { expectedUnorderedNode.value.matcher.matches(it) }

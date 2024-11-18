@@ -1,10 +1,11 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.debugger.ui.tree.render;
 
 import com.intellij.debugger.DebuggerContext;
 import com.intellij.debugger.JavaDebuggerBundle;
 import com.intellij.debugger.engine.DebuggerManagerThreadImpl;
 import com.intellij.debugger.engine.DebuggerUtils;
+import com.intellij.debugger.engine.FieldVisibilityProvider;
 import com.intellij.debugger.engine.evaluation.EvaluateException;
 import com.intellij.debugger.engine.evaluation.EvaluationContext;
 import com.intellij.debugger.engine.jdi.StackFrameProxy;
@@ -293,7 +294,7 @@ public class ClassRenderer extends NodeRendererImpl {
       return false;
     }
 
-    return true;
+    return FieldVisibilityProvider.shouldDisplayField(field);
   }
 
   @Override
@@ -364,7 +365,7 @@ public class ClassRenderer extends NodeRendererImpl {
       }
     }
     while (!(CommonClassNames.JAVA_LANG_ENUM.equals(classType.name())));
-    final Field field = classType.fieldByName("name");
+    final Field field = DebuggerUtils.findField(classType, "name");
     if (field == null) {
       return null;
     }

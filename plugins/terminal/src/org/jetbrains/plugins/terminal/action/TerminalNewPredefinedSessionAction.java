@@ -25,6 +25,7 @@ import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.terminal.*;
+import org.jetbrains.plugins.terminal.runner.LocalTerminalStartCommandBuilder;
 import org.jetbrains.plugins.terminal.ui.OpenPredefinedTerminalActionProvider;
 
 import javax.swing.*;
@@ -39,6 +40,15 @@ import java.util.List;
 import java.util.function.Supplier;
 
 public final class TerminalNewPredefinedSessionAction extends DumbAwareAction {
+
+  private static final List<String> UNIX_BINARIES_DIRECTORIES = List.of(
+    "/bin",
+    "/usr/bin",
+    "/usr/local/bin",
+    "/opt/homebrew/bin"
+  );
+
+  private static final List<String> UNIX_SHELL_NAMES = List.of("bash", "zsh", "fish", "pwsh");
 
   @Override
   public void actionPerformed(@NotNull AnActionEvent e) {
@@ -103,22 +113,25 @@ public final class TerminalNewPredefinedSessionAction extends DumbAwareAction {
   private static @NotNull List<OpenShellAction> detectShells() {
     List<OpenShellAction> actions = new ArrayList<>();
     if (SystemInfo.isUnix) {
-      ContainerUtil.addIfNotNull(actions, create("/bin/bash", List.of(), "bash (/bin)"));
-      ContainerUtil.addIfNotNull(actions, create("/usr/bin/bash", List.of(), "bash (/usr/bin)"));
-      ContainerUtil.addIfNotNull(actions, create("/usr/local/bin/bash", List.of(), "bash (/usr/local/bin)"));
-      ContainerUtil.addIfNotNull(actions, create("/opt/homebrew/bin/bash", List.of(), "bash (/opt/homebrew/bin)"));
-
-      ContainerUtil.addIfNotNull(actions, create("/bin/zsh", List.of(), "zsh (/bin)"));
-      ContainerUtil.addIfNotNull(actions, create("/usr/bin/zsh", List.of(), "zsh (/usr/bin)"));
-      ContainerUtil.addIfNotNull(actions, create("/usr/local/bin/zsh", List.of(), "zsh (/usr/local/bin)"));
-      ContainerUtil.addIfNotNull(actions, create("/opt/homebrew/bin/zsh", List.of(), "zsh (/opt/homebrew/bin)"));
-
-      ContainerUtil.addIfNotNull(actions, create("/bin/fish", List.of(), "fish (/bin)"));
-      ContainerUtil.addIfNotNull(actions, create("/usr/bin/fish", List.of(), "fish (/usr/bin)"));
-      ContainerUtil.addIfNotNull(actions, create("/usr/local/bin/fish", List.of(), "fish (/usr/local/bin)"));
-      ContainerUtil.addIfNotNull(actions, create("/opt/homebrew/bin/fish", List.of(), "fish (/opt/homebrew/bin)"));
-
-      ContainerUtil.addIfNotNull(actions, create("/opt/homebrew/bin/pwsh", List.of(), "pwsh (/opt/homebrew/bin)"));
+      // Iterate over all combinations of path+shell to find executables.
+      for (String unixShellName : UNIX_SHELL_NAMES) {
+        List<String> validExecutablesDirectories = new ArrayList<>();
+        for (String executablesDirectory : UNIX_BINARIES_DIRECTORIES) {
+          var shellPath = executablesDirectory + "/" + unixShellName;
+          if (Files.exists(Path.of(shellPath))) {
+            validExecutablesDirectories.add(executablesDirectory);
+          }
+        }
+        if (validExecutablesDirectories.size() > 1) {
+          for (String executablesDirectory : validExecutablesDirectories) {
+            // i.e. /bin/zsh -> zsh (/bin)
+            ContainerUtil.addIfNotNull(actions, create(executablesDirectory + "/" + unixShellName, List.of(), unixShellName + " (" + executablesDirectory + ")"));
+          }
+        } else if (validExecutablesDirectories.size() == 1) {
+          // If only 1 shell of type fount - then there is no need to specify path.
+          ContainerUtil.addIfNotNull(actions, create(validExecutablesDirectories.get(0) + "/" + unixShellName, List.of(), unixShellName));
+        }
+      }
     }
     else if (SystemInfo.isWindows) {
       File powershell = PathEnvironmentVariableUtil.findInPath("powershell.exe");
@@ -133,8 +146,10 @@ public final class TerminalNewPredefinedSessionAction extends DumbAwareAction {
       if (pwsh != null && StringUtil.startsWithIgnoreCase(pwsh.getAbsolutePath(), "C:\\Program Files\\PowerShell\\")) {
         ContainerUtil.addIfNotNull(actions, create(pwsh.getAbsolutePath(), List.of(), "PowerShell"));
       }
-      File gitBash = new File("C:\\Program Files\\Git\\bin\\bash.exe");
-      if (gitBash.isFile()) {
+      File gitBashGlobal = new File("C:\\Program Files\\Git\\bin\\bash.exe");
+      File gitBashLocal = new File(System.getenv("LocalAppData") + "\\Programs\\Git\\bin\\bash.exe");
+      File gitBash = gitBashLocal.isFile() ? gitBashLocal : (gitBashGlobal.isFile() ? gitBashGlobal : null);
+      if (gitBash != null) {
         ContainerUtil.addIfNotNull(actions, create(gitBash.getAbsolutePath(), List.of(), "Git Bash"));
       }
       String cmderRoot = EnvironmentUtil.getValue("CMDER_ROOT");
@@ -150,7 +165,7 @@ public final class TerminalNewPredefinedSessionAction extends DumbAwareAction {
 
   private static @Nullable OpenShellAction create(@NotNull String shellPath, @NotNull List<String> shellOptions, @NlsSafe String presentableName) {
     if (Files.exists(Path.of(shellPath))) {
-      List<String> shellCommand = LocalTerminalDirectRunner.convertShellPathToCommand(shellPath);
+      List<String> shellCommand = LocalTerminalStartCommandBuilder.convertShellPathToCommand(shellPath);
       List<String> otherOptions = shellOptions.stream().filter(opt -> !shellCommand.contains(opt)).toList();
       return new OpenShellAction(() -> presentableName, ContainerUtil.concat(shellCommand, otherOptions), null);
     }

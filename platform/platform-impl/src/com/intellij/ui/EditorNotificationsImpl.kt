@@ -20,6 +20,7 @@ import com.intellij.openapi.fileEditor.impl.FileEditorManagerImpl
 import com.intellij.openapi.fileEditor.impl.text.AsyncEditorLoader.Companion.isEditorLoaded
 import com.intellij.openapi.fileEditor.impl.text.TextEditorImpl
 import com.intellij.openapi.project.DumbService
+import com.intellij.openapi.project.IndexNotReadyException
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.AdditionalLibraryRootsListener
 import com.intellij.openapi.roots.ModuleRootEvent
@@ -40,6 +41,7 @@ import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
+import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.TestOnly
 import java.util.*
 import java.util.concurrent.CancellationException
@@ -53,6 +55,7 @@ private val EDITOR_NOTIFICATION_PROVIDER: Key<MutableMap<Class<EditorNotificatio
 private val PENDING_UPDATE: Key<Boolean> = Key.create("pending.notification.update")
 private val FILE_LEVEL_INTENTIONS: Key<List<IntentionActionWithOptions>> = Key.create("file.level.intentions")
 
+@ApiStatus.Internal
 class EditorNotificationsImpl(private val project: Project,
                               coroutineScope: CoroutineScope) : EditorNotifications(), Disposable {
 
@@ -167,8 +170,10 @@ class EditorNotificationsImpl(private val project: Project,
 
   override fun updateNotifications(file: VirtualFile) {
     coroutineScope.launch(Dispatchers.EDT + ModalityState.any().asContextElement()) {
-      if (file.isValid) {
-        doUpdateNotifications(file)
+      writeIntentReadAction {
+        if (file.isValid) {
+          doUpdateNotifications(file)
+        }
       }
     }
   }
@@ -246,14 +251,17 @@ class EditorNotificationsImpl(private val project: Project,
 
           val componentProvider = result.orElse(null)
           withContext(Dispatchers.EDT + ModalityState.any().asContextElement()) {
-            if (!file.isValid) {
-              return@withContext
-            }
-
-            for (fileEditor in fileEditors) {
-              updateNotification(fileEditor = fileEditor, provider = provider, component = componentProvider?.apply(fileEditor))
+            writeIntentReadAction {
+              if (!file.isValid) {
+                return@writeIntentReadAction
+              }
+              for (fileEditor in fileEditors) {
+                updateNotification(fileEditor = fileEditor, provider = provider, component = componentProvider?.apply(fileEditor))
+              }
             }
           }
+        }
+        catch (_: IndexNotReadyException) {
         }
         catch (e: CancellationException) {
           throw e

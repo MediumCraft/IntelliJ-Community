@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.idea;
 
 import com.github.benmanes.caffeine.cache.Cache;
@@ -35,7 +35,6 @@ import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
-import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public final class IdeaLogger extends JulLogger {
@@ -48,9 +47,9 @@ public final class IdeaLogger extends JulLogger {
    * so that instead of polluting the log with hundreds of identical {@link com.intellij.openapi.diagnostic.Logger#error(Throwable) LOG.errors}
    * we print the error message and the stacktrace once in a while.
    * <p>
-   *  "-Didea.logger.exception.expiration.minutes=5" means to forget about this particular exception if it didn't occur for five minutes.
+   * {@code -Didea.logger.exception.expiration.minutes=5} means to forget about this particular exception if it didn't occur for five minutes.
    * <p>
-   *  To disable this "mute frequent exceptions" feature completely specify "-Didea.logger.exception.expiration.minutes=0"
+   * To disable the "mute frequent exceptions" feature completely, specify {@code -Didea.logger.exception.expiration.minutes=0}
    */
   private static final int EXPIRE_FREQUENT_EXCEPTIONS_AFTER_MINUTES = Integer.getInteger("idea.logger.exception.expiration.minutes", 8*60);
 
@@ -62,7 +61,7 @@ public final class IdeaLogger extends JulLogger {
       .build();
 
     private static @NotNull AtomicInteger getOrCreate(int hash, @NotNull Throwable t) {
-      return cache.get(hash+":"+t, __ -> new AtomicInteger());
+      return cache.get(hash + ":" + t, __ -> new AtomicInteger());
     }
   }
 
@@ -112,9 +111,10 @@ public final class IdeaLogger extends JulLogger {
   }
 
   @Override
+  @SuppressWarnings("deprecation")
   public void error(Object message) {
     if (message instanceof IdeaLoggingEvent) {
-       myLogger.log(Level.SEVERE, "{0}", message);
+      logSevere(message.toString());
     }
     else {
       super.error(message);
@@ -127,7 +127,7 @@ public final class IdeaLogger extends JulLogger {
       return;
     }
 
-    myLogger.log(Level.SEVERE, "{0}", LogMessage.eventOf(t != null ? t : new Throwable(), message, List.of(attachments)));
+    logSevere(LogMessage.eventOf(t != null ? t : new Throwable(), message, List.of(attachments)).toString());
     if (t != null) {
       reportToFus(t);
     }
@@ -151,7 +151,7 @@ public final class IdeaLogger extends JulLogger {
 
   private void doLogError(String message, @Nullable Throwable t, String @NotNull ... details) {
     if (t instanceof ControlFlowException) {
-      myLogger.log(Level.SEVERE, message, ensureNotControlFlow(t));
+      logSevere(message, ensureNotControlFlow(t));
       ExceptionUtil.rethrow(t);
     }
 
@@ -166,23 +166,23 @@ public final class IdeaLogger extends JulLogger {
       //noinspection AssignmentToStaticFieldFromInstanceMethod
       ourErrorsOccurred = new Exception(mess + detailString, t);
     }
-    myLogger.log(Level.SEVERE, message + detailString, t);
+    logSevere(message + detailString, t);
   }
 
   private void logErrorHeader(@Nullable Throwable t) {
-    myLogger.severe(ourApplicationInfoProvider.get());
+    logSevere(ourApplicationInfoProvider.get());
 
     Properties properties = System.getProperties();
-    myLogger.severe("JDK: " + properties.getProperty("java.version", "unknown") +
+    logSevere("JDK: " + properties.getProperty("java.version", "unknown") +
                     "; VM: " + properties.getProperty("java.vm.name", "unknown") +
                     "; Vendor: " + properties.getProperty("java.vendor", "unknown"));
-    myLogger.severe("OS: " + properties.getProperty("os.name", "unknown"));
+    logSevere("OS: " + properties.getProperty("os.name", "unknown"));
 
     // do not use getInstance here - container maybe already disposed
     if (t != null && PluginManagerCore.arePluginsInitialized()) {
       IdeaPluginDescriptor plugin = PluginManagerCore.getPlugin(PluginUtilImpl.doFindPluginId(t));
       if (plugin != null && (!plugin.isBundled() || plugin.allowBundledUpdate())) {
-         myLogger.severe("Plugin to blame: " + plugin.getName() + " version: " + plugin.getVersion());
+        logSevere("Plugin to blame: " + plugin.getName() + " version: " + plugin.getVersion());
       }
     }
 
@@ -190,14 +190,14 @@ public final class IdeaLogger extends JulLogger {
     if (application != null && application.isComponentCreated() && !application.isDisposed()) {
       String lastPreformedActionId = ourLastActionId;
       if (lastPreformedActionId != null) {
-         myLogger.severe("Last Action: " + lastPreformedActionId);
+        logSevere("Last Action: " + lastPreformedActionId);
       }
 
       CommandProcessor commandProcessor = application.getServiceIfCreated(CommandProcessor.class);
       if (commandProcessor != null) {
         String currentCommandName = commandProcessor.getCurrentCommandName();
         if (currentCommandName != null) {
-           myLogger.severe("Current Command: " + currentCommandName);
+          logSevere("Current Command: " + currentCommandName);
         }
       }
     }

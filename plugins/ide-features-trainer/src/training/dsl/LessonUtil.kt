@@ -13,7 +13,8 @@ import com.intellij.execution.ui.layout.impl.RunnerLayoutSettings
 import com.intellij.ide.DataManager
 import com.intellij.ide.IdeBundle
 import com.intellij.ide.impl.DataManagerImpl
-import com.intellij.openapi.actionSystem.*
+import com.intellij.openapi.actionSystem.ActionPlaces
+import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.ex.ActionUtil
 import com.intellij.openapi.actionSystem.impl.ActionButton
 import com.intellij.openapi.actionSystem.impl.ActionToolbarImpl
@@ -60,6 +61,7 @@ import com.intellij.xdebugger.XExpression
 import com.intellij.xdebugger.impl.ui.XDebuggerEmbeddedComboBox
 import org.assertj.swing.timing.Timeout
 import org.intellij.lang.annotations.Language
+import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.Nls
 import training.FeaturesTrainerIcons
 import training.dsl.LessonUtil.checkExpectedStateOfEditor
@@ -275,7 +277,7 @@ object LessonUtil {
   ) {
     task {
       triggerAndBorderHighlight().componentPart l@{ ui: EditorGutterComponentEx ->
-        if (CommonDataKeys.EDITOR.getData(ui as DataProvider) != editor) return@l null
+        if (ui.editor != editor) return@l null
         val y = editor.visualLineToY(editor.logicalToVisualPosition(logicalPosition()).line)
         val range = xRange(ui.width)
         return@l Rectangle(range.first, y, range.last - range.first + 1, editor.lineHeight)
@@ -307,7 +309,7 @@ object LessonUtil {
       this.highlightInside = highlightInside
       this.usePulsation = usePulsation
     }.componentPart l@{ ui: EditorGutterComponentEx ->
-      if (CommonDataKeys.EDITOR.getData(ui as DataProvider) != editor) return@l null
+      if (ui.editor != editor) return@l null
       val runGutterLines = (0 until editor.document.lineCount).mapNotNull { lineInd ->
         if (ui.getGutterRenderers(lineInd).any { (it as? LineMarkerInfo.LineMarkerGutterIconRenderer<*>)?.featureId == "run" })
           lineInd
@@ -445,8 +447,7 @@ fun LessonContext.highlightRunToolbar(highlightInside: Boolean = true, usePulsat
       this.highlightInside = highlightInside
       this.usePulsation = usePulsation
     }.component { toolbar: ActionToolbarImpl ->
-      val actionId = ActionManager.getInstance().getId(toolbar.actionGroup)
-      actionId == "RunToolbarMainActionGroup"
+      toolbar.place == ActionPlaces.NEW_UI_RUN_TOOLBAR
     }
   }
 }
@@ -708,6 +709,7 @@ inline fun <reified ComponentType : Component> LessonContext.highlightAllFoundUi
   }
 }
 
+@ApiStatus.ScheduledForRemoval
 @Deprecated("Use inline form instead")
 fun <ComponentType : Component> LessonContext.highlightAllFoundUiWithClass(componentClass: Class<ComponentType>,
                                                                            clearPreviousHighlights: Boolean,

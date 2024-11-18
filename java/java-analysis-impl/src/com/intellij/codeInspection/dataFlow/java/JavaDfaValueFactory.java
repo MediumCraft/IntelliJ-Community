@@ -24,7 +24,6 @@ import com.intellij.psi.util.PropertyUtilBase;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
 import com.siyeh.ig.callMatcher.CallMatcher;
-import com.siyeh.ig.psiutils.ClassUtils;
 import com.siyeh.ig.psiutils.ExpressionUtils;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NonNls;
@@ -112,7 +111,7 @@ public final class JavaDfaValueFactory {
         target = tryCast(qualifier.resolve(), PsiClass.class);
       }
       else {
-        target = ClassUtils.getContainingClass(expression);
+        target = PsiUtil.getContainingClass(expression);
       }
       return target == null
              ? factory.fromDfType(DfTypes.typedObject(expression.getType(), Nullability.NOT_NULL))
@@ -152,7 +151,7 @@ public final class JavaDfaValueFactory {
     if (qualifierExpression == null) {
       PsiElement element = refExpr.resolve();
       if (element instanceof PsiMember && !((PsiMember)element).hasModifierProperty(PsiModifier.STATIC)) {
-        PsiClass currentClass = ClassUtils.getContainingClass(refExpr);
+        PsiClass currentClass = PsiUtil.getContainingClass(refExpr);
         PsiClass memberClass = ((PsiMember)element).getContainingClass();
         if (memberClass != null && currentClass != null) {
           PsiClass target;
@@ -165,6 +164,11 @@ public final class JavaDfaValueFactory {
           return ThisDescriptor.createThisValue(factory, target);
         }
       }
+    }
+    qualifierExpression = PsiUtil.skipParenthesizedExprDown(qualifierExpression);
+    if (qualifierExpression instanceof PsiTypeCastExpression castExpression &&
+        castExpression.getType() instanceof PsiClassType) {
+      qualifierExpression = castExpression.getOperand();
     }
     return getQualifierValue(factory, qualifierExpression);
   }
@@ -180,9 +184,9 @@ public final class JavaDfaValueFactory {
     return qualifierValue;
   }
 
-  private static boolean maybeUninitializedConstant(DfaValue constValue,
-                                                    @NotNull PsiReferenceExpression refExpr,
-                                                    PsiModifierListOwner var) {
+  static boolean maybeUninitializedConstant(DfaValue constValue,
+                                            @NotNull PsiReferenceExpression refExpr,
+                                            PsiModifierListOwner var) {
     // If static final field is referred from the same or inner/nested class,
     // we consider that it might be uninitialized yet as some class initializers may call its methods or
     // even instantiate objects of this class and call their methods
@@ -248,7 +252,7 @@ public final class JavaDfaValueFactory {
    * @return a value that represents a constant created from variable; null if variable cannot be represented as a constant
    */
   @Nullable
-  private static DfaValue getConstantFromVariable(DfaValueFactory factory, PsiVariable variable) {
+  static DfaValue getConstantFromVariable(DfaValueFactory factory, PsiVariable variable) {
     if (!variable.hasModifierProperty(PsiModifier.FINAL) || ignoreInitializer(variable)) return null;
     Object value = variable.computeConstantValue();
     PsiType type = variable.getType();
@@ -288,11 +292,18 @@ public final class JavaDfaValueFactory {
    * @return true if variable initializer should be ignored by analysis
    */
   public static boolean ignoreInitializer(PsiVariable variable) {
-    if (variable instanceof PsiField && variable.hasModifierProperty(PsiModifier.FINAL) && variable.getType().equals(PsiTypes.booleanType())) {
-      // Skip boolean constant fields as they usually used as control knobs to modify program logic
-      // it's better to analyze both true and false values even if it's predefined
-      PsiLiteralExpression initializer = tryCast(PsiUtil.skipParenthesizedExprDown(variable.getInitializer()), PsiLiteralExpression.class);
-      return initializer != null && initializer.getValue() instanceof Boolean;
+    if (variable instanceof PsiField && variable.hasModifierProperty(PsiModifier.FINAL)) {
+      if (variable.getClass().getName().equals("org.jetbrains.kotlin.light.classes.symbol.fields.SymbolLightFieldForProperty")) {
+        // Kotlin light fields may report default value as initializer, which is wrong. See KT-71407
+        return true;
+      }
+      if (variable.getType().equals(PsiTypes.booleanType())) {
+        // Skip boolean constant fields as they usually used as control knobs to modify program logic
+        // it's better to analyze both true and false values even if it's predefined
+        PsiLiteralExpression initializer =
+          tryCast(PsiUtil.skipParenthesizedExprDown(variable.getInitializer()), PsiLiteralExpression.class);
+        return initializer != null && initializer.getValue() instanceof Boolean;
+      }
     }
     return false;
   }

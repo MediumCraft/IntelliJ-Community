@@ -5,22 +5,17 @@ import com.intellij.openapi.util.NlsSafe
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiReference
 import org.jetbrains.kotlin.analysis.api.analyze
-import org.jetbrains.kotlin.analysis.api.calls.KtCallableMemberCall
-import org.jetbrains.kotlin.analysis.api.calls.KtImplicitReceiverValue
-import org.jetbrains.kotlin.analysis.api.calls.successfulCallOrNull
+import org.jetbrains.kotlin.analysis.api.resolution.KaCallableMemberCall
+import org.jetbrains.kotlin.analysis.api.resolution.KaImplicitReceiverValue
+import org.jetbrains.kotlin.analysis.api.resolution.successfulCallOrNull
 import org.jetbrains.kotlin.analysis.api.permissions.KaAllowAnalysisFromWriteAction
 import org.jetbrains.kotlin.analysis.api.permissions.KaAllowAnalysisOnEdt
 import org.jetbrains.kotlin.analysis.api.permissions.allowAnalysisFromWriteAction
 import org.jetbrains.kotlin.analysis.api.permissions.allowAnalysisOnEdt
-import org.jetbrains.kotlin.analysis.api.symbols.KtCallableSymbol
-import org.jetbrains.kotlin.analysis.api.symbols.KtConstructorSymbol
-import org.jetbrains.kotlin.analysis.api.symbols.KtFunctionLikeSymbol
-import org.jetbrains.kotlin.analysis.api.symbols.KtPropertySymbol
-import org.jetbrains.kotlin.analysis.api.symbols.KtReceiverParameterSymbol
-import org.jetbrains.kotlin.analysis.api.symbols.KtValueParameterSymbol
-import org.jetbrains.kotlin.analysis.api.types.KtFunctionalType
+import org.jetbrains.kotlin.analysis.api.symbols.*
+import org.jetbrains.kotlin.analysis.api.types.KaFunctionType
 import org.jetbrains.kotlin.idea.base.psi.copied
-import org.jetbrains.kotlin.idea.base.psi.isExpectDeclaration
+import org.jetbrains.kotlin.psi.psiUtil.isExpectDeclaration
 import org.jetbrains.kotlin.idea.base.psi.setDefaultValue
 import org.jetbrains.kotlin.idea.refactoring.changeSignature.KotlinModifiableParameterInfo
 import org.jetbrains.kotlin.idea.refactoring.changeSignature.KotlinValVar
@@ -40,6 +35,7 @@ class KotlinParameterInfo(
     override var defaultValueForCall: KtExpression?,
     override var defaultValueAsDefaultParameter: Boolean,
     override var defaultValue: KtExpression?,
+    val modifierList: KtModifierList? = null,
     val context: KtElement
 ) : KotlinModifiableParameterInfo {
     val oldName: String = name
@@ -122,8 +118,8 @@ class KotlinParameterInfo(
             allowAnalysisFromWriteAction {
                 allowAnalysisOnEdt {
                     analyze(inheritedCallable) {
-                        val expectedType = inheritedCallable.getExpectedType()
-                        return expectedType == null || expectedType is KtFunctionalType
+                        val expectedType = inheritedCallable.expectedType
+                        return expectedType == null || expectedType is KaFunctionType
                     }
                 }
             }
@@ -140,6 +136,9 @@ class KotlinParameterInfo(
         val psiFactory = KtPsiFactory(context.project)
 
         val buffer = StringBuilder()
+        if (modifierList != null) {
+            buffer.append(modifierList.text).append(' ')
+        }
 
         if (valOrVar != KotlinValVar.None && !(baseFunction is KtNamedDeclaration && baseFunction.isExpectDeclaration())) {
             buffer.append(valOrVar).append(' ')
@@ -206,41 +205,42 @@ class KotlinParameterInfo(
 
             analyze(expression) {
                 val target = ref.resolveToSymbol()
-                val declarationSymbol = callableDeclaration.getSymbol() as? KtCallableSymbol ?: return null
-                if (target is KtValueParameterSymbol) {
-                    if (declarationSymbol is KtFunctionLikeSymbol && target.getContainingSymbol() == declarationSymbol) {
+                val declarationSymbol = callableDeclaration.symbol as? KaCallableSymbol ?: return null
+                if (target is KaValueParameterSymbol) {
+                    if (declarationSymbol is KaFunctionSymbol && target.containingDeclaration == declarationSymbol) {
                         return declarationSymbol.valueParameters.indexOf(target) + (if ((callableDeclaration as? KtCallableDeclaration)?.receiverTypeReference != null) 1 else 0)
                     }
 
                     if (declarationSymbol.receiverParameter != null &&
-                        (target.getContainingSymbol() as? KtConstructorSymbol)?.getContainingSymbol() == declarationSymbol.receiverParameter?.type?.expandedClassSymbol
+                        (target.containingDeclaration as? KaConstructorSymbol)?.containingDeclaration == declarationSymbol.receiverParameter?.returnType?.expandedSymbol
                     ) {
                         return Int.MAX_VALUE
                     }
                     return null
                 }
 
-                if (target is KtPropertySymbol && declarationSymbol is KtConstructorSymbol) {
+                if (target is KaPropertySymbol && declarationSymbol is KaConstructorSymbol) {
                     val parameterIndex = declarationSymbol.valueParameters.indexOfFirst { it.generatedPrimaryConstructorProperty == target }
                     if (parameterIndex >= 0) {
                         return parameterIndex
                     }
                 }
 
-                if (target is KtReceiverParameterSymbol && declarationSymbol.receiverParameter == target) {
+                if (target is KaReceiverParameterSymbol && declarationSymbol.receiverParameter == target) {
                     //this which refers to function's receiver
                     return 0
                 }
 
-                val symbol = expression.resolveCall()?.successfulCallOrNull<KtCallableMemberCall<*, *>>()?.partiallyAppliedSymbol
-                (symbol?.dispatchReceiver as? KtImplicitReceiverValue)?.symbol
-                    ?.takeIf { it == declarationSymbol.receiverParameter || it == declarationSymbol.getContainingSymbol() }
+                val symbol = expression.resolveToCall()?.successfulCallOrNull<KaCallableMemberCall<*, *>>()?.partiallyAppliedSymbol
+                (symbol?.dispatchReceiver as? KaImplicitReceiverValue)?.symbol
+                    ?.takeIf { it == declarationSymbol.receiverParameter || it == declarationSymbol.containingDeclaration }
                     ?.let { return Int.MAX_VALUE }
-                (symbol?.extensionReceiver as? KtImplicitReceiverValue)?.symbol
-                    ?.takeIf { it == declarationSymbol.receiverParameter || it == declarationSymbol.getContainingSymbol() }
+                (symbol?.extensionReceiver as? KaImplicitReceiverValue)?.symbol
+                    ?.takeIf { it == declarationSymbol.receiverParameter || it == declarationSymbol.containingDeclaration }
                     ?.let { return Int.MAX_VALUE }
 
-                if (expression.parent is KtThisExpression && declarationSymbol.receiverParameter == null) {
+                val parent = expression.parent
+                if (parent is KtThisExpression && parent.getLabelName() == null && declarationSymbol.receiverParameter == null) {
                     return Int.MAX_VALUE
                 }
             }

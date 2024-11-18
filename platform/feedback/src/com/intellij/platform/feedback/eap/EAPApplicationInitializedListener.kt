@@ -1,20 +1,21 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.feedback.eap
 
-import com.intellij.ide.ApplicationInitializedListener
+import com.intellij.ide.ApplicationActivity
 import com.intellij.ide.BrowserUtil
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.notification.NotificationAction
 import com.intellij.openapi.application.ApplicationInfo
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ApplicationNamesInfo
+import com.intellij.openapi.components.service
 import com.intellij.openapi.extensions.ExtensionNotApplicableException
 import com.intellij.openapi.util.NlsSafe
 import com.intellij.openapi.util.registry.Registry
 import com.intellij.platform.feedback.impl.notification.RequestFeedbackNotification
-import kotlinx.coroutines.CoroutineScope
+import com.intellij.util.application
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlin.time.Duration.Companion.days
 import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.minutes
@@ -22,15 +23,15 @@ import kotlin.time.Duration.Companion.minutes
 private const val timerStartedKey = "eap.feedback.scheduled"
 private const val eapFeedbackRegistryKey = "eap.feedback.notification.enabled"
 
-class EAPApplicationInitializedListener : ApplicationInitializedListener {
+private class EAPApplicationInitializedListener : ApplicationActivity {
   init {
     if (!isEAPEnv()) {
       throw ExtensionNotApplicableException.create()
     }
   }
 
-  override suspend fun execute(asyncScope: CoroutineScope) {
-    asyncScope.launch {
+  override suspend fun execute() {
+    coroutineScope {
       // postpone to avoid getting PropertiesComponent and other classes too early
       delay(1.minutes)
       schedule()
@@ -93,11 +94,7 @@ class EAPApplicationInitializedListener : ApplicationInitializedListener {
 }
 
 fun executeEAPFeedbackAction() {
-  BrowserUtil.browse(
-    "https://surveys.jetbrains.com/s3/${getProductName().lowercase()}-${
-      getProductVersion().replace('.', '-')
-    }-eap-user-survey",
-    null)
+  BrowserUtil.browse(application.service<EAPFeedbackUrlProvider>().surveyUrl(), null)
 }
 
 fun isEAPEnv(): Boolean {

@@ -7,13 +7,7 @@ package org.jetbrains.kotlin.idea.completion.weighers
 import com.intellij.codeInsight.lookup.LookupElement
 import com.intellij.codeInsight.lookup.LookupElementWeigher
 import com.intellij.openapi.util.Key
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
-import org.jetbrains.kotlin.analysis.api.signatures.KtCallableSignature
-import org.jetbrains.kotlin.analysis.api.symbols.KtVariableLikeSymbol
 import org.jetbrains.kotlin.idea.completion.contributors.helpers.CallableMetadataProvider
-import org.jetbrains.kotlin.idea.completion.contributors.helpers.CallableMetadataProvider.getCallableMetadata
-import org.jetbrains.kotlin.idea.completion.contributors.helpers.CompletionSymbolOrigin
-import org.jetbrains.kotlin.idea.completion.lookups.factories.FunctionCallLookupObject
 import org.jetbrains.kotlin.psi.UserDataProperty
 
 internal object CallableWeigher {
@@ -64,21 +58,5 @@ internal object CallableWeigher {
         }
     }
 
-    context(KtAnalysisSession)
-    fun addWeight(
-        context: WeighingContext,
-        lookupElement: LookupElement,
-        signature: KtCallableSignature<*>,
-        symbolOrigin: CompletionSymbolOrigin,
-    ) {
-        if (context.isPositionInsideImportOrPackageDirective) return
-
-        val isFunctionalVariableCall = signature.symbol is KtVariableLikeSymbol && lookupElement.`object` is FunctionCallLookupObject
-        lookupElement.callableWeight = getCallableMetadata(context, signature, symbolOrigin, isFunctionalVariableCall)
-    }
-
-    internal var LookupElement.callableWeight: CallableMetadataProvider.CallableMetadata? by UserDataProperty(
-        Key<CallableMetadataProvider.CallableMetadata>("KOTLIN_CALLABlE_WEIGHT")
-    )
-        private set
+    internal var LookupElement.callableWeight: CallableMetadataProvider.CallableMetadata? by UserDataProperty(Key("KOTLIN_CALLABlE_WEIGHT"))
 }

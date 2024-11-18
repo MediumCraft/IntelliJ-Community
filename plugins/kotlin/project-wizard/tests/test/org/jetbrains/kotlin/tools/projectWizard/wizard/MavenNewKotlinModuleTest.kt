@@ -15,13 +15,10 @@ import com.intellij.openapi.project.modules
 import com.intellij.openapi.roots.ModuleRootManager
 import com.intellij.openapi.util.registry.Registry
 import com.intellij.openapi.util.registry.withValue
-import com.intellij.testFramework.*
 import com.intellij.testFramework.common.runAll
+import com.intellij.testFramework.useProject
 import com.intellij.testFramework.utils.module.assertModules
-import kotlinx.coroutines.GlobalScope
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import org.jetbrains.idea.maven.importing.MavenProjectImporter
 import org.jetbrains.idea.maven.project.MavenProjectsManager
 import org.jetbrains.idea.maven.wizards.MavenJavaNewProjectWizardData.Companion.javaMavenData
 import org.jetbrains.idea.maven.wizards.MavenNewProjectWizardTestCase
@@ -30,7 +27,9 @@ import org.jetbrains.kotlin.idea.framework.KotlinSdkType
 import org.jetbrains.kotlin.tools.projectWizard.BuildSystemKotlinNewProjectWizardData.Companion.kotlinBuildSystemData
 import org.jetbrains.kotlin.tools.projectWizard.maven.MavenKotlinNewProjectWizardData.Companion.kotlinMavenData
 import org.jetbrains.kotlin.util.capitalizeDecapitalize.decapitalizeAsciiOnly
-import org.junit.*
+import org.junit.Assert
+import org.junit.Rule
+import org.junit.Test
 import org.junit.jupiter.api.Assertions
 import org.junit.rules.TestName
 import org.junit.runner.RunWith
@@ -39,7 +38,8 @@ import org.junit.runners.JUnit4
 @TestRoot("project-wizard/tests")
 @RunWith(JUnit4::class)
 class MavenNewKotlinModuleTest : MavenNewProjectWizardTestCase(), NewKotlinProjectTestUtils {
-    override val testDirectory = "testData/mavenNewProjectWizard"
+    override val testDirectory: String
+        get() = "testData/mavenNewProjectWizard"
     private val newModuleName = "module"
 
     @JvmField
@@ -47,10 +47,6 @@ class MavenNewKotlinModuleTest : MavenNewProjectWizardTestCase(), NewKotlinProje
     var testName = TestName()
 
     override fun runInDispatchThread() = false
-
-    private fun isWorkspaceImport(): Boolean {
-        return MavenProjectImporter.isImportToWorkspaceModelEnabled(myProject)
-    }
 
     override fun tearDown() {
         runAll({ CodeStyle.getDefaultSettings().clearCodeStyleSettings() },
@@ -60,7 +56,6 @@ class MavenNewKotlinModuleTest : MavenNewProjectWizardTestCase(), NewKotlinProje
 
     @Test
     fun `test when module is created then its pom is unignored`() = runBlocking {
-        Assume.assumeTrue(isWorkspaceImport())
         // create project
         waitForProjectCreation {
             createKotlinProjectFromTemplate()
@@ -92,7 +87,6 @@ class MavenNewKotlinModuleTest : MavenNewProjectWizardTestCase(), NewKotlinProje
 
     @Test
     fun `test new maven module inherits project sdk by default`() = runBlocking {
-        Assume.assumeTrue(isWorkspaceImport())
         // create project
         waitForProjectCreation {
             createKotlinProjectFromTemplate()
@@ -119,7 +113,6 @@ class MavenNewKotlinModuleTest : MavenNewProjectWizardTestCase(), NewKotlinProje
 
     @Test
     fun testNewModuleInJavaProject() = runBlocking {
-        Assume.assumeTrue(isWorkspaceImport())
         waitForProjectCreation {
             createProjectFromTemplate(JAVA) {
                 it.baseData!!.name = "project"
@@ -166,7 +159,6 @@ class MavenNewKotlinModuleTest : MavenNewProjectWizardTestCase(), NewKotlinProje
         independentHierarchy: Boolean = false,
         additionalAssertions: (Project) -> Unit = {}
     ) = runBlocking {
-        Assume.assumeTrue(isWorkspaceImport())
         waitForProjectCreation {
             createKotlinProjectFromTemplate(
                 groupId = groupId,
@@ -202,7 +194,6 @@ class MavenNewKotlinModuleTest : MavenNewProjectWizardTestCase(), NewKotlinProje
     @Test
     fun testCreateNewProject() {
         runBlocking {
-            Assume.assumeTrue(isWorkspaceImport())
             waitForProjectCreation {
                 createKotlinProjectFromTemplate()
             }.useProject { project ->
@@ -231,7 +222,6 @@ class MavenNewKotlinModuleTest : MavenNewProjectWizardTestCase(), NewKotlinProje
     fun testOnboardingTips() {
         Registry.get("doc.onboarding.tips.render").withValue(false) {
             runBlocking {
-                Assume.assumeTrue(isWorkspaceImport())
                 waitForProjectCreation {
                     createKotlinProjectFromTemplate(addSampleCode = true, generateOnboardingTips = true)
                 }.useProject { project ->
@@ -255,7 +245,6 @@ class MavenNewKotlinModuleTest : MavenNewProjectWizardTestCase(), NewKotlinProje
     fun testRenderedOnboardingTips() {
         Registry.get("doc.onboarding.tips.render").withValue(true) {
             runBlocking {
-                Assume.assumeTrue(isWorkspaceImport())
                 waitForProjectCreation {
                     createKotlinProjectFromTemplate(addSampleCode = true, generateOnboardingTips = true)
                 }.useProject { project ->

@@ -155,6 +155,21 @@ public class K2InplaceRenameTestGenerated extends AbstractK2InplaceRenameTest {
         runTest("../../idea/tests/testData/refactoring/rename/inplace/conflicts/typeParameters/TypeParameterVsTypeAlias.kt");
     }
 
+    @TestMetadata("DisableInplaceRenameOnThis.kt")
+    public void testDisableInplaceRenameOnThis() throws Exception {
+        runTest("../../idea/tests/testData/refactoring/rename/inplace/DisableInplaceRenameOnThis.kt");
+    }
+
+    @TestMetadata("DisableInplaceRenameOnThisExtension.kt")
+    public void testDisableInplaceRenameOnThisExtension() throws Exception {
+        runTest("../../idea/tests/testData/refactoring/rename/inplace/DisableInplaceRenameOnThisExtension.kt");
+    }
+
+    @TestMetadata("DisableInplaceRenameOnThisWithLabel.kt")
+    public void testDisableInplaceRenameOnThisWithLabel() throws Exception {
+        runTest("../../idea/tests/testData/refactoring/rename/inplace/DisableInplaceRenameOnThisWithLabel.kt");
+    }
+
     @TestMetadata("EnumEntries.kt")
     public void testEnumEntries() throws Exception {
         runTest("../../idea/tests/testData/refactoring/rename/inplace/EnumEntries.kt");
@@ -168,6 +183,11 @@ public class K2InplaceRenameTestGenerated extends AbstractK2InplaceRenameTest {
     @TestMetadata("EraseCompanionName.kt")
     public void testEraseCompanionName() throws Exception {
         runTest("../../idea/tests/testData/refactoring/rename/inplace/EraseCompanionName.kt");
+    }
+
+    @TestMetadata("expressionsInRange.kt")
+    public void testExpressionsInRange() throws Exception {
+        runTest("../../idea/tests/testData/refactoring/rename/inplace/expressionsInRange.kt");
     }
 
     @TestMetadata("ExtensionAndNoReceiver.kt")
@@ -485,6 +505,11 @@ public class K2InplaceRenameTestGenerated extends AbstractK2InplaceRenameTest {
         runTest("../../idea/tests/testData/refactoring/rename/inplace/InvokeToPlus.kt");
     }
 
+    @TestMetadata("JavaInheritor.kt")
+    public void testJavaInheritor() throws Exception {
+        runTest("../../idea/tests/testData/refactoring/rename/inplace/JavaInheritor.kt");
+    }
+
     @TestMetadata("LabelFromFunction.kt")
     public void testLabelFromFunction() throws Exception {
         runTest("../../idea/tests/testData/refactoring/rename/inplace/LabelFromFunction.kt");
@@ -643,6 +668,11 @@ public class K2InplaceRenameTestGenerated extends AbstractK2InplaceRenameTest {
     @TestMetadata("QuotedParameter.kt")
     public void testQuotedParameter() throws Exception {
         runTest("../../idea/tests/testData/refactoring/rename/inplace/QuotedParameter.kt");
+    }
+
+    @TestMetadata("RedundantOverride.kt")
+    public void testRedundantOverride() throws Exception {
+        runTest("../../idea/tests/testData/refactoring/rename/inplace/RedundantOverride.kt");
     }
 
     @TestMetadata("SameNameFunctionByImplicitReceiver.kt")

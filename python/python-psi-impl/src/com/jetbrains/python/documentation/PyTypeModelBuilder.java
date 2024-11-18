@@ -9,16 +9,18 @@ import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.text.HtmlBuilder;
 import com.intellij.openapi.util.text.HtmlChunk;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiElement;
 import com.intellij.util.containers.ContainerUtil;
 import com.jetbrains.python.PyNames;
 import com.jetbrains.python.codeInsight.typing.PyTypingTypeProvider;
 import com.jetbrains.python.highlighting.PyHighlighter;
 import com.jetbrains.python.psi.LanguageLevel;
+import com.jetbrains.python.psi.PyClass;
 import com.jetbrains.python.psi.PyExpression;
 import com.jetbrains.python.psi.impl.PyBuiltinCache;
+import com.jetbrains.python.psi.impl.PythonLanguageLevelPusher;
 import com.jetbrains.python.psi.types.*;
-import com.jetbrains.python.pyi.PyiUtil;
 import one.util.streamex.StreamEx;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
@@ -89,12 +91,30 @@ public class PyTypeModelBuilder {
     }
   }
 
+  private static final class NarrowedType extends TypeModel {
+    private final TypeModel narrowedType;
+    private final boolean isTypeIs;
+
+    private NarrowedType(@NotNull TypeModel narrowedType, boolean isTypeIs) {
+      this.narrowedType = narrowedType;
+      this.isTypeIs = isTypeIs;
+    }
+
+    @Override
+    void accept(@NotNull TypeVisitor visitor) {
+      visitor.narrowedType(this);
+    }
+  }
+  
+
   private static final class CollectionOf extends TypeModel {
     private final TypeModel collectionType;
     private final List<TypeModel> elementTypes;
     private final boolean useTypingAlias;
 
-    private CollectionOf(TypeModel collectionType, List<TypeModel> elementTypes, boolean useTypingAlias) {
+    private CollectionOf(TypeModel collectionType,
+                         List<TypeModel> elementTypes,
+                         boolean useTypingAlias) {
       this.collectionType = collectionType;
       this.elementTypes = elementTypes;
       this.useTypingAlias = useTypingAlias;
@@ -293,7 +313,8 @@ public class PyTypeModelBuilder {
                                         ? Collections.singletonList(tupleType.getIteratedItemType())
                                         : tupleType.getElementTypes();
 
-      boolean useTypingAlias = PyiUtil.getOriginalLanguageLevel(tupleType.getPyClass()).isOlderThan(LanguageLevel.PYTHON39);
+      boolean useTypingAlias =
+        PythonLanguageLevelPusher.getLanguageLevelForFile(tupleType.getPyClass().getContainingFile()).isOlderThan(LanguageLevel.PYTHON39);
       final List<TypeModel> elementModels = ContainerUtil.map(elementTypes, elementType -> build(elementType, true));
       result = new TupleType(elementModels, tupleType.isHomogeneous(), useTypingAlias);
     }
@@ -303,10 +324,15 @@ public class PyTypeModelBuilder {
         elementModels.add(build(elementType, true));
       }
       if (!elementModels.isEmpty()) {
-        final TypeModel collectionType = build(new PyClassTypeImpl(asCollection.getPyClass(), asCollection.isDefinition()), false);
-        boolean useTypingAlias = PyiUtil.getOriginalLanguageLevel(asCollection.getPyClass()).isOlderThan(LanguageLevel.PYTHON39);
+        PyClass pyClass = asCollection.getPyClass();
+        final TypeModel collectionType = build(new PyClassTypeImpl(pyClass, asCollection.isDefinition()), false);
+        boolean useTypingAlias =
+          PythonLanguageLevelPusher.getLanguageLevelForFile(pyClass.getContainingFile()).isOlderThan(LanguageLevel.PYTHON39);
         result = new CollectionOf(collectionType, elementModels, useTypingAlias);
       }
+    }
+    else if (type instanceof PyNarrowedType narrowedType) {
+      result = new NarrowedType(build(narrowedType.getNarrowedType(), true), narrowedType.getTypeIs());
     }
     else if (type instanceof PyUnionType unionType && allowUnions) {
       final Collection<PyType> unionMembers = unionType.getMembers();
@@ -426,17 +452,19 @@ public class PyTypeModelBuilder {
     void typeVarType(TypeVarType type);
 
     void oneOfLiterals(OneOfLiterals literals);
+
+    void narrowedType(NarrowedType type);
   }
 
   private static class TypeToStringVisitor extends TypeNameVisitor {
     @Override
     protected @NotNull HtmlChunk styled(@Nls String text, @NotNull TextAttributesKey style) {
-      return HtmlChunk.raw(text);
+      return HtmlChunk.raw(StringUtil.notNullize(text));
     }
 
     @Override
     protected @NotNull HtmlChunk escaped(@Nls String text) {
-      return HtmlChunk.raw(text);
+      return HtmlChunk.raw(StringUtil.notNullize(text));
     }
 
     @Override
@@ -446,7 +474,7 @@ public class PyTypeModelBuilder {
 
     @Override
     protected @NotNull HtmlChunk styledExpression(@Nls String expressionText, @NotNull PyExpression expression) {
-      return HtmlChunk.raw(expressionText);
+      return HtmlChunk.raw(StringUtil.notNullize(expressionText));
     }
 
     public String getString() {
@@ -542,12 +570,12 @@ public class PyTypeModelBuilder {
   private static class TypeToDescriptionVisitor extends TypeNameVisitor {
     @Override
     protected @NotNull HtmlChunk styled(@Nls String text, @NotNull TextAttributesKey style) {
-      return HtmlChunk.raw(text);
+      return HtmlChunk.raw(StringUtil.notNullize(text));
     }
 
     @Override
     protected @NotNull HtmlChunk escaped(@Nls String text) {
-      return HtmlChunk.raw(text);
+      return HtmlChunk.raw(StringUtil.notNullize(text));
     }
 
     @Override
@@ -557,7 +585,7 @@ public class PyTypeModelBuilder {
 
     @Override
     protected @NotNull HtmlChunk styledExpression(@Nls String expressionText, @NotNull PyExpression expression) {
-      return HtmlChunk.raw(expressionText);
+      return HtmlChunk.raw(StringUtil.notNullize(expressionText));
     }
 
     @NotNull
@@ -657,6 +685,19 @@ public class PyTypeModelBuilder {
         processList(collectionOf.elementTypes);
         add(styled("]", PyHighlighter.PY_BRACKETS));
       }
+    }
+
+    @Override
+    public void narrowedType(@NotNull NarrowedType narrowedType) {
+      if (narrowedType.isTypeIs) {
+        add(styled("TypeIs", PyHighlighter.PY_CLASS_DEFINITION));
+      }
+      else {
+        add(styled("TypeGuard", PyHighlighter.PY_CLASS_DEFINITION));
+      }
+      add(styled("[", PyHighlighter.PY_BRACKETS));
+      narrowedType.narrowedType.accept(this);
+      add(styled("]", PyHighlighter.PY_BRACKETS));
     }
 
     @Override

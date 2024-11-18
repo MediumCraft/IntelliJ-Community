@@ -1,4 +1,4 @@
-// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.idea.test
 
@@ -12,7 +12,7 @@ import com.intellij.openapi.actionSystem.impl.SimpleDataContext
 import com.intellij.openapi.application.WriteAction
 import com.intellij.openapi.editor.Caret
 import com.intellij.openapi.editor.Editor
-import com.intellij.openapi.editor.actionSystem.CaretSpecificDataContext
+import com.intellij.openapi.editor.actionSystem.EditorActionHandler
 import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.editor.ex.util.EditorUtil
 import com.intellij.openapi.externalSystem.service.project.ProjectDataManager
@@ -45,6 +45,7 @@ import org.jetbrains.kotlin.config.JvmTarget
 import org.jetbrains.kotlin.config.LanguageVersion
 import org.jetbrains.kotlin.idea.KotlinFileType
 import org.jetbrains.kotlin.idea.base.facet.hasKotlinFacet
+import org.jetbrains.kotlin.idea.base.facet.platform.platform
 import org.jetbrains.kotlin.idea.base.fe10.highlighting.suspender.KotlinHighlightingSuspender
 import org.jetbrains.kotlin.idea.base.plugin.KotlinPluginMode
 import org.jetbrains.kotlin.idea.base.test.InTextDirectivesUtils
@@ -315,7 +316,7 @@ abstract class KotlinLightCodeInsightFixtureTestCase : KotlinLightCodeInsightFix
         8 -> IdeaTestUtil.getMockJdk18()
         9 -> IdeaTestUtil.getMockJdk9()
         11, 17 -> {
-            if (SystemInfo.isJavaVersionAtLeast(javaVersion, 0, 0)) {
+            if (Runtime.version().feature() >= javaVersion) {
                 PluginTestCaseBase.fullJdk()
             } else {
                 error("JAVA_HOME have to point at least to JDK 11")
@@ -567,7 +568,7 @@ private fun configureLanguageAndApiVersion(
             this.apiVersion = null
         }
 
-        facet.configureFacet(compilerVersion, null, modelsProvider)
+        facet.configureFacet(compilerVersion, module.platform, modelsProvider)
         if (apiVersion != null) {
             facet.configuration.settings.apiLevel = LanguageVersion.fromVersionString(apiVersion.versionString)
         }
@@ -607,7 +608,7 @@ fun createTextEditorBasedDataContext(
     caret: Caret,
     additionalSteps: SimpleDataContext.Builder.() -> SimpleDataContext.Builder = { this },
 ): DataContext {
-    val parentContext = CaretSpecificDataContext.create(EditorUtil.getEditorDataContext(editor), caret)
+    val parentContext = EditorActionHandler.caretDataContext(EditorUtil.getEditorDataContext(editor), caret)
     assertEquals(project, parentContext.getData(CommonDataKeys.PROJECT))
     assertEquals(editor, parentContext.getData(CommonDataKeys.EDITOR))
     return SimpleDataContext.builder()

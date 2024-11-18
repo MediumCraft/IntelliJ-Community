@@ -23,6 +23,7 @@
  */
 package com.jetbrains.performancePlugin.utils;
 
+import com.intellij.jna.JnaLoader;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.troubleshooting.TroubleInfoCollector;
@@ -39,16 +40,21 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-public class HardwareCollector implements TroubleInfoCollector {
-  final List<String> info = new ArrayList<>();
-  final static Logger logger = Logger.getInstance(HardwareCollector.class);
+public final class HardwareCollector implements TroubleInfoCollector {
+  private final static Logger logger = Logger.getInstance(HardwareCollector.class);
+
+  private final List<String> info = new ArrayList<>();
 
   @Override
   public @NotNull String collectInfo(@NotNull Project project) {
     return collectHardwareInfo();
   }
 
-  public String collectHardwareInfo(){
+  public String collectHardwareInfo() {
+    if (!JnaLoader.isLoaded()) {
+      return "Failed to collect computer system info: JNA is not loaded)";
+    }
+
     try {
       SystemInfo si = new SystemInfo();
 
@@ -60,7 +66,7 @@ public class HardwareCollector implements TroubleInfoCollector {
         printOperatingSystem(os);
         printComputerSystem(hal.getComputerSystem());
       }
-      catch (Exception e) {
+      catch (Throwable e) {
         logger.warn("Failed to collect computer system info", e);
         info.add("Failed to collect computer system info: " + e.getMessage());
       }
@@ -71,7 +77,7 @@ public class HardwareCollector implements TroubleInfoCollector {
         printProcessor(processor);
         printCpu(processor);
       }
-      catch (Exception e) {
+      catch (Throwable e) {
         logger.warn("Failed to collect processor info", e);
         info.add("Failed to collect processor info: " + e.getMessage());
       }
@@ -84,7 +90,7 @@ public class HardwareCollector implements TroubleInfoCollector {
         info.add("\n=====PROCESSES SUMMARY=====\n");
         printProcesses(os, memory);
       }
-      catch (Exception e) {
+      catch (Throwable e) {
         logger.warn("Failed to collect memory info", e);
         info.add("Failed to collect memory info: " + e.getMessage());
       }
@@ -95,7 +101,7 @@ public class HardwareCollector implements TroubleInfoCollector {
         printLVgroups(hal.getLogicalVolumeGroups());
         printFileSystem(os.getFileSystem());
       }
-      catch (Exception e) {
+      catch (Throwable e) {
         logger.warn("Failed to collect filesystem info", e);
         info.add("Failed to collect filesystem info: " + e.getMessage());
       }
@@ -105,7 +111,7 @@ public class HardwareCollector implements TroubleInfoCollector {
         printNetworkInterfaces(hal.getNetworkIFs());
         printNetworkParameters(os.getNetworkParams());
       }
-      catch (Exception e) {
+      catch (Throwable e) {
         logger.warn("Failed to collect network info", e);
         info.add("Failed to collect network info: " + e.getMessage());
       }
@@ -115,7 +121,7 @@ public class HardwareCollector implements TroubleInfoCollector {
         printDisplays(hal.getDisplays());
         printGraphicsCards(hal.getGraphicsCards());
       }
-      catch (Exception e) {
+      catch (Throwable e) {
         logger.warn("Failed to collect network info", e);
         info.add("Failed to collect network info: " + e.getMessage());
       }

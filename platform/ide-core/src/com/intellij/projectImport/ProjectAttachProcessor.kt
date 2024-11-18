@@ -18,10 +18,11 @@ open class ProjectAttachProcessor {
     val EP_NAME: ExtensionPointName<ProjectAttachProcessor> = ExtensionPointName("com.intellij.projectAttachProcessor")
 
     @JvmStatic
-    fun canAttachToProject(): Boolean = getProcessor(null, null) != null
+    fun canAttachToProject(): Boolean = getProcessor(null, null, null) != null
 
     @JvmStatic
-    fun getProcessor(project: Project?, path: Path?) = EP_NAME.extensionList.firstOrNull { it.isEnabled(project, path) }
+    fun getProcessor(project: Project?, path: Path?, newProject: Project?) =
+      EP_NAME.extensionList.firstOrNull { it.isEnabled(project, path, newProject) }
   }
 
   /**
@@ -45,13 +46,15 @@ open class ProjectAttachProcessor {
     }
   }
 
+  open suspend fun beforeAttach(project: Project?) {}
+
   open fun beforeDetach(module: Module) {}
 
-  open fun isEnabled(project: Project?, path: Path?): Boolean = true
+  open fun isEnabled(project: Project?, projectDir: Path?, newProject: Project?): Boolean = true
 
   open fun getActionText(project: Project): @NlsContexts.Button String? = null
 
   open fun getDescription(project: Project): @NlsContexts.DetailedDescription String? = null
 
-  open val defaultOptionIndex: Int = 0
+  open fun defaultOptionIndex(project: Project?): Int = 0
 }

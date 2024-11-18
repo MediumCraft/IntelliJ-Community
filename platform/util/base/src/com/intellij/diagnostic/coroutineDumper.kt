@@ -48,16 +48,24 @@ fun enableCoroutineDump(): Result<Unit> {
  */
 //@JvmOverloads
 fun dumpCoroutines(scope: CoroutineScope? = null, stripDump: Boolean = true, deduplicateTrees: Boolean = true): String? {
-  if (!isCoroutineDumpEnabled()) {
-    return null
+  try {
+    if (!isCoroutineDumpEnabled()) {
+      return null
+    }
+    val charset = StandardCharsets.UTF_8.name()
+    val outputStream = ByteArrayOutputStream()
+    PrintStream(BufferedOutputStream(outputStream), true, charset).use { out ->
+      val jobTree = jobTrees(scope).toList()
+      dumpCoroutines(jobTree, out, stripDump, deduplicateTrees)
+    }
+    return outputStream.toString(charset)
+  } catch (e: Throwable) {
+    // if there is an unexpected exception, we won't be able to provide meaningful information anyway,
+    // but the exception should not prevent other diagnostic tools from collecting data
+    return "Coroutine dump has failed: ${e.message}\n" +
+           "Please report this issue to the developers.\n" +
+           e.stackTraceToString()
   }
-  val charset = StandardCharsets.UTF_8.name()
-  val outputStream = ByteArrayOutputStream()
-  PrintStream(BufferedOutputStream(outputStream), true, charset).use { out ->
-    val jobTree = jobTrees(scope).toList()
-    dumpCoroutines(jobTree, out, stripDump, deduplicateTrees)
-  }
-  return outputStream.toString(charset)
 }
 
 /**
@@ -159,22 +167,29 @@ private fun jobTrees(scope: CoroutineScope? = null): Sequence<JobTree> {
 
   return sequence {
     for (job in rootJobs) {
-      yieldAll(buildJobTrees(job, jobToStack))
+      yieldAll(buildJobTrees(job, jobToStack, hashSetOf()))
     }
   }
 }
 
 private fun buildJobTrees(
   job: Job,
-  jobToStack: Map<Job, DebugCoroutineInfo>
+  jobToStack: Map<Job, DebugCoroutineInfo>,
+  visited: MutableSet<Job>
 ): List<JobTree> {
-  val info = jobToStack[job]
-  if (info === null && job is ScopeCoroutine<*>) {
-    // don't yield ScopeCoroutine without info, such as `coroutineScope` or `withContext`
-    return job.children.flatMap { buildJobTrees(it, jobToStack) }.toList()
-  }
-  else {
-    return listOf(JobTree(job, info, job.children.flatMap { buildJobTrees(it, jobToStack) }.toList()))
+  return visited.withElement(job) { notSeenThisJob ->
+    if (notSeenThisJob) {
+      val info = jobToStack[job]
+      if (info === null && job is ScopeCoroutine<*>) {
+        // don't yield ScopeCoroutine without info, such as `coroutineScope` or `withContext`
+        job.children.flatMap { buildJobTrees(it, jobToStack, visited) }.toList()
+      }
+      else {
+        listOf(JobTree(job, info, job.children.flatMap { buildJobTrees(it, jobToStack, visited) }.toList()))
+      }
+    } else {
+      listOf(JobTree(RecursiveJob(job), null, emptyList()))
+    }
   }
 }
 
@@ -260,7 +275,7 @@ private fun JobTree.toRepresentation(stripTrace: Boolean): JobRepresentationTree
     job is CoroutineScope -> job.coroutineContext
     debugInfo !== null -> debugInfo.context
     else -> EmptyCoroutineContext
-  }
+  } ?: EmptyCoroutineContext // shouldn't be necessary but see IJPL-158517
   val name = if (job is AbstractCoroutine<*> && DEBUG) {
     // in DEBUG the name is displayed as part of `job.toString()` for AbstractCoroutine
     // see kotlinx.coroutines.AbstractCoroutine.nameString
@@ -296,10 +311,22 @@ private fun JobRepresentationTree.deduplicate(): DeduplicatedJobRepresentationTr
   )
 
 private fun JobRepresentation.withoutJobAddress(): JobRepresentation {
-  val ind = job.lastIndexOf("}@")
-  if (ind == -1) return this
-  assert(job.substring(ind + 2, job.length).all { it.isLetterOrDigit() })
-  return JobRepresentation(coroutineName, job.substring(0, ind + 1), state, context, trace)
+  val closingBracketPosition = job.lastIndexOf("}@")
+  if (closingBracketPosition == -1) {
+    return this
+  }
+  val openingBracketPosition = job.substring(0, closingBracketPosition).lastIndexOf('{')
+  if (openingBracketPosition == -1) {
+    return this
+  }
+  if (job.substring(0, openingBracketPosition).endsWith("BlockingCoroutine")) {
+    return this // the address of BlockingCoroutine is important to link it to the thread that awaits it
+  }
+  if (job.substring(closingBracketPosition + 2, job.length).any { !it.isLetterOrDigit() }) {
+    return this // suffix doesn't look like a job address
+  }
+  val jobWithoutAddress = job.substring(0, closingBracketPosition + 1)
+  return JobRepresentation(coroutineName, jobWithoutAddress, state, context, trace)
 }
 
 private fun traceToDump(info: DebugCoroutineInfo, stripTrace: Boolean): List<StackTraceElement> {
@@ -308,4 +335,20 @@ private fun traceToDump(info: DebugCoroutineInfo, stripTrace: Boolean): List<Sta
     return stripCoroutineTrace(trace)
   }
   return DebugProbesImpl.enhanceStackTraceWithThreadDump(info, trace)
+}
+
+private fun <T, R> MutableSet<T>.withElement(elem: T, body: (added: Boolean) -> R): R {
+  val added = add(elem)
+  try {
+    return body(added)
+  }
+  finally {
+    if (added) remove(elem)
+  }
+}
+
+private class RecursiveJob(private val originalJob: Job) : Job by originalJob {
+  override fun toString(): String {
+    return "CIRCULAR REFERENCE: $originalJob"
+  }
 }

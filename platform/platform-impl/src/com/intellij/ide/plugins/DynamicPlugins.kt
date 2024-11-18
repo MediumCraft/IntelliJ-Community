@@ -2,6 +2,7 @@
 package com.intellij.ide.plugins
 
 import com.fasterxml.jackson.databind.type.TypeFactory
+import com.intellij.DynamicBundle.LanguageBundleEP
 import com.intellij.configurationStore.jdomSerializer
 import com.intellij.configurationStore.runInAutoSaveDisabledMode
 import com.intellij.configurationStore.saveProjectsAndApp
@@ -20,7 +21,6 @@ import com.intellij.ide.plugins.cl.PluginAwareClassLoader
 import com.intellij.ide.plugins.cl.PluginClassLoader
 import com.intellij.ide.ui.TopHitCache
 import com.intellij.ide.ui.UIThemeProvider
-import com.intellij.ide.util.TipAndTrickManager
 import com.intellij.idea.IdeaLogger
 import com.intellij.lang.Language
 import com.intellij.notification.NotificationType
@@ -80,6 +80,7 @@ import com.intellij.util.SystemProperties
 import com.intellij.util.containers.WeakList
 import com.intellij.util.messages.impl.MessageBusEx
 import com.intellij.util.ref.GCWatcher
+import com.intellij.util.xmlb.clearPropertyCollectorCache
 import java.awt.KeyboardFocusManager
 import java.awt.Window
 import java.nio.channels.FileChannel
@@ -95,6 +96,10 @@ private val LOG = logger<DynamicPlugins>()
 private val classloadersFromUnloadedPlugins = mutableMapOf<PluginId, WeakList<PluginClassLoader>>()
 
 object DynamicPlugins {
+  private var myProcessRun = 0
+  private val myProcessCallbacks = mutableListOf<Runnable>()
+  private val myLock = Any()
+
   @JvmStatic
   @JvmOverloads
   fun allowLoadUnloadWithoutRestart(descriptor: IdeaPluginDescriptorImpl,
@@ -111,8 +116,10 @@ object DynamicPlugins {
    * @return true if the requested enabled state was applied without restart, false if restart is required
    */
   fun loadPlugins(descriptors: Collection<IdeaPluginDescriptorImpl>, project: Project?): Boolean {
-    return updateDescriptorsWithoutRestart(descriptors, load = true) {
-      loadPlugin(it, project)
+    return runProcess {
+      updateDescriptorsWithoutRestart(descriptors, load = true) {
+        doLoadPlugin(it, project)
+      }
     }
   }
 
@@ -125,8 +132,40 @@ object DynamicPlugins {
     parentComponent: JComponent? = null,
     options: UnloadPluginOptions = UnloadPluginOptions(disable = true),
   ): Boolean {
-    return updateDescriptorsWithoutRestart(descriptors, load = false) {
-      unloadPluginWithProgress(project, parentComponent, it, options)
+    return runProcess {
+      updateDescriptorsWithoutRestart(descriptors, load = false) {
+        doUnloadPluginWithProgress(project, parentComponent, it, options)
+      }
+    }
+  }
+
+  private fun runProcess(process: () -> Boolean): Boolean {
+    try {
+      synchronized(myLock) {
+        myProcessRun++
+      }
+      return process.invoke()
+    }
+    finally {
+      val callbacks = mutableListOf<Runnable>()
+      synchronized(myLock) {
+        myProcessRun--
+        callbacks.addAll(myProcessCallbacks)
+        myProcessCallbacks.clear()
+      }
+      callbacks.forEach { it.run() }
+    }
+  }
+
+  fun runAfter(runAlways: Boolean, callback: Runnable) {
+    synchronized(myLock) {
+      if (myProcessRun > 0) {
+        myProcessCallbacks.add(callback)
+        return
+      }
+    }
+    if (runAlways) {
+      callback.run()
     }
   }
 
@@ -288,9 +327,10 @@ object DynamicPlugins {
       return null
     }
 
-    if (isPluginWhichDependsOnKotlinPluginInK2ModeAndItDoesNotSupportK2Mode(module)) {
-      // force restarting the IDE in the case the dynamic plugin is incompatible with Kotlin Plugin K2 mode KTIJ-24797
-      return "Plugin ${module.pluginId} depends on the Kotlin plugin in K2 Mode, but the plugin does not support K2 Mode"
+    if (isPluginWhichDependsOnKotlinPluginAndItsIncompatibleWithIt(module)) {
+      // force restarting the IDE in the case the dynamic plugin is incompatible with Kotlin Plugin K1/K2 modes KTIJ-24797
+      val mode = if (isKotlinPluginK1Mode()) "K1" else "K2"
+      return "Plugin ${module.pluginId} depends on the Kotlin plugin in $mode Mode, but the plugin does not support $mode Mode"
     }
 
     var dependencyMessage: String? = null
@@ -357,7 +397,7 @@ object DynamicPlugins {
   @JvmStatic
   fun allowLoadUnloadSynchronously(module: IdeaPluginDescriptorImpl): Boolean {
     val extensions = (module.epNameToExtensions.takeIf { it.isNotEmpty() } ?: module.appContainerDescriptor.extensions)
-    if (!extensions.all { it.key == UIThemeProvider.EP_NAME.name || it.key == BundledKeymapBean.EP_NAME.name }) {
+    if (!extensions.all { it.key == UIThemeProvider.EP_NAME.name || it.key == BundledKeymapBean.EP_NAME.name || it.key == LanguageBundleEP.EP_NAME.name}) {
       return false
     }
     return checkNoComponentsOrServiceOverrides(module) == null && module.actions.isEmpty()
@@ -384,6 +424,15 @@ object DynamicPlugins {
                                parentComponent: JComponent?,
                                pluginDescriptor: IdeaPluginDescriptorImpl,
                                options: UnloadPluginOptions): Boolean {
+    return runProcess {
+      doUnloadPluginWithProgress(project, parentComponent, pluginDescriptor, options)
+    }
+  }
+
+  private fun doUnloadPluginWithProgress(project: Project? = null,
+                                         parentComponent: JComponent?,
+                                         pluginDescriptor: IdeaPluginDescriptorImpl,
+                                         options: UnloadPluginOptions): Boolean {
     var result = false
     if (options.save) {
       runInAutoSaveDisabledMode {
@@ -444,7 +493,9 @@ object DynamicPlugins {
   @JvmOverloads
   fun unloadPlugin(pluginDescriptor: IdeaPluginDescriptorImpl,
                    options: UnloadPluginOptions = UnloadPluginOptions(disable = true)): Boolean {
-    return unloadPluginWithProgress(project = null, parentComponent = null, pluginDescriptor, options)
+    return runProcess {
+      doUnloadPluginWithProgress(project = null, parentComponent = null, pluginDescriptor, options)
+    }
   }
 
   private fun unloadPluginWithoutProgress(pluginDescriptor: IdeaPluginDescriptorImpl,
@@ -463,8 +514,6 @@ object DynamicPlugins {
     }
 
     try {
-      TipAndTrickManager.getInstance().closeTipDialog()
-
       app.messageBus.syncPublisher(DynamicPluginListener.TOPIC).beforePluginUnload(pluginDescriptor, options.isUpdate)
       IdeEventQueue.getInstance().flushQueue()
     }
@@ -493,8 +542,6 @@ object DynamicPlugins {
           unloadDependencyDescriptors(pluginDescriptor, pluginSet, classLoaders)
           unloadModuleDescriptorNotRecursively(pluginDescriptor)
 
-          clearPluginClassLoaderParentListCache(pluginSet)
-
           app.extensionArea.clearUserCache()
           for (project in ProjectUtil.getOpenProjects()) {
             (project.extensionArea as ExtensionsAreaImpl).clearUserCache()
@@ -502,6 +549,7 @@ object DynamicPlugins {
           clearCachedValues()
 
           jdomSerializer.clearSerializationCaches()
+          clearPropertyCollectorCache()
           TypeFactory.defaultInstance().clearCache()
           TopHitCache.getInstance().clear()
           ActionToolbarImpl.resetAllToolbars()
@@ -526,12 +574,17 @@ object DynamicPlugins {
           @Suppress("TestOnlyProblems")
           (ProjectManager.getInstanceIfCreated() as? ProjectManagerImpl)?.disposeDefaultProjectAndCleanupComponentsForDynamicPluginTests()
 
+          // clear parents as much late as possible because allParents are a lazy list and calculated on demand
+          // it may happen that too early invalidation may lead to unloaded loaders appear in allParents again (IJPL-171566)
+          clearPluginClassLoaderParentListCache(pluginSet)
           val newPluginSet = pluginSet.withoutModule(
             module = pluginDescriptor,
             disable = options.disable,
           ).createPluginSetWithEnabledModulesMap()
 
           PluginManagerCore.setPluginSet(newPluginSet)
+          // clear parents cache for newPluginSet just for a case
+          clearPluginClassLoaderParentListCache(newPluginSet)
         }
         finally {
           try {
@@ -702,9 +755,6 @@ object DynamicPlugins {
     val app = ApplicationManager.getApplication() as ApplicationImpl
     (ActionManager.getInstance() as ActionManagerImpl).unloadActions(module)
 
-    if (module.pluginId.idString == "com.intellij.jsp") {
-      println("Unloading")
-    }
     val openedProjects = ProjectUtil.getOpenProjects().asList()
     val appExtensionArea = app.extensionArea
     val priorityUnloadListeners = mutableListOf<Runnable>()
@@ -820,6 +870,12 @@ object DynamicPlugins {
 
   @JvmOverloads
   fun loadPlugin(pluginDescriptor: IdeaPluginDescriptorImpl, project: Project? = null): Boolean {
+    return runProcess {
+      doLoadPlugin(pluginDescriptor, project)
+    }
+  }
+
+  private fun doLoadPlugin(pluginDescriptor: IdeaPluginDescriptorImpl, project: Project? = null): Boolean {
     var result = false
     val indicator = PotemkinProgress(IdeBundle.message("plugins.progress.loading.plugin.title", pluginDescriptor.name),
                                      project,
@@ -1358,8 +1414,9 @@ private fun setClassLoaderState(pluginDescriptor: IdeaPluginDescriptorImpl, stat
 }
 
 private fun clearPluginClassLoaderParentListCache(pluginSet: PluginSet) {
-  // yes, clear not only enabled plugins, but all, just to be sure; it's a cheap operation
-  for (descriptor in pluginSet.allPlugins) {
+  // yes, clear not only enabled plugins, but (all + enabledModules) because enabledModules is a superset of enabledPlugins
+  // it's a cheap operation and even if some modules may repeat due to concatenation, it should be not a problem (making a set is probably even slower)
+  for (descriptor in pluginSet.allPlugins + pluginSet.getEnabledModules()) {
     (descriptor.pluginClassLoader as? PluginClassLoader)?.clearParentListCache()
   }
 }

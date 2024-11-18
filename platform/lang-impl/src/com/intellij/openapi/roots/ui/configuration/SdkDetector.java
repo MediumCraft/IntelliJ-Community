@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.roots.ui.configuration;
 
 import com.intellij.openapi.Disposable;
@@ -15,6 +15,7 @@ import com.intellij.openapi.projectRoots.SdkType;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.util.concurrency.ThreadingAssertions;
+import com.intellij.util.concurrency.annotations.RequiresBackgroundThread;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -27,8 +28,7 @@ import java.util.function.Consumer;
 public class SdkDetector {
   private static final Logger LOG = Logger.getInstance(SdkDetector.class);
 
-  @NotNull
-  public static SdkDetector getInstance() {
+  public static @NotNull SdkDetector getInstance() {
     return ApplicationManager.getApplication().getService(SdkDetector.class);
   }
 
@@ -92,7 +92,7 @@ public class SdkDetector {
          */
         BackgroundTaskUtil.executeOnPooledThread(lifetime, () -> {
           var progressIndicator = ProgressManager.getInstance().getProgressIndicator();
-          detectAllSdks(progressIndicator, myMulticaster);
+          detectAllSdks(project, progressIndicator, myMulticaster);
         });
       }
 
@@ -141,8 +141,25 @@ public class SdkDetector {
 
   /**
    * Run Sdk detection assuming called in a background thread
+   *
+   * @deprecated Please use {@link SdkDetector#detectSdks(Project, SdkType, ProgressIndicator, DetectedSdkListener)}
    */
+  @Deprecated
   public void detectSdks(
+    @NotNull SdkType type,
+    @NotNull ProgressIndicator indicator,
+    @NotNull DetectedSdkListener callback
+  ) {
+    detectSdks(null, type, indicator, callback);
+  }
+
+  /**
+   * Run Sdk detection on the machine where {@code project} is located
+   * This function assumes that it is called in background thread
+   */
+  @RequiresBackgroundThread
+  public void detectSdks(
+    @Nullable Project project,
     @NotNull SdkType type,
     @NotNull ProgressIndicator indicator,
     @NotNull DetectedSdkListener callback
@@ -150,7 +167,7 @@ public class SdkDetector {
     try {
       callback.onSearchStarted();
       if (isDetectorEnabled()) {
-        detect(type, indicator, callback);
+        detect(project, type, indicator, callback);
       }
     }
     finally {
@@ -158,7 +175,7 @@ public class SdkDetector {
     }
   }
 
-  private static void detectAllSdks(@NotNull ProgressIndicator indicator, @NotNull DetectedSdkListener callback) {
+  private static void detectAllSdks(@NotNull Project project, @NotNull ProgressIndicator indicator, @NotNull DetectedSdkListener callback) {
     try {
       callback.onSearchStarted();
       indicator.setIndeterminate(false);
@@ -167,7 +184,7 @@ public class SdkDetector {
         indicator.setFraction((float)i / types.size());
         indicator.checkCanceled();
         if (isDetectorEnabled()) {
-          detect(types.get(i), indicator, callback);
+          detect(project, types.get(i), indicator, callback);
         }
       }
     }
@@ -176,11 +193,12 @@ public class SdkDetector {
     }
   }
 
-  private static void detect(@NotNull SdkType type,
+  private static void detect(@Nullable Project project,
+                             @NotNull SdkType type,
                              @NotNull ProgressIndicator indicator,
                              @NotNull DetectedSdkListener callback) {
     try {
-      Collection<String> suggestedPaths = type.suggestHomePaths();
+      Collection<String> suggestedPaths = type.suggestHomePaths(project);
       for (String path : suggestedPaths) {
         indicator.checkCanceled();
 

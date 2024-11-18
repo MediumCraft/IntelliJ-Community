@@ -7,6 +7,8 @@ import org.jetbrains.kotlin.analysis.api.permissions.KaAllowAnalysisOnEdt
 import org.jetbrains.kotlin.analysis.api.permissions.allowAnalysisFromWriteAction
 import org.jetbrains.kotlin.analysis.api.permissions.allowAnalysisOnEdt
 import org.jetbrains.kotlin.idea.base.psi.copied
+import org.jetbrains.kotlin.idea.codeinsight.utils.callExpression
+import org.jetbrains.kotlin.idea.codeinsight.utils.getRenderedTypeArguments
 import org.jetbrains.kotlin.idea.refactoring.inline.codeInliner.InlineDataKeys.DEFAULT_PARAMETER_VALUE_KEY
 import org.jetbrains.kotlin.idea.refactoring.inline.codeInliner.InlineDataKeys.MAKE_ARGUMENT_NAMED_KEY
 import org.jetbrains.kotlin.idea.refactoring.inline.codeInliner.InlineDataKeys.NEW_DECLARATION_KEY
@@ -72,6 +74,18 @@ abstract class AbstractCodeInliner<TCallElement : KtElement, Parameter : Any, Ko
         }
     }
 
+    protected fun MutableCodeToInline.convertToCallableReferenceIfNeeded(elementToBeReplaced: KtElement) {
+        if (elementToBeReplaced !is KtCallableReferenceExpression) return
+        val qualified = mainExpression?.safeAs<KtQualifiedExpression>() ?: return
+        val reference = qualified.callExpression?.calleeExpression ?: qualified.selectorExpression ?: return
+        val callableReference = if (elementToBeReplaced.receiverExpression == null) {
+            psiFactory.createExpressionByPattern("::$0", reference)
+        } else {
+            psiFactory.createExpressionByPattern("$0::$1", qualified.receiverExpression, reference)
+        }
+        codeToInline.replaceExpression(qualified, callableReference)
+    }
+
     inner class IntroduceValueForParameter(
         val parameter: Parameter,
         val value: KtExpression,
@@ -88,6 +102,29 @@ abstract class AbstractCodeInliner<TCallElement : KtElement, Parameter : Any, Ko
     )
 
     protected abstract fun argumentForParameter(parameter: Parameter, callableDescriptor: CallableDescriptor): Argument?
+
+    @OptIn(KaAllowAnalysisOnEdt::class, KaAllowAnalysisFromWriteAction::class)
+    protected fun expandTypeArgumentsInParameterDefault(
+        expression: KtExpression,
+    ): KtExpression? {
+        if (expression is KtCallExpression && expression.typeArguments.isEmpty() && expression.calleeExpression != null) {
+            val arguments = allowAnalysisFromWriteAction {
+                allowAnalysisOnEdt {
+                    analyze(expression) {
+                        getRenderedTypeArguments(expression)
+                    }
+                }
+            }
+
+            if (arguments != null) {
+                val ktCallExpression = expression.copied()
+                val callee = ktCallExpression.calleeExpression
+                ktCallExpression.addAfter(psiFactory.createTypeArguments(arguments), callee)
+                return ktCallExpression
+            }
+        }
+        return null
+    }
 
     protected abstract fun CallableDescriptor.valueParameters(): List<Parameter>
     protected abstract fun Parameter.name(): Name
@@ -116,6 +153,9 @@ abstract class AbstractCodeInliner<TCallElement : KtElement, Parameter : Any, Ko
 
             for (param in introduceValuesForParameters) {
                 val usagesReplaced = codeToInline.collectDescendantsOfType<KtExpression> { it.getCopyableUserData(PARAMETER_VALUE_KEY) == param.parameter.name() }
+                if (!usagesReplaced.isEmpty()) {
+                    val p = 0
+                }
                 introduceValue(
                     param.value,
                     param.valueType,
@@ -232,7 +272,7 @@ abstract class AbstractCodeInliner<TCallElement : KtElement, Parameter : Any, Ko
             }
         }
 
-        if (codeToInline.statementsBefore.isEmpty() || allowAnalysisOnEdt { allowAnalysisFromWriteAction { analyze(expressionToBeReplaced) { expressionToBeReplaced.isUsedAsExpression() } } }) {
+        if (codeToInline.statementsBefore.isEmpty() || allowAnalysisOnEdt { allowAnalysisFromWriteAction { analyze(expressionToBeReplaced) { expressionToBeReplaced.isUsedAsExpression } } }) {
             val thisReplaced = codeToInline.collectDescendantsOfType<KtExpression> { it.getCopyableUserData(RECEIVER_VALUE_KEY) != null }
             introduceValue(receiver, receiverType, thisReplaced, expressionToBeReplaced, safeCall = true)
         } else {

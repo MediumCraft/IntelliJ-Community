@@ -12,10 +12,11 @@ import com.intellij.openapi.editor.colors.TextAttributesKey
 import com.intellij.openapi.util.Iconable
 import com.intellij.openapi.util.NlsSafe
 import com.intellij.openapi.util.text.StringUtil
-import com.intellij.ui.ExperimentalUI
+import com.intellij.ui.NewUI
 import org.jetbrains.kotlin.idea.KotlinIconProvider
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.lexer.KtTokens
+import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.psi.*
 import org.jetbrains.kotlin.psi.psiUtil.getStrictParentOfType
 import javax.swing.Icon
@@ -49,7 +50,7 @@ open class KotlinDefaultNamedDeclarationPresentation(private val declaration: Kt
         val name = declaration.fqName
         val parent = declaration.parent
         val containerText = if (name != null) {
-            val qualifiedContainer = name.parent().toString()
+            val qualifiedContainer = name.parent().takeUnless { it == FqName.ROOT }?.toString() ?: return null
             if (parent is KtFile && declaration.hasModifier(KtTokens.PRIVATE_KEYWORD)) {
                 KotlinBundle.message("presentation.text.in.container", parent.name, qualifiedContainer)
             } else {
@@ -90,19 +91,31 @@ open class KotlinFunctionPresentation(
 ) : KotlinDefaultNamedDeclarationPresentation(function) {
     override fun getPresentableText(): String {
         return buildString {
-            function.receiverTypeReference?.getTypeText()?.let {
-                append(StringUtil.getShortName(it))
-                append(".")
+            val receiverTypeText = getTrimmedTypeText(function.receiverTypeReference)
+            if (receiverTypeText.isNotEmpty()) {
+                append("$receiverTypeText.")
             }
 
             name?.let { append(it) }
 
             append("(")
             append(function.valueParameters.joinToString {
-                (if (it.isVarArg) "vararg " else "") + StringUtil.getShortName(it.typeReference?.getTypeText() ?: "")
+                val typeReference = it.typeReference
+                (if (it.isVarArg) "vararg " else "") + getTrimmedTypeText(typeReference)
             })
             append(")")
         }
+    }
+
+    private fun getTrimmedTypeText(typeReference: KtTypeReference?): String {
+        val typeText = when (typeReference?.typeElement) {
+            null -> ""
+            is KtFunctionType -> typeReference.getTypeText()
+            else -> {
+                StringUtil.getShortName(typeReference.getTypeText())
+            }
+        }
+        return typeText
     }
 
     override fun getLocationString(): String? {
@@ -123,16 +136,16 @@ class KtFunctionPresenter : ItemPresentationProvider<KtFunction> {
     }
 }
 
-private fun getPresentationInContainer(param: Any): String {
-    if (ExperimentalUI.isNewUI() && !ApplicationManager.getApplication().isUnitTestMode) {
+internal fun getPresentationInContainer(param: Any): String {
+    if (NewUI.isEnabled() && !ApplicationManager.getApplication().isUnitTestMode) {
         return KotlinBundle.message("presentation.text.in.container.paren.no.brackets", param)
     } else {
         return KotlinBundle.message("presentation.text.in.container.paren", param)
     }
 }
 
-private fun getPresentationText(param: Any): String {
-    if (ExperimentalUI.isNewUI() && !ApplicationManager.getApplication().isUnitTestMode) {
+internal fun getPresentationText(param: Any): String {
+    if (NewUI.isEnabled() && !ApplicationManager.getApplication().isUnitTestMode) {
         return KotlinBundle.message("presentation.text.paren.no.brackets", param)
     } else {
         return KotlinBundle.message("presentation.text.paren", param)

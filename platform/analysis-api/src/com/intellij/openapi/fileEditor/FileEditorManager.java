@@ -7,7 +7,6 @@ import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.util.concurrency.annotations.RequiresBlockingContext;
 import com.intellij.util.concurrency.annotations.RequiresEdt;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.ApiStatus;
@@ -28,7 +27,6 @@ import java.util.List;
 public abstract class FileEditorManager {
   public static final Key<Boolean> USE_CURRENT_WINDOW = Key.create("OpenFile.searchForOpen");
 
-  @RequiresBlockingContext
   public static FileEditorManager getInstance(@NotNull Project project) {
     return project.getService(FileEditorManager.class);
   }
@@ -36,11 +34,15 @@ public abstract class FileEditorManager {
   public abstract @Nullable FileEditorComposite getComposite(@NotNull VirtualFile file);
 
   /**
-   * @param file file to open. File should be valid.
-   *             Must be called from <a href="https://docs.oracle.com/javase/tutorial/uiswing/concurrency/dispatch.html">EDT</a>.
+   * @param file file to open. The file should be valid.
    * @return array of opened editors
    */
   public abstract FileEditor @NotNull [] openFile(@NotNull VirtualFile file, boolean focusEditor);
+
+  @ApiStatus.Experimental
+  public void requestOpenFile(@NotNull VirtualFile file) {
+    openFile(file, true);
+  }
 
   public abstract @NotNull List<@NotNull FileEditor> openFile(@NotNull VirtualFile file);
 
@@ -87,6 +89,11 @@ public abstract class FileEditorManager {
    */
   @RequiresEdt
   public abstract @Nullable Editor getSelectedTextEditor();
+
+  @ApiStatus.Experimental
+  public @Nullable Editor getSelectedTextEditor(boolean lockFree) {
+    return getSelectedTextEditor();
+  }
 
   /**
    * @return currently selected TEXT editors including ones which were opened by guests during a collaborative development session
@@ -259,12 +266,19 @@ public abstract class FileEditorManager {
    */
   public abstract @NotNull Project getProject();
 
+  /**
+   * @deprecated Use {@link com.intellij.openapi.actionSystem.UiDataRule} instead.
+   */
+  @Deprecated(forRemoval = true)
   public abstract void registerExtraEditorDataProvider(@NotNull EditorDataProvider provider, @Nullable Disposable parentDisposable);
 
   /**
    * Returns data associated with given editor/caret context. Data providers are registered via
    * {@link #registerExtraEditorDataProvider(EditorDataProvider, Disposable)} method.
+   *
+   * @deprecated Use {@link com.intellij.openapi.actionSystem.UiDataRule} instead.
    */
+  @Deprecated(forRemoval = true)
   public abstract @Nullable Object getData(@NotNull String dataId, @NotNull Editor editor, @NotNull Caret caret);
 
   /**

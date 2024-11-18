@@ -16,6 +16,7 @@ import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ConfigImportHelper;
 import com.intellij.openapi.components.Service;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
@@ -54,6 +55,7 @@ import com.intellij.util.PathUtil;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.text.UniqueNameGenerator;
 import kotlin.Unit;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -63,7 +65,7 @@ import org.jetbrains.plugins.terminal.action.RenameTerminalSessionAction;
 import org.jetbrains.plugins.terminal.arrangement.TerminalArrangementState;
 import org.jetbrains.plugins.terminal.arrangement.TerminalCommandHistoryManager;
 import org.jetbrains.plugins.terminal.arrangement.TerminalWorkingDirectoryManager;
-import org.jetbrains.plugins.terminal.exp.BlockTerminalPromotionService;
+import org.jetbrains.plugins.terminal.block.BlockTerminalPromotionService;
 import org.jetbrains.plugins.terminal.ui.TerminalContainer;
 import org.jetbrains.plugins.terminal.vfs.TerminalSessionVirtualFileImpl;
 
@@ -111,6 +113,7 @@ public final class TerminalToolWindowManager implements Disposable {
   /**
    * @deprecated use {@link #getTerminalWidgets()} instead
    */
+  @ApiStatus.Internal
   @Deprecated
   public Set<JBTerminalWidget> getWidgets() {
     return ContainerUtil.map2SetNotNull(myContainerByWidgetMap.keySet(),
@@ -266,7 +269,8 @@ public final class TerminalToolWindowManager implements Disposable {
                                @Nullable TerminalTabState tabState,
                                boolean requestFocus,
                                boolean deferSessionStartUntilUiShown) {
-    final Content content = createTerminalContent(terminalRunner, toolWindow, terminalWidget, tabState, deferSessionStartUntilUiShown);
+    TerminalStartupMoment startupMoment = requestFocus && deferSessionStartUntilUiShown ? new TerminalStartupMoment() : null;
+    Content content = createTerminalContent(terminalRunner, toolWindow, terminalWidget, tabState, deferSessionStartUntilUiShown, startupMoment);
     content.putUserData(RUNNER_KEY, terminalRunner);
     final ContentManager contentManager = toolWindow.getContentManager();
     contentManager.addContent(content);
@@ -297,7 +301,8 @@ public final class TerminalToolWindowManager implements Disposable {
                                         @NotNull ToolWindow toolWindow,
                                         @Nullable TerminalWidget terminalWidget,
                                         @Nullable TerminalTabState tabState,
-                                        boolean deferSessionStartUntilUiShown) {
+                                        boolean deferSessionStartUntilUiShown,
+                                        @Nullable TerminalStartupMoment startupMoment) {
     TerminalToolWindowPanel panel = new TerminalToolWindowPanel(PropertiesComponent.getInstance(myProject), toolWindow);
 
     Content content = ContentFactory.getInstance().createContent(panel, null, false);
@@ -315,6 +320,7 @@ public final class TerminalToolWindowManager implements Disposable {
         .workingDirectory(currentWorkingDir)
         .shellCommand(tabState != null ? tabState.myShellCommand : null)
         .commandHistoryFileProvider(() -> commandHistoryFileLazyValue.getValue())
+        .startupMoment(startupMoment)
         .build();
       widget = terminalRunner.startShellTerminalWidget(content, startupOptions, deferSessionStartUntilUiShown);
       widget.getTerminalTitle().change(state -> {
@@ -387,8 +393,9 @@ public final class TerminalToolWindowManager implements Disposable {
         boolean shouldShowPromotion = runner instanceof LocalBlockTerminalRunner blockRunner && blockRunner.shouldShowPromotion();
         boolean blockTerminalSupported = terminalWidget instanceof ShellTerminalWidget shellWidget &&
                                          isBlockTerminalSupported(shellWidget.getStartupOptions());
-        // show the promotion only if the current runner allows it and block terminal can be used with the shell started now
-        if (shouldShowPromotion && blockTerminalSupported) {
+        // Show the promotion only if the current runner allows it and block terminal can be used with the shell started now.
+        // And it is not the first launch of the IDE by the user.
+        if (shouldShowPromotion && blockTerminalSupported && !ConfigImportHelper.isNewUser()) {
           BlockTerminalPromotionService.INSTANCE.showPromotionOnce(myProject, widget);
         }
       }
@@ -481,7 +488,12 @@ public final class TerminalToolWindowManager implements Disposable {
     List<String> tabs = Arrays.stream(toolWindow.getContentManager().getContents())
       .filter(c -> c!= content)
       .map(c -> c.getDisplayName()).toList();
-    content.setDisplayName(generateUniqueName(title, tabs));
+    String generatedName = generateUniqueName(title, tabs);
+    content.setDisplayName(generatedName);
+    terminalTitle.change((state) -> {
+      state.setDefaultTitle(generatedName);
+      return null;
+    });
   }
 
   public boolean isSplitTerminal(@NotNull JBTerminalWidget widget) {

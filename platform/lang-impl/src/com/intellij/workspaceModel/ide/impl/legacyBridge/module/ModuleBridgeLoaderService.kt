@@ -1,13 +1,14 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.workspaceModel.ide.impl.legacyBridge.module
 
-import com.intellij.openapi.application.writeAction
+import com.intellij.openapi.application.backgroundWriteAction
+import com.intellij.openapi.application.readAction
 import com.intellij.openapi.components.serviceAsync
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.module.ModuleManager
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.project.impl.ProjectServiceContainerInitializedListener
+import com.intellij.openapi.project.impl.ProjectServiceInitializer
 import com.intellij.openapi.projectRoots.ProjectJdkTable
 import com.intellij.openapi.roots.ProjectRootManager
 import com.intellij.openapi.roots.libraries.LibraryTablesRegistrar
@@ -22,11 +23,8 @@ import com.intellij.platform.diagnostic.telemetry.helpers.MillisecondsMeasurer
 import com.intellij.platform.diagnostic.telemetry.impl.span
 import com.intellij.platform.workspace.jps.entities.ModuleEntity
 import com.intellij.platform.workspace.storage.MutableEntityStorage
-import com.intellij.workspaceModel.core.fileIndex.WorkspaceFileIndex
-import com.intellij.workspaceModel.core.fileIndex.impl.WorkspaceFileIndexEx
 import com.intellij.workspaceModel.ide.JpsProjectLoadedListener
 import com.intellij.workspaceModel.ide.impl.GlobalWorkspaceModel
-import com.intellij.workspaceModel.ide.impl.WorkspaceModelCacheImpl
 import com.intellij.workspaceModel.ide.impl.WorkspaceModelImpl
 import com.intellij.workspaceModel.ide.impl.jps.serialization.JpsProjectModelSynchronizer
 import com.intellij.workspaceModel.ide.impl.jpsMetrics
@@ -52,13 +50,17 @@ private fun setupOpenTelemetryReporting(meter: Meter) {
   )
 }
 
-private class ModuleBridgeLoaderService : ProjectServiceContainerInitializedListener {
-  override suspend fun execute(project: Project, workspaceIndexReady: () -> Unit) {
+private class ModuleBridgeLoaderService : ProjectServiceInitializer {
+  override suspend fun execute(project: Project) {
     coroutineScope {
       val projectModelSynchronizer = project.serviceAsync<JpsProjectModelSynchronizer>()
       val workspaceModel = project.serviceAsync<WorkspaceModel>() as WorkspaceModelImpl
 
-      launch { project.serviceAsync<ProjectRootManager>() }
+      launch {
+        readAction {
+          ProjectRootManager.getInstance(project)
+        }
+      }
 
       val start = Milliseconds.now()
 
@@ -76,7 +78,7 @@ private class ModuleBridgeLoaderService : ProjectServiceContainerInitializedList
                       loadedFromCache = workspaceModel.loadedFromCache)
         }
         val globalWorkspaceModel = serviceAsync<GlobalWorkspaceModel>()
-        writeAction {
+        backgroundWriteAction {
           globalWorkspaceModel.applyStateToProject(project)
         }
       }
@@ -104,22 +106,8 @@ private class ModuleBridgeLoaderService : ProjectServiceContainerInitializedList
           launch { serviceAsync<ProjectJdkTable>() }
           project.serviceAsync<ProjectRootManager>() as ProjectRootManagerBridge
         }
-        writeAction {
+        backgroundWriteAction {
           projectRootManager.setupTrackedLibrariesAndJdks()
-        }
-      }
-
-      span("workspace file index initialization") {
-        try {
-          (project.serviceAsync<WorkspaceFileIndex>() as WorkspaceFileIndexEx).initialize()
-        }
-        catch (e: RuntimeException) {
-          // IDEA-345082 There is a chance that the index was not initialized due to the broken cache.
-          WorkspaceModelCacheImpl.invalidateCaches()
-          throw RuntimeException(e)
-        }
-        finally {
-          workspaceIndexReady()
         }
       }
 

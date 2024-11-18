@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.daemon.impl;
 
 import com.intellij.codeInsight.daemon.HighlightDisplayKey;
@@ -26,27 +26,32 @@ import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.util.BackgroundTaskUtil;
 import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.DumbService;
+import com.intellij.openapi.project.IndexNotReadyException;
+import com.intellij.openapi.util.ProperTextRange;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.profile.codeInspection.InspectionProjectProfileManager;
 import com.intellij.psi.FileViewProvider;
 import com.intellij.psi.PsiFile;
+import com.intellij.util.TimeoutUtil;
+import com.intellij.util.concurrency.annotations.RequiresBackgroundThread;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.update.Update;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
 
+@ApiStatus.Internal
 public final class ExternalToolPass extends ProgressableTextEditorHighlightingPass implements DumbAware {
   private static final Logger LOG = Logger.getInstance(ExternalToolPass.class);
 
-  private final List<MyData<?,?>> myAnnotationData = new ArrayList<>();
+  private final List<MyData<?,?>> myAnnotationData = Collections.synchronizedList(new ArrayList<>());
   private volatile @NotNull List<? extends HighlightInfo> myHighlightInfos = Collections.emptyList();
+  private volatile boolean externalUpdateTaskCompleted; // true when the task in ExternalAnnotatorManager.getInstance().queue() was completed
 
   private static final class MyData<K,V> {
     final @NotNull ExternalAnnotator<K,V> annotator;
@@ -129,6 +134,8 @@ public final class ExternalToolPass extends ProgressableTextEditorHighlightingPa
         try {
           collectedInfo = editor == null ? annotator.collectInformation(psiRoot) : annotator.collectInformation(psiRoot, editor, errorFound);
         }
+        catch (IndexNotReadyException ignore) {
+        }
         catch (Throwable t) {
           processError(t, annotator, psiRoot);
         }
@@ -142,46 +149,58 @@ public final class ExternalToolPass extends ProgressableTextEditorHighlightingPa
     }
 
     long modificationStampBefore = myDocument.getModificationStamp();
-    Update update = new Update(myFile) {
+    ExternalAnnotatorManager.getInstance().queue(new Update(myFile) {
       @Override
       public void setRejected() {
-        super.setRejected();
-        if (!myProject.isDisposed()) { // Project close in EDT might call MergeUpdateQueue.dispose which calls setRejected in EDT
-          doFinish();
+        try {
+          super.setRejected();
+          if (!myProject.isDisposed()) { // Project close in EDT might call MergeUpdateQueue.dispose which calls setRejected in EDT
+            doFinish();
+          }
+        }
+        finally {
+          externalUpdateTaskCompleted = true;
         }
       }
 
       @Override
       public void run() {
-        if (documentChanged(modificationStampBefore) || myProject.isDisposed()) {
-          return;
+        try {
+          if (documentChanged(modificationStampBefore) || myProject.isDisposed()) {
+            return;
+          }
+
+          // have to instantiate new indicator because the old one (progress) might have already been canceled
+          DaemonProgressIndicator indicator = new DaemonProgressIndicator();
+          BackgroundTaskUtil.runUnderDisposeAwareIndicator(myProject, () -> {
+            // run annotators outside the read action because they could start OSProcessHandler
+            runChangeAware(myDocument, () -> doAnnotate());
+            ReadAction.run(() -> {
+              ProgressManager.checkCanceled();
+              if (!documentChanged(modificationStampBefore)) {
+                doApply();
+                doFinish();
+              }
+            });
+          }, indicator);
         }
-        // have to instantiate new indicator because the old one (progress) might have already been canceled
-        DaemonProgressIndicator indicator = new DaemonProgressIndicator();
-        BackgroundTaskUtil.runUnderDisposeAwareIndicator(myProject, () -> {
-          // run annotators outside the read action because they could start OSProcessHandler
-          runChangeAware(myDocument, () -> doAnnotate());
-          ReadAction.run(() -> {
-            ProgressManager.checkCanceled();
-            if (!documentChanged(modificationStampBefore)) {
-              doApply();
-              doFinish();
-            }
-          });
-        }, indicator);
+        finally {
+          externalUpdateTaskCompleted = true;
+        }
       }
-    };
-    ExternalAnnotatorManager.getInstance().queue(update);
+    });
   }
 
   @Override
   public @NotNull List<HighlightInfo> getInfos() {
     ApplicationManager.getApplication().assertIsNonDispatchThread();
-    try {
-      ExternalAnnotatorManager.getInstance().waitForAllExecuted(1, TimeUnit.MINUTES);
-    }
-    catch (ExecutionException | InterruptedException | TimeoutException e) {
-      throw new RuntimeException(e);
+    long deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(60);
+
+    while (!externalUpdateTaskCompleted) {
+      ProgressManager.checkCanceled();
+      TimeoutUtil.sleep(1);
+      Thread.yield();
+      if (System.currentTimeMillis() > deadline) break;
     }
     //noinspection unchecked
     return (List<HighlightInfo>)myHighlightInfos;
@@ -209,6 +228,8 @@ public final class ExternalToolPass extends ProgressableTextEditorHighlightingPa
         return null;
       });
     }
+    catch (IndexNotReadyException ignore) {
+    }
     catch (Throwable t) {
       processError(t, data.annotator, data.psiRoot);
     }
@@ -231,16 +252,19 @@ public final class ExternalToolPass extends ProgressableTextEditorHighlightingPa
     }
   }
 
+  @RequiresBackgroundThread
   private void doFinish() {
     List<HighlightInfo> highlights = myAnnotationData.stream()
       .flatMap(data ->
         ContainerUtil.notNullize(data.annotationHolder).stream().map(annotation -> HighlightInfo.fromAnnotation(data.annotator, annotation)))
       .toList();
     MarkupModelEx markupModel = (MarkupModelEx)DocumentMarkupModel.forDocument(myDocument, myProject, true);
-    // use the method which doesn't retrieve a HighlightingSession from the indicator, because we likely destroyed the one already
-    BackgroundUpdateHighlightersUtil.setHighlightersInRange(myRestrictRange, highlights, markupModel, getId(), getHighlightingSession());
-    DaemonCodeAnalyzerEx.getInstanceEx(myProject).getFileStatusMap().markFileUpToDate(myDocument, getId());
-    myHighlightInfos = highlights;
+    HighlightingSessionImpl.runInsideHighlightingSession(myFile, getColorsScheme(), ProperTextRange.create(myFile.getTextRange()), false, session -> {
+      // use the method which doesn't retrieve a HighlightingSession from the indicator, because we likely destroyed the one already
+      BackgroundUpdateHighlightersUtil.setHighlightersInRange(myRestrictRange, highlights, markupModel, getId(), session);
+      DaemonCodeAnalyzerEx.getInstanceEx(myProject).getFileStatusMap().markFileUpToDate(myDocument, getId());
+      myHighlightInfos = highlights;
+    });
   }
 
   private static void processError(@NotNull Throwable t, @NotNull ExternalAnnotator<?,?> annotator, @NotNull PsiFile root) {

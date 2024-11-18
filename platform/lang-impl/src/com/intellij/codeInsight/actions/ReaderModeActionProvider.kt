@@ -1,23 +1,27 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.actions
 
 import com.intellij.application.options.colors.ReaderModeStatsCollector
 import com.intellij.codeInsight.actions.ReaderModeSettings.Companion.matchMode
 import com.intellij.icons.AllIcons
 import com.intellij.ide.HelpTooltip
+import com.intellij.ide.ui.UISettings
 import com.intellij.lang.LangBundle
 import com.intellij.openapi.actionSystem.*
 import com.intellij.openapi.actionSystem.ex.CustomComponentAction
 import com.intellij.openapi.actionSystem.impl.ActionButtonWithText
+import com.intellij.openapi.actionSystem.remoting.ActionRemoteBehaviorSpecification
 import com.intellij.openapi.application.Experiments
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.colors.ColorKey
 import com.intellij.openapi.editor.markup.InspectionWidgetActionProvider
+import com.intellij.openapi.options.BoundSearchableConfigurable
+import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.options.ShowSettingsUtil
+import com.intellij.openapi.options.ex.ConfigurableWrapper
 import com.intellij.openapi.project.DumbAwareToggleAction
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.SystemInfo
-import com.intellij.openapi.util.registry.Registry
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.ui.JBColor
 import com.intellij.ui.scale.JBUIScale
@@ -33,7 +37,7 @@ internal class ReaderModeActionProvider : InspectionWidgetActionProvider {
   override fun createAction(editor: Editor): AnAction? {
     val project: Project? = editor.project
     return if (project == null || project.isDefault) null
-    else object : DefaultActionGroup(ReaderModeAction(editor), Separator.create()) {
+    else object : DefaultActionGroup(ReaderModeAction(editor), Separator.create()), ActionRemoteBehaviorSpecification.Frontend {
 
       override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 
@@ -66,13 +70,23 @@ internal class ReaderModeActionProvider : InspectionWidgetActionProvider {
 
         override fun updateToolTipText() {
           val project = editor.project
-          if (Registry.`is`("ide.helptooltip.enabled") && project != null) {
+          if (project != null && UISettings.isIdeHelpTooltipEnabled()) {
             HelpTooltip.dispose(this)
             HelpTooltip()
               .setTitle(myPresentation.description)
               .setDescription(LangBundle.message("action.ReaderModeProvider.description"))
-              .setLink(LangBundle.message("action.ReaderModeProvider.link.configure"))
-              { ShowSettingsUtil.getInstance().showSettingsDialog(project, ReaderModeConfigurable::class.java) }
+              .setLink(LangBundle.message("action.ReaderModeProvider.link.configure")) {
+                ShowSettingsUtil.getInstance().showSettingsDialog(
+                  project,
+                  /*predicate =*/{ it: Configurable? ->
+                    if (it is ConfigurableWrapper) {
+                      val unwrapped = it.configurable
+                      unwrapped is BoundSearchableConfigurable && unwrapped.id == "editor.reader.mode"
+                    } else false
+                  },
+                  /*additionalConfiguration =*/null
+                )
+              }
               .installOn(this)
           }
           else {

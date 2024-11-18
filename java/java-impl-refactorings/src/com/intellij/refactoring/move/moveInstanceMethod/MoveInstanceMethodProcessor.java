@@ -31,7 +31,6 @@ import com.intellij.util.CommonJavaRefactoringUtil;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.VisibilityUtil;
 import com.intellij.util.containers.MultiMap;
-import com.siyeh.ig.psiutils.ClassUtils;
 import com.siyeh.ig.psiutils.ExpressionUtils;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -244,19 +243,20 @@ public class MoveInstanceMethodProcessor extends BaseRefactoringProcessor{
     PsiMethod patternMethod = createMethodToAdd();
     final List<PsiReference> docRefs = new ArrayList<>();
     for (UsageInfo usage : usages) {
-      if (usage instanceof InheritorUsageInfo) {
-        final PsiClass inheritor = ((InheritorUsageInfo)usage).getInheritor();
+      if (usage instanceof InheritorUsageInfo inheritorUsage) {
+        final PsiClass inheritor = inheritorUsage.getInheritor();
         addMethodToClass(inheritor, patternMethod, true);
       }
-      else if (usage instanceof MethodCallUsageInfo && !((MethodCallUsageInfo)usage).isInternal()) {
-        final PsiElement expression = ((MethodCallUsageInfo)usage).getMethodCallExpression();
-        if (expression instanceof PsiMethodCallExpression) {
-          correctMethodCall((PsiMethodCallExpression)expression, false);
+      else if (usage instanceof MethodCallUsageInfo methodCallUsage && !methodCallUsage.isInternal()) {
+        final PsiElement expression = methodCallUsage.getMethodCallExpression();
+        if (expression instanceof PsiMethodCallExpression call) {
+          correctMethodCall(call, false);
         }
         else if (expression instanceof PsiMethodReferenceExpression methodReferenceExpression) {
           PsiExpression qualifierExpression = methodReferenceExpression.getQualifierExpression();
 
-          if (myTargetVariable instanceof PsiParameter && shouldBeExpandedToLambda(methodReferenceExpression, myMethod.getParameterList().getParameterIndex((PsiParameter)myTargetVariable))) {
+          if (myTargetVariable instanceof PsiParameter parameter && 
+              shouldBeExpandedToLambda(methodReferenceExpression, myMethod.getParameterList().getParameterIndex(parameter))) {
             PsiLambdaExpression lambdaExpression = LambdaRefactoringUtil.convertMethodReferenceToLambda(methodReferenceExpression, false, true);
             if (lambdaExpression != null) {
               List<PsiExpression> returnExpressions = LambdaUtil.getReturnExpressions(lambdaExpression);
@@ -278,7 +278,7 @@ public class MoveInstanceMethodProcessor extends BaseRefactoringProcessor{
               exprText = myTargetVariable.getName();
             }
             PsiExpression newQualifier = JavaPsiFacade.getElementFactory(myProject).createExpressionFromText(exprText, null);
-            ((PsiMethodReferenceExpression)expression).setQualifierExpression(newQualifier);
+            methodReferenceExpression.setQualifierExpression(newQualifier);
             JavaCodeStyleManager.getInstance(myProject).shortenClassReferences(expression);
           }
         }
@@ -290,7 +290,7 @@ public class MoveInstanceMethodProcessor extends BaseRefactoringProcessor{
 
     try {
       final PsiModifierList modifierList = patternMethod.getModifierList();
-      if (myTargetClass.isInterface()) {
+      if (myTargetClass.isInterface() && !myMethod.hasModifierProperty(PsiModifier.ABSTRACT)) {
         if (!PsiUtil.isAvailable(JavaFeature.EXTENSION_METHODS, myTargetClass)) {
           patternMethod.getBody().delete();
           modifierList.setModifierProperty(PsiModifier.DEFAULT, false);
@@ -454,7 +454,7 @@ public class MoveInstanceMethodProcessor extends BaseRefactoringProcessor{
     }
   }
 
-  private PsiMethod createMethodToAdd () {
+  private PsiMethod createMethodToAdd() {
     ChangeContextUtil.encodeContextInfo(myMethod, true);
     try {
       //correct internal references
@@ -527,7 +527,7 @@ public class MoveInstanceMethodProcessor extends BaseRefactoringProcessor{
           }
           if (myTargetVariable.equals(resolved)) {
             PsiThisExpression thisExpression = RefactoringChangeUtil.createThisExpression(
-              manager, PsiTreeUtil.isAncestor(myMethod, ClassUtils.getContainingClass(expression), true) ? myTargetClass : null);
+              manager, PsiTreeUtil.isAncestor(myMethod, PsiUtil.getContainingClass(expression), true) ? myTargetClass : null);
             replaceMap.put(expression, thisExpression);
             return;
           }

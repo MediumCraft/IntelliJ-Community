@@ -26,13 +26,14 @@ import com.intellij.openapi.ui.Splitter;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.wm.IdeFocusManager;
+import com.intellij.threadDumpParser.ThreadOperation;
+import com.intellij.threadDumpParser.ThreadState;
 import com.intellij.ui.*;
 import com.intellij.ui.components.JBList;
 import com.intellij.util.PlatformIcons;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import javax.swing.event.DocumentEvent;
@@ -51,7 +52,7 @@ import static com.intellij.icons.AllIcons.Debugger.ThreadStates.*;
  * @author Jeka
  * @author Konstantin Bulenkov
  */
-public final class ThreadDumpPanel extends JPanel implements DataProvider {
+public final class ThreadDumpPanel extends JPanel implements UiDataProvider {
   private static final Icon PAUSE_ICON_DAEMON = LayeredIcon.layeredIcon(() -> new Icon[]{AllIcons.Actions.Pause, Daemon_sign});
   private static final Icon LOCKED_ICON_DAEMON = LayeredIcon.layeredIcon(() -> new Icon[]{AllIcons.Debugger.MuteBreakpoints, Daemon_sign});
   private static final Icon RUNNING_ICON_DAEMON = LayeredIcon.layeredIcon(() -> new Icon[]{AllIcons.Actions.Resume, Daemon_sign});
@@ -163,11 +164,8 @@ public final class ThreadDumpPanel extends JPanel implements DataProvider {
   }
 
   @Override
-  public @Nullable Object getData(@NotNull @NonNls String dataId) {
-    if (PlatformDataKeys.EXPORTER_TO_TEXT_FILE.is(dataId)) {
-      return myExporterToTextFile;
-    }
-    return null;
+  public void uiDataSnapshot(@NotNull DataSink sink) {
+    sink.set(PlatformDataKeys.EXPORTER_TO_TEXT_FILE, myExporterToTextFile);
   }
 
   private void updateThreadList() {

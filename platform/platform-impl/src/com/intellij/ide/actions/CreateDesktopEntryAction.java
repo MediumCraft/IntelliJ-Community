@@ -10,6 +10,7 @@ import com.intellij.notification.Notification;
 import com.intellij.notification.NotificationType;
 import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.remoting.ActionRemoteBehaviorSpecification;
 import com.intellij.openapi.application.ApplicationBundle;
 import com.intellij.openapi.application.ApplicationNamesInfo;
 import com.intellij.openapi.application.PathManager;
@@ -27,6 +28,7 @@ import com.intellij.ui.AppUIUtil;
 import com.intellij.ui.AppUIUtilKt;
 import com.intellij.util.ExceptionUtil;
 import com.intellij.util.Restarter;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -37,7 +39,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 
-public final class CreateDesktopEntryAction extends DumbAwareAction {
+@ApiStatus.Internal
+public final class CreateDesktopEntryAction extends DumbAwareAction implements ActionRemoteBehaviorSpecification.Disabled {
   private static final Logger LOG = Logger.getInstance(CreateDesktopEntryAction.class);
 
   public static boolean isAvailable() {

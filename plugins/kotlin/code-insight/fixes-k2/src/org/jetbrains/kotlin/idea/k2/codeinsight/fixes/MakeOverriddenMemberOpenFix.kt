@@ -1,18 +1,14 @@
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.kotlin.idea.k2.codeinsight.fixes
 
 import com.intellij.modcommand.ActionContext
 import com.intellij.modcommand.ModPsiUpdater
+import com.intellij.modcommand.Presentation
 import com.intellij.psi.createSmartPointer
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
+import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.fir.diagnostics.KaFirDiagnostic
-import org.jetbrains.kotlin.analysis.api.symbols.KtCallableSymbol
-import org.jetbrains.kotlin.analysis.api.symbols.KtClassKind
-import org.jetbrains.kotlin.analysis.api.symbols.KtNamedClassOrObjectSymbol
-import org.jetbrains.kotlin.analysis.api.symbols.markers.KtNamedSymbol
-import org.jetbrains.kotlin.analysis.api.symbols.markers.KtSymbolWithModality
-import org.jetbrains.kotlin.analysis.api.symbols.markers.KtSymbolWithVisibility
-import org.jetbrains.kotlin.descriptors.Modality
-import org.jetbrains.kotlin.descriptors.Visibilities
+import org.jetbrains.kotlin.analysis.api.symbols.*
+import org.jetbrains.kotlin.analysis.api.symbols.markers.KaNamedSymbol
 import org.jetbrains.kotlin.idea.base.analysis.api.utils.getSymbolContainingMemberDeclarations
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.codeinsight.api.applicable.intentions.KotlinPsiUpdateModCommandAction
@@ -49,28 +45,31 @@ internal object MakeOverriddenMemberOpenFixFactory {
             MakeOverriddenMemberOpenFixUtils.invoke(writableMembers)
         }
 
-        override fun getActionName(
-            actionContext: ActionContext,
+        override fun getPresentation(
+            context: ActionContext,
             element: KtDeclaration,
-            elementContext: ElementContext,
-        ): String = MakeOverriddenMemberOpenFixUtils.getActionName(element, elementContext.containingDeclarationNames)
+        ): Presentation {
+            val (_, containingDeclarationNames) = getElementContext(context, element)
+            val actionName = MakeOverriddenMemberOpenFixUtils.getActionName(element, containingDeclarationNames)
+            return Presentation.of(actionName)
+        }
 
-        override fun getFamilyName(): String = KotlinBundle.message("add.modifier")
+        override fun getFamilyName(): String =
+            KotlinBundle.message("add.modifier")
     }
 }
 
-context(KtAnalysisSession)
-private fun computeElementContext(element: KtNamedDeclaration): ElementContext? {
+private fun KaSession.computeElementContext(element: KtNamedDeclaration): ElementContext? {
     val overriddenNonOverridableMembers = mutableListOf<DeclarationPointer>()
     val containingDeclarationNames = mutableListOf<String>()
-    val symbol = element.getSymbol() as? KtCallableSymbol ?: return null
+    val symbol = element.symbol as? KaCallableSymbol ?: return null
 
-    val allOverriddenSymbols = symbol.getAllOverriddenSymbols()
+    val allOverriddenSymbols = symbol.allOverriddenSymbols.toList()
     for (overriddenSymbol in retainNonOverridableMembers(allOverriddenSymbols)) {
         val overriddenMember = overriddenSymbol.psi
-        val containingSymbol = overriddenSymbol.getContainingSymbol()
+        val containingSymbol = overriddenSymbol.containingDeclaration
         if (overriddenMember == null || overriddenMember !is KtCallableDeclaration || !overriddenMember.canRefactorElement() ||
-            containingSymbol !is KtNamedSymbol || overriddenMember.modifierList?.hasModifier(KtTokens.OPEN_KEYWORD) == true
+            containingSymbol !is KaNamedSymbol || overriddenMember.modifierList?.hasModifier(KtTokens.OPEN_KEYWORD) == true
         ) {
             return null
         }
@@ -86,17 +85,16 @@ private data class ElementContext(
     val containingDeclarationNames: List<String>,
 )
 
-context(KtAnalysisSession)
 private fun retainNonOverridableMembers(
-    callableMemberSymbols: Collection<KtCallableSymbol>,
-): Collection<KtCallableSymbol> {
+    callableMemberSymbols: Collection<KaCallableSymbol>,
+): Collection<KaCallableSymbol> {
     return callableMemberSymbols.filter { !it.isOverridable }
 }
 
-private val KtCallableSymbol.isOverridable: Boolean
-    get() = (this as? KtSymbolWithModality)?.modality != Modality.FINAL &&
-            (this as? KtSymbolWithVisibility)?.visibility != Visibilities.Private &&
-            (this.getSymbolContainingMemberDeclarations() as? KtNamedClassOrObjectSymbol)?.isFinalClass != true
+private val KaCallableSymbol.isOverridable: Boolean
+    get() = modality != KaSymbolModality.FINAL &&
+            visibility != KaSymbolVisibility.PRIVATE &&
+            (this.getSymbolContainingMemberDeclarations() as? KaNamedClassSymbol)?.isFinalClass != true
 
-private val KtNamedClassOrObjectSymbol.isFinalClass: Boolean
-    get() = modality == Modality.FINAL && classKind != KtClassKind.ENUM_CLASS
+private val KaNamedClassSymbol.isFinalClass: Boolean
+    get() = modality == KaSymbolModality.FINAL && classKind != KaClassKind.ENUM_CLASS

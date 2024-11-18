@@ -3,17 +3,19 @@ package org.jetbrains.kotlin.idea.k2.codeinsight.fixes
 
 import com.intellij.modcommand.ActionContext
 import com.intellij.modcommand.ModPsiUpdater
+import com.intellij.modcommand.Presentation
 import com.intellij.psi.SmartPsiElementPointer
 import com.intellij.psi.createSmartPointer
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
+import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
+import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.fir.diagnostics.KaFirDiagnostic
 import org.jetbrains.kotlin.analysis.api.renderer.declarations.KaCallableReturnTypeFilter
-import org.jetbrains.kotlin.analysis.api.renderer.declarations.impl.KtDeclarationRendererForSource
-import org.jetbrains.kotlin.analysis.api.renderer.declarations.modifiers.renderers.KtRendererKeywordFilter
+import org.jetbrains.kotlin.analysis.api.renderer.declarations.impl.KaDeclarationRendererForSource
+import org.jetbrains.kotlin.analysis.api.renderer.declarations.modifiers.renderers.KaRendererKeywordFilter
 import org.jetbrains.kotlin.analysis.api.renderer.declarations.renderers.callables.KaValueParameterSymbolRenderer
-import org.jetbrains.kotlin.analysis.api.symbols.KtConstructorSymbol
-import org.jetbrains.kotlin.analysis.api.symbols.KtValueParameterSymbol
-import org.jetbrains.kotlin.analysis.api.symbols.markers.KtNamedSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaConstructorSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaValueParameterSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.markers.KaNamedSymbol
 import org.jetbrains.kotlin.idea.base.analysis.api.utils.shortenReferences
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.codeinsight.api.applicable.intentions.KotlinPsiUpdateModCommandAction
@@ -27,6 +29,7 @@ import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.psi.*
 
 internal object SpecifyOverrideExplicitlyFixFactory {
+    @OptIn(KaExperimentalApi::class)
     val specifyOverrideExplicitlyFixFactory =
         KotlinQuickFixFactory.ModCommandBased { diagnostic: KaFirDiagnostic.DelegatedMemberHidesSupertypeOverride ->
             val ktClass = diagnostic.psi
@@ -44,11 +47,11 @@ internal object SpecifyOverrideExplicitlyFixFactory {
                 if (specifier is KtDelegatedSuperTypeEntry) {
                     val delegateTargetSymbol = specifier.getSymbol() ?: return@ModCommandBased emptyList()
 
-                    if (delegateTargetSymbol is KtValueParameterSymbol &&
-                        delegateTargetSymbol.getContainingSymbol().let {
-                            it is KtConstructorSymbol &&
+                    if (delegateTargetSymbol is KaValueParameterSymbol &&
+                        delegateTargetSymbol.containingDeclaration.let {
+                            it is KaConstructorSymbol &&
                                     it.isPrimary &&
-                                    it.getContainingSymbol() == delegatedDeclaration.getContainingSymbol()
+                                    it.containingDeclaration == delegatedDeclaration.containingDeclaration
                         }
                     ) {
                         val delegateParameter = delegateTargetSymbol.psi as? KtParameter
@@ -84,30 +87,31 @@ internal object SpecifyOverrideExplicitlyFixFactory {
             listOf(SpecifyOverrideExplicitlyFix(ktClass, elementContext))
         }
 
-    context(KtAnalysisSession)
-    private fun KtDelegatedSuperTypeEntry.getSymbol(): KtNamedSymbol? {
+    context(KaSession)
+    private fun KtDelegatedSuperTypeEntry.getSymbol(): KaNamedSymbol? {
         val nameReferenceExpression = delegateExpression as? KtNameReferenceExpression ?: return null
-        return nameReferenceExpression.mainReference.resolveToSymbol() as? KtNamedSymbol
+        return nameReferenceExpression.mainReference.resolveToSymbol() as? KaNamedSymbol
     }
 
-    private val renderer = KtDeclarationRendererForSource.WITH_SHORT_NAMES.with {
+    @KaExperimentalApi
+    private val renderer = KaDeclarationRendererForSource.WITH_SHORT_NAMES.with {
         returnTypeFilter = KaCallableReturnTypeFilter.ALWAYS
         valueParameterRenderer = KaValueParameterSymbolRenderer.TYPE_ONLY
         keywordsRenderer = keywordsRenderer.with {
-            keywordFilter = KtRendererKeywordFilter.without(
+            keywordFilter = KaRendererKeywordFilter.without(
                 KtTokens.FUN_KEYWORD
             )
         }
         modifiersRenderer = modifiersRenderer.with {
             keywordsRenderer = keywordsRenderer.with {
-                keywordFilter = KtRendererKeywordFilter.without(
+                keywordFilter = KaRendererKeywordFilter.without(
                     KtTokens.OVERRIDE_KEYWORD,
                 )
             }
         }
     }
 
-    private class ElementContext(
+    private data class ElementContext(
         val signature: String,
         val delegateParameters: MutableList<SmartPsiElementPointer<KtParameter>>,
         val generatedMembers: List<KtCallableDeclaration>,
@@ -137,12 +141,15 @@ internal object SpecifyOverrideExplicitlyFixFactory {
             }
         }
 
-        override fun getActionName(actionContext: ActionContext, element: KtClassOrObject, elementContext: ElementContext): String {
-            return KotlinBundle.message("specify.override.for.0.explicitly", elementContext.signature)
+        override fun getPresentation(
+            context: ActionContext,
+            element: KtClassOrObject,
+        ): Presentation {
+            val (signature) = getElementContext(context, element)
+            return Presentation.of(KotlinBundle.message("specify.override.for.0.explicitly", signature))
         }
 
-        override fun getFamilyName(): String {
-            return KotlinBundle.message("specify.override.explicitly")
-        }
+        override fun getFamilyName(): String =
+            KotlinBundle.message("specify.override.explicitly")
     }
 }

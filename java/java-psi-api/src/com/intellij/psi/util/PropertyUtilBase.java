@@ -1,4 +1,4 @@
-// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.psi.util;
 
 import com.intellij.codeInsight.AnnotationTargetUtil;
@@ -13,6 +13,7 @@ import com.intellij.psi.codeStyle.CodeStyleManager;
 import com.intellij.psi.codeStyle.JavaCodeStyleManager;
 import com.intellij.psi.codeStyle.VariableKind;
 import com.intellij.util.ArrayUtilRt;
+import com.intellij.util.ObjectUtils;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NonNls;
@@ -21,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.beans.Introspector;
 import java.util.*;
+import java.util.stream.Stream;
 
 public class PropertyUtilBase {
 
@@ -323,6 +325,41 @@ public class PropertyUtilBase {
       getPropertyNameBySetter(method).equals(propertyName) && type.equals(method.getParameterList().getParameters()[0].getType()));
   }
 
+  /**
+   * Returns the field of current class, which is read by a supplied expression
+   * 
+   * @param expression the PsiExpression to extract the field from
+   * @return the {@link PsiField} of current class returned by the supplied expression, or null if expression does not read the field.
+   */
+  @Nullable
+  public static PsiField getSimplyReturnedField(@Nullable PsiExpression expression) {
+    expression = PsiUtil.skipParenthesizedExprDown(expression);
+    if (!(expression instanceof PsiReferenceExpression)) {
+      return null;
+    }
+
+    PsiReferenceExpression reference = (PsiReferenceExpression)expression;
+    if (hasSubstantialQualifier(reference)) {
+      return null;
+    }
+
+    return ObjectUtils.tryCast(reference.resolve(), PsiField.class);
+  }
+
+  private static boolean hasSubstantialQualifier(PsiReferenceExpression reference) {
+    final PsiExpression qualifier = PsiUtil.skipParenthesizedExprDown(reference.getQualifierExpression());
+    if (qualifier == null) return false;
+
+    if (qualifier instanceof PsiQualifiedExpression) {
+      return false;
+    }
+
+    if (qualifier instanceof PsiReferenceExpression) {
+      return !(((PsiReferenceExpression)qualifier).resolve() instanceof PsiClass);
+    }
+    return true;
+  }
+
   public enum GetterFlavour {
     BOOLEAN,
     GENERIC,
@@ -604,9 +641,17 @@ public class PropertyUtilBase {
     VariableKind kind = codeStyleManager.getVariableKind(field);
     String propertyName = codeStyleManager.variableNameToPropertyName(name, kind);
     String setName = suggestSetterName(field);
-    PsiMethod setMethod = factory
-      .createMethodFromText(factory.createMethod(setName, returnSelf ? factory.createType(containingClass) : PsiTypes.voidType()).getText(),
-                            field);
+    
+    PsiMethod setMethod;
+    if (returnSelf) {
+      PsiType[] typeArguments = Stream.of(containingClass.getTypeParameters())
+        .map(factory::createType)
+        .toArray(PsiType[]::new);
+      setMethod = factory.createMethod(setName, factory.createType(containingClass, typeArguments));
+    }
+    else {
+      setMethod = factory.createMethod(setName, PsiTypes.voidType());
+    }
     String parameterName = codeStyleManager.propertyNameToVariableName(propertyName, VariableKind.PARAMETER);
     PsiParameter param = factory.createParameter(parameterName, AnnotationTargetUtil.keepStrictlyTypeUseAnnotations(field.getModifierList(), field.getType()));
 

@@ -60,6 +60,13 @@ public inline fun <reified E: WorkspaceEntity> EntityStorage.entities(): Sequenc
 }
 
 /**
+ * Kotlin shortcut for `EntityStorage.referrers(id, E::class.java)`.
+ */
+public inline fun <reified E: WorkspaceEntityWithSymbolicId> EntityStorage.referrers(id: SymbolicEntityId<E>): Sequence<E> {
+  return this.referrers(id, E::class.java)
+}
+
+/**
  * An immutable snapshot of the storage state. 
  * It isn't affected by the further modifications of the storage.
  * 
@@ -70,6 +77,7 @@ public interface ImmutableEntityStorage : EntityStorage {
    * This function is under development, please don't use it.
    */
   @ApiStatus.Experimental
+  @ApiStatus.Internal
   public fun <T> cached(query: StorageQuery<T>): T
 
   public companion object {
@@ -82,18 +90,4 @@ public interface ImmutableEntityStorage : EntityStorage {
  */
 public fun ImmutableEntityStorage.toBuilder(): MutableEntityStorage {
   return MutableEntityStorage.from(this)
-}
-
-/**
- * Convert entity storage to the snapshot. If the storage is a snapshot, return itself.
- *
- * This function is obsolete, use [MutableEntityStorage.toSnapshot].
- */
-@ApiStatus.Obsolete
-public fun EntityStorage.toSnapshot(): ImmutableEntityStorage {
-  return when (this) {
-    is ImmutableEntityStorage -> this
-    is MutableEntityStorage -> this.toSnapshot()
-    else -> error("Unexpected storage: $this")
-  }
 }

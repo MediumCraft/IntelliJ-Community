@@ -263,6 +263,11 @@ public abstract class K2IntroduceFunctionTestGenerated extends AbstractK2Introdu
             runTest("../../idea/tests/testData/refactoring/extractFunction/basic/packageQualifier.kt");
         }
 
+        @TestMetadata("parenthesis.kt")
+        public void testParenthesis() throws Exception {
+            runTest("../../idea/tests/testData/refactoring/extractFunction/basic/parenthesis.kt");
+        }
+
         @TestMetadata("privateMemberInClassObject.kt")
         public void testPrivateMemberInClassObject() throws Exception {
             runTest("../../idea/tests/testData/refactoring/extractFunction/basic/privateMemberInClassObject.kt");
@@ -286,6 +291,11 @@ public abstract class K2IntroduceFunctionTestGenerated extends AbstractK2Introdu
         @TestMetadata("privateSetter.kt")
         public void testPrivateSetter() throws Exception {
             runTest("../../idea/tests/testData/refactoring/extractFunction/basic/privateSetter.kt");
+        }
+
+        @TestMetadata("quotedName.kt")
+        public void testQuotedName() throws Exception {
+            runTest("../../idea/tests/testData/refactoring/extractFunction/basic/quotedName.kt");
         }
 
         @TestMetadata("refInReturn.kt")
@@ -842,6 +852,11 @@ public abstract class K2IntroduceFunctionTestGenerated extends AbstractK2Introdu
             @TestMetadata("singleOutputValue.kt")
             public void testSingleOutputValue() throws Exception {
                 runTest("../../idea/tests/testData/refactoring/extractFunction/controlFlow/outputValues/singleOutputValue.kt");
+            }
+
+            @TestMetadata("singleOutputValueBracesRequired.kt")
+            public void testSingleOutputValueBracesRequired() throws Exception {
+                runTest("../../idea/tests/testData/refactoring/extractFunction/controlFlow/outputValues/singleOutputValueBracesRequired.kt");
             }
 
             @TestMetadata("singleOutputValueWithIf.kt")
@@ -1759,6 +1774,11 @@ public abstract class K2IntroduceFunctionTestGenerated extends AbstractK2Introdu
             @TestMetadata("missingReceiver.kt")
             public void testMissingReceiver() throws Exception {
                 runTest("../../idea/tests/testData/refactoring/extractFunction/parameters/extractThis/missingReceiver.kt");
+            }
+
+            @TestMetadata("nestedReceivers.kt")
+            public void testNestedReceivers() throws Exception {
+                runTest("../../idea/tests/testData/refactoring/extractFunction/parameters/extractThis/nestedReceivers.kt");
             }
 
             @TestMetadata("paramAsExplicitInvoke.kt")

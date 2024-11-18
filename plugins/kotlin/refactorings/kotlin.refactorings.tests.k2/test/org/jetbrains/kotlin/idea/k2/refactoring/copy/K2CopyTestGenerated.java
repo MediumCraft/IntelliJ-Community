@@ -65,6 +65,11 @@ public class K2CopyTestGenerated extends AbstractK2CopyTest {
         runTest("../../idea/tests/testData/refactoring/copy/copyClassWithSmartCast/copyClassWithSmartCast.test");
     }
 
+    @TestMetadata("copyEmptyKtFile/copyEmptyKtFile.test")
+    public void testCopyEmptyKtFile_CopyEmptyKtFile() throws Exception {
+        runTest("../../idea/tests/testData/refactoring/copy/copyEmptyKtFile/copyEmptyKtFile.test");
+    }
+
     @TestMetadata("copyFIleFromDefaultPackage/copyFIleFromDefaultPackage.test")
     public void testCopyFIleFromDefaultPackage_CopyFIleFromDefaultPackage() throws Exception {
         runTest("../../idea/tests/testData/refactoring/copy/copyFIleFromDefaultPackage/copyFIleFromDefaultPackage.test");
@@ -78,6 +83,11 @@ public class K2CopyTestGenerated extends AbstractK2CopyTest {
     @TestMetadata("copyFIleToDefaultPackage/copyFIleToDefaultPackage.test")
     public void testCopyFIleToDefaultPackage_CopyFIleToDefaultPackage() throws Exception {
         runTest("../../idea/tests/testData/refactoring/copy/copyFIleToDefaultPackage/copyFIleToDefaultPackage.test");
+    }
+
+    @TestMetadata("copyFIleToSubpackage/copyFIleToSubpackage.test")
+    public void testCopyFIleToSubpackage_CopyFIleToSubpackage() throws Exception {
+        runTest("../../idea/tests/testData/refactoring/copy/copyFIleToSubpackage/copyFIleToSubpackage.test");
     }
 
     @TestMetadata("copyFIleWithPackageAndDirUnmatched/copyFIleWithPackageAndDirUnmatched.test")
@@ -223,6 +233,11 @@ public class K2CopyTestGenerated extends AbstractK2CopyTest {
     @TestMetadata("kt18149/kt18149.test")
     public void testKt18149_Kt18149() throws Exception {
         runTest("../../idea/tests/testData/refactoring/copy/kt18149/kt18149.test");
+    }
+
+    @TestMetadata("operationReferenceToJavaDecl/operationReferenceToJavaDecl.test")
+    public void testOperationReferenceToJavaDecl_OperationReferenceToJavaDecl() throws Exception {
+        runTest("../../idea/tests/testData/refactoring/copy/operationReferenceToJavaDecl/operationReferenceToJavaDecl.test");
     }
 
     @TestMetadata("protectedConstructorRefInSuperListEntry/protectedConstructorRefInSuperListEntry.test")

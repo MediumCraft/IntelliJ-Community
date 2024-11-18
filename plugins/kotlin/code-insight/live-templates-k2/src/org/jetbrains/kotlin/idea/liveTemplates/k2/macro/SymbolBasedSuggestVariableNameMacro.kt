@@ -7,8 +7,7 @@ import org.jetbrains.kotlin.analysis.api.permissions.KaAllowAnalysisFromWriteAct
 import org.jetbrains.kotlin.analysis.api.permissions.KaAllowAnalysisOnEdt
 import org.jetbrains.kotlin.analysis.api.permissions.allowAnalysisFromWriteAction
 import org.jetbrains.kotlin.analysis.api.permissions.allowAnalysisOnEdt
-import org.jetbrains.kotlin.analysis.api.symbols.KtVariableLikeSymbol
-import org.jetbrains.kotlin.analysis.api.symbols.getSymbolOfTypeSafe
+import org.jetbrains.kotlin.analysis.api.symbols.KaVariableSymbol
 import org.jetbrains.kotlin.idea.base.codeInsight.KotlinDeclarationNameValidator
 import org.jetbrains.kotlin.idea.base.codeInsight.KotlinNameSuggester
 import org.jetbrains.kotlin.idea.base.codeInsight.KotlinNameSuggestionProvider
@@ -45,7 +44,7 @@ class SymbolBasedSuggestVariableNameMacro(private val defaultName: String? = nul
             @OptIn(KaAllowAnalysisFromWriteAction::class)
             allowAnalysisFromWriteAction {
                 analyze(declaration) {
-                    val symbol = declaration.getSymbolOfTypeSafe<KtVariableLikeSymbol>()
+                    val symbol = declaration.symbol as? KaVariableSymbol
                     if (symbol != null) {
                         val nameValidator = KotlinDeclarationNameValidator(
                             declaration,

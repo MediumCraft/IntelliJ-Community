@@ -1,9 +1,9 @@
-// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.uast.kotlin
 
 import com.intellij.psi.*
-import org.jetbrains.kotlin.analysis.api.types.KtTypeNullability
+import org.jetbrains.kotlin.analysis.api.types.KaTypeNullability
 import org.jetbrains.kotlin.asJava.toLightAnnotation
 import org.jetbrains.kotlin.asJava.toLightElements
 import org.jetbrains.kotlin.builtins.createFunctionType
@@ -33,6 +33,8 @@ import org.jetbrains.kotlin.types.TypeUtils
 import org.jetbrains.kotlin.types.error.ErrorUtils
 import org.jetbrains.kotlin.types.typeUtil.TypeNullability
 import org.jetbrains.kotlin.types.typeUtil.nullability
+import org.jetbrains.kotlin.utils.exceptions.errorWithAttachment
+import org.jetbrains.kotlin.utils.exceptions.withPsiEntry
 import org.jetbrains.uast.*
 import org.jetbrains.uast.kotlin.psi.UastKotlinPsiParameterBase
 
@@ -149,17 +151,16 @@ interface KotlinUastResolveProviderService : BaseKotlinUastResolveProviderServic
 
         val parameters = if (includeExplicitParameters) functionDescriptor.explicitParameters else functionDescriptor.valueParameters
 
-        return parameters.map { p ->
+        return parameters.map { param ->
+            val type = param.type.toPsiType(parent, ktLambdaExpression, PsiTypeConversionConfiguration.create(ktLambdaExpression))
             KotlinUParameter(
                 UastKotlinPsiParameterBase(
-                    name = p.name.asString(),
-                    type = p.type.toPsiType(parent, ktLambdaExpression, PsiTypeConversionConfiguration.create(ktLambdaExpression)),
+                    name = param.name.asString(),
                     parent = ktLambdaExpression,
-                    ktOrigin = ktLambdaExpression,
-                    language = ktLambdaExpression.language,
-                    isVarArgs = p.isVararg,
-                    ktDefaultValue = null
-                ),
+                    isVarArgs = param.isVararg,
+                    ktDefaultValue = null,
+                    ktOrigin = ktLambdaExpression
+                ) { type },
                 null,
                 parent
             )
@@ -283,6 +284,13 @@ interface KotlinUastResolveProviderService : BaseKotlinUastResolveProviderServic
     }
 
     override fun callKind(ktCallElement: KtCallElement): UastCallKind {
+        when (ktCallElement) {
+            is KtSuperTypeCallEntry, is KtAnnotationEntry, is KtConstructorDelegationCall -> return UastCallKind.CONSTRUCTOR_CALL
+            is KtCallExpression -> {}
+            else -> errorWithAttachment("Unexpected element: ${ktCallElement::class.simpleName}") {
+                withPsiEntry("callElement", ktCallElement)
+            }
+        }
         val resolvedCall = ktCallElement.getResolvedCall(ktCallElement.analyze()) ?: return UastCallKind.METHOD_CALL
         val fqName = DescriptorUtils.getFqNameSafe(resolvedCall.candidateDescriptor)
         return when {
@@ -530,12 +538,12 @@ interface KotlinUastResolveProviderService : BaseKotlinUastResolveProviderServic
                 returnType.nullability() != TypeNullability.NOT_NULL
     }
 
-    override fun nullability(psiElement: PsiElement): KtTypeNullability? {
+    override fun nullability(psiElement: PsiElement): KaTypeNullability? {
         return getTargetType(psiElement)?.nullability()?.let {
             when (it) {
-                TypeNullability.NOT_NULL -> KtTypeNullability.NON_NULLABLE
-                TypeNullability.NULLABLE -> KtTypeNullability.NULLABLE
-                TypeNullability.FLEXIBLE -> KtTypeNullability.UNKNOWN
+                TypeNullability.NOT_NULL -> KaTypeNullability.NON_NULLABLE
+                TypeNullability.NULLABLE -> KaTypeNullability.NULLABLE
+                TypeNullability.FLEXIBLE -> KaTypeNullability.UNKNOWN
             }
         }
     }

@@ -3,9 +3,8 @@ package org.jetbrains.kotlin.idea.k2.codeinsight.intentions
 
 import com.intellij.modcommand.ActionContext
 import com.intellij.modcommand.ModPsiUpdater
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
+import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
-import org.jetbrains.kotlin.idea.codeinsight.api.applicable.asUnit
 import org.jetbrains.kotlin.idea.codeinsight.api.applicable.intentions.KotlinApplicableModCommandAction
 import org.jetbrains.kotlin.idea.codeinsight.utils.RemoveExplicitTypeArgumentsUtils
 import org.jetbrains.kotlin.idea.k2.refactoring.util.areTypeArgumentsRedundant
@@ -22,15 +21,16 @@ internal class RemoveExplicitTypeArgumentsIntention :
         return RemoveExplicitTypeArgumentsUtils.isApplicableByPsi(callExpression)
     }
 
-    context(KtAnalysisSession)
-    override fun prepareContext(element: KtTypeArgumentList): Unit? =
-        areTypeArgumentsRedundant(element).asUnit
+    context(KaSession)
+    override fun prepareContext(element: KtTypeArgumentList): Unit? {
+        return if (areTypeArgumentsRedundant(element)) Unit else null
+    }
 
     override fun invoke(
-      actionContext: ActionContext,
-      element: KtTypeArgumentList,
-      elementContext: Unit,
-      updater: ModPsiUpdater,
+        actionContext: ActionContext,
+        element: KtTypeArgumentList,
+        elementContext: Unit,
+        updater: ModPsiUpdater,
     ) {
         RemoveExplicitTypeArgumentsUtils.applyTo(element)
     }

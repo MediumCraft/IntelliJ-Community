@@ -26,7 +26,6 @@ import com.intellij.refactoring.extractMethod.newImpl.ExtractException;
 import com.intellij.refactoring.extractMethod.newImpl.MethodExtractor;
 import com.intellij.refactoring.util.duplicates.Match;
 import com.intellij.testFramework.IdeaTestUtil;
-import com.intellij.testFramework.IndexingTestUtil;
 import com.intellij.testFramework.LightJavaCodeInsightTestCase;
 import com.intellij.util.ArrayUtilRt;
 import com.intellij.util.IncorrectOperationException;
@@ -1692,6 +1691,30 @@ public class ExtractMethodNewTest extends LightJavaCodeInsightTestCase {
 
   public void testExtractConditionFromSimpleIf1() throws Exception {
     doTest();
+  }
+
+  public void testSimpleWithNullableDirectlyBeforeType() throws Exception {
+    JavaCodeStyleSettings instance = JavaCodeStyleSettings.getInstance(getProject());
+    boolean oldValue = instance.GENERATE_USE_TYPE_ANNOTATION_BEFORE_TYPE;
+    instance.GENERATE_USE_TYPE_ANNOTATION_BEFORE_TYPE = true;
+    try {
+      doTest();
+    }
+    finally {
+      instance.GENERATE_USE_TYPE_ANNOTATION_BEFORE_TYPE = oldValue;
+    }
+  }
+
+  public void testSimpleWithNullableDirectlyBeforeKeyword() throws Exception {
+    JavaCodeStyleSettings instance = JavaCodeStyleSettings.getInstance(getProject());
+    boolean oldValue = instance.GENERATE_USE_TYPE_ANNOTATION_BEFORE_TYPE;
+    instance.GENERATE_USE_TYPE_ANNOTATION_BEFORE_TYPE = false;
+    try {
+      doTest();
+    }
+    finally {
+      instance.GENERATE_USE_TYPE_ANNOTATION_BEFORE_TYPE = oldValue;
+    }
   }
 
   private void doTestDisabledParam() throws PrepareFailedException {

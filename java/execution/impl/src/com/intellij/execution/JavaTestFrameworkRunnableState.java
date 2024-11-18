@@ -3,6 +3,7 @@ package com.intellij.execution;
 
 import com.intellij.codeInsight.daemon.impl.analysis.JavaModuleGraphUtil;
 import com.intellij.debugger.impl.GenericDebuggerRunnerSettings;
+import com.intellij.debugger.impl.RemoteConnectionBuilder;
 import com.intellij.diagnostic.logging.OutputFileUtil;
 import com.intellij.execution.configurations.*;
 import com.intellij.execution.filters.ArgumentFileFilter;
@@ -11,6 +12,7 @@ import com.intellij.execution.process.*;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.execution.runners.ProgramRunner;
 import com.intellij.execution.target.*;
+import com.intellij.execution.target.eel.EelTargetEnvironmentRequest;
 import com.intellij.execution.target.local.LocalTargetEnvironment;
 import com.intellij.execution.testDiscovery.JvmToggleAutoTestAction;
 import com.intellij.execution.testframework.*;
@@ -25,8 +27,6 @@ import com.intellij.execution.ui.ConsoleView;
 import com.intellij.execution.util.JavaParametersUtil;
 import com.intellij.execution.util.ProgramParametersConfigurator;
 import com.intellij.execution.util.ProgramParametersUtil;
-import com.intellij.execution.wsl.target.WslTargetEnvironmentConfiguration;
-import com.intellij.execution.wsl.target.WslTargetEnvironmentRequest;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.compiler.JavaCompilerBundle;
 import com.intellij.openapi.diagnostic.Logger;
@@ -48,6 +48,7 @@ import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.JavaPsiFacade;
@@ -186,8 +187,8 @@ public abstract class JavaTestFrameworkRunnableState<T extends
   @Override
   public TargetEnvironmentRequest createCustomTargetEnvironmentRequest() {
     // Don't call getJavaParameters() because it will perform too much initialization
-    WslTargetEnvironmentConfiguration config = checkCreateWslConfiguration(getJdk());
-    return config == null ? null : new WslTargetEnvironmentRequest(config);
+    final var config = checkCreateNonLocalConfiguration(getJdk());
+    return config == null ? null : new EelTargetEnvironmentRequest(config);
   }
 
   public void resolveServerSocketPort(@NotNull TargetEnvironment remoteEnvironment) throws ExecutionException {
@@ -214,6 +215,10 @@ public abstract class JavaTestFrameworkRunnableState<T extends
 
   protected boolean isIdBasedTestTree() {
     return false;
+  }
+
+  protected boolean isPrintAsyncStackTraceForExceptions() {
+    return true;
   }
 
   @Override
@@ -247,6 +252,11 @@ public abstract class JavaTestFrameworkRunnableState<T extends
     downloadAdditionalDependencies(getJavaParameters());
     appendForkInfo(getEnvironment().getExecutor());
     appendRepeatMode();
+
+    var asyncStackTraceForExceptions = isPrintAsyncStackTraceForExceptions();
+    if (asyncStackTraceForExceptions && Registry.is("debugger.async.stack.trace.for.exceptions.printing", false)) {
+      RemoteConnectionBuilder.addDebuggerAgent(getJavaParameters(), getEnvironment().getProject(), true);
+    }
 
     TargetedCommandLineBuilder commandLineBuilder = super.createTargetedCommandLine(request);
     File inputFile = InputRedirectAware.getInputFile(getConfiguration());

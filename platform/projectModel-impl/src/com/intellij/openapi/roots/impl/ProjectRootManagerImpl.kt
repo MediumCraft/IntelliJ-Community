@@ -23,7 +23,9 @@ import com.intellij.util.EventDispatcher
 import com.intellij.util.SmartList
 import com.intellij.util.io.URLUtil
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.jdom.Element
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.jps.model.module.JpsModuleSourceRootType
@@ -36,8 +38,11 @@ private const val PROJECT_JDK_TYPE_ATTR = "project-jdk-type"
 private const val ATTRIBUTE_VERSION = "version"
 
 @State(name = "ProjectRootManager")
-open class ProjectRootManagerImpl(val project: Project,
-                                  private val coroutineScope: CoroutineScope) : ProjectRootManagerEx(), PersistentStateComponent<Element> {
+@ApiStatus.Internal
+open class ProjectRootManagerImpl(
+  @JvmField val project: Project,
+  @JvmField protected val coroutineScope: CoroutineScope,
+) : ProjectRootManagerEx(), PersistentStateComponent<Element> {
   private val projectJdkEventDispatcher = EventDispatcher.create(ProjectJdkListener::class.java)
   private var projectSdkName: String? = null
   private var projectSdkType: String? = null
@@ -63,6 +68,7 @@ open class ProjectRootManagerImpl(val project: Project,
     @JvmStatic
     fun getInstanceImpl(project: Project): ProjectRootManagerImpl = getInstance(project) as ProjectRootManagerImpl
 
+    @ApiStatus.Internal
     fun extractLocalPath(url: String): String {
       val path = URLUtil.extractPath(url)
       val separatorIndex = path.indexOf(URLUtil.JAR_SEPARATOR)
@@ -125,14 +131,19 @@ open class ProjectRootManagerImpl(val project: Project,
       }
     }
 
+    @ApiStatus.Internal
     protected abstract fun fireRootsChanged(change: ChangeList): Boolean
 
+    @ApiStatus.Internal
     protected abstract fun initiateChangelist(change: Change): ChangeList
 
+    @ApiStatus.Internal
     protected abstract fun accumulate(current: ChangeList, change: Change): ChangeList
 
+    @ApiStatus.Internal
     protected abstract fun copy(changes: ChangeList): ChangeList
 
+    @get:ApiStatus.Internal
     protected abstract val genericChange: Change
   }
 
@@ -158,6 +169,7 @@ open class ProjectRootManagerImpl(val project: Project,
     }
   }
 
+  @ApiStatus.Internal
   protected val fileTypesChanged: BatchSession<Boolean, Boolean> = object : BatchSession<Boolean, Boolean>(true) {
     override fun fireRootsChanged(change: Boolean): Boolean {
       return this@ProjectRootManagerImpl.fireRootsChanged(true, emptyList())
@@ -174,11 +186,13 @@ open class ProjectRootManagerImpl(val project: Project,
 
     override fun copy(changes: Boolean): Boolean = changes
   }
+  @ApiStatus.Internal
   open val rootsValidityChangedListener: VirtualFilePointerListener = object : VirtualFilePointerListener {}
   override fun getFileIndex(): ProjectFileIndex {
     return ProjectFileIndex.getInstance(project)
   }
 
+  @ApiStatus.Internal
   override fun getContentRootUrls(): List<String> {
     val modules = moduleManager.modules
     val result = ArrayList<String>(modules.size)
@@ -188,6 +202,7 @@ open class ProjectRootManagerImpl(val project: Project,
     return result
   }
 
+  @ApiStatus.Internal
   override fun getContentRoots(): Array<VirtualFile> {
     val modules = moduleManager.modules
     val result = ArrayList<VirtualFile>(modules.size)
@@ -201,6 +216,7 @@ open class ProjectRootManagerImpl(val project: Project,
     return VfsUtilCore.toVirtualFileArray(result)
   }
 
+  @ApiStatus.Internal
   override fun getContentSourceRoots(): Array<VirtualFile> {
     val modules = moduleManager.modules
     val result = ArrayList<VirtualFile>(modules.size)
@@ -210,6 +226,7 @@ open class ProjectRootManagerImpl(val project: Project,
     return VfsUtilCore.toVirtualFileArray(result)
   }
 
+  @ApiStatus.Internal
   override fun getModuleSourceRoots(rootTypes: Set<JpsModuleSourceRootType<*>?>): List<VirtualFile> {
     val modules = moduleManager.modules
     val roots = ArrayList<VirtualFile>(modules.size)
@@ -219,10 +236,13 @@ open class ProjectRootManagerImpl(val project: Project,
     return roots
   }
 
+  @ApiStatus.Internal
   override fun orderEntries(): OrderEnumerator = ProjectOrderEnumerator(project, rootCache)
 
-  override fun orderEntries(modules: Collection<Module>): OrderEnumerator = ModulesOrderEnumerator(modules)
+  @ApiStatus.Internal
+  override fun orderEntries(modules: Collection<Module>): OrderEnumerator = ModulesOrderEnumerator(project, modules)
 
+  @ApiStatus.Internal
   override fun getContentRootsFromAllModules(): Array<VirtualFile> {
     val modules = moduleManager.sortedModules
     val result = ArrayList<VirtualFile>(modules.size + 1)
@@ -236,6 +256,7 @@ open class ProjectRootManagerImpl(val project: Project,
     return VfsUtilCore.toVirtualFileArray(result)
   }
 
+  @ApiStatus.Internal
   final override fun getProjectSdk(): Sdk? {
     if (projectSdkName == null) {
       return null
@@ -250,10 +271,13 @@ open class ProjectRootManagerImpl(val project: Project,
     }
   }
 
+  @ApiStatus.Internal
   override fun getProjectSdkName(): String? = projectSdkName
 
+  @ApiStatus.Internal
   override fun getProjectSdkTypeName(): String? = projectSdkType
 
+  @ApiStatus.Internal
   override fun setProjectSdk(sdk: Sdk?) {
     ApplicationManager.getApplication().assertWriteAccessAllowed()
     if (sdk == null) {
@@ -280,9 +304,11 @@ open class ProjectRootManagerImpl(val project: Project,
     }
   }
 
+  @get:ApiStatus.Internal
   protected open val actionToRunWhenProjectJdkChanges: Runnable
     get() = Runnable { projectJdkEventDispatcher.getMulticaster().projectJdkChanged() }
 
+  @ApiStatus.Internal
   override fun setProjectSdkName(name: String, sdkTypeName: String) {
     ApplicationManager.getApplication().assertWriteAccessAllowed()
     projectSdkName = name
@@ -298,6 +324,7 @@ open class ProjectRootManagerImpl(val project: Project,
     projectJdkEventDispatcher.removeListener(listener)
   }
 
+  @ApiStatus.Internal
   override fun loadState(element: Element) {
     LOG.debug("Loading state into element")
     var stateChanged = false
@@ -316,7 +343,10 @@ open class ProjectRootManagerImpl(val project: Project,
     if (app != null) {
       val isStateLoaded = isStateLoaded
       if (stateChanged) {
-        coroutineScope.launch(ModalityState.nonModal().asContextElement()) {
+        coroutineScope.launch {
+          // make sure we execute it only after any current modality dialog
+          withContext(Dispatchers.EDT + ModalityState.nonModal().asContextElement()) {
+          }
           applyState(isStateLoaded)
         }
       }
@@ -327,7 +357,7 @@ open class ProjectRootManagerImpl(val project: Project,
   private suspend fun applyState(isStateLoaded: Boolean) {
     if (isStateLoaded) {
       LOG.debug("Run write action for projectJdkChanged()")
-      writeAction {
+      backgroundWriteAction {
         projectJdkChanged()
       }
       return
@@ -352,17 +382,19 @@ open class ProjectRootManagerImpl(val project: Project,
 
     LOG.debug("Run write action for extension.projectSdkChanged(sdk)")
     val extensions = EP_NAME.getExtensions(project)
-    writeAction {
+    backgroundWriteAction {
       for (extension in extensions) {
         extension.projectSdkChanged(sdk)
       }
     }
   }
 
+  @ApiStatus.Internal
   override fun noStateLoaded() {
     isStateLoaded = true
   }
 
+  @ApiStatus.Internal
   override fun getState(): Element? {
     val element = Element("state")
     element.setAttribute(ATTRIBUTE_VERSION, "2")
@@ -382,6 +414,7 @@ open class ProjectRootManagerImpl(val project: Project,
     return element
   }
 
+  @ApiStatus.Internal
   override fun mergeRootsChangesDuring(runnable: Runnable) {
     ApplicationManager.getApplication().assertWriteAccessAllowed()
     val batchSession = rootsChanged
@@ -394,10 +427,12 @@ open class ProjectRootManagerImpl(val project: Project,
     }
   }
 
+  @ApiStatus.Internal
   protected open fun clearScopesCaches() {
     clearScopesCachesForModules()
   }
 
+  @ApiStatus.Internal
   override fun clearScopesCachesForModules() {
     rootCache.clearCache()
     for (module in ModuleManager.getInstance(project).modules) {
@@ -443,6 +478,7 @@ open class ProjectRootManagerImpl(val project: Project,
     return AutoCloseable { rootsChanged.rootsChanged(changes) }
   }
 
+  @ApiStatus.Internal
   var isFiringEvent: Boolean = false
     protected set
 
@@ -479,5 +515,6 @@ open class ProjectRootManagerImpl(val project: Project,
   private val moduleManager: ModuleManager
     get() = ModuleManager.getInstance(project)
 
+  @ApiStatus.Internal
   override fun markRootsForRefresh(): List<VirtualFile> = emptyList()
 }

@@ -12,7 +12,6 @@
     <orderEntry type="module" module-name="intellij.platform.extensions" />
     <orderEntry type="module" module-name="intellij.platform.core" exported="" />
     <orderEntry type="module" module-name="intellij.java.guiForms.rt" exported="" />
-    <orderEntry type="module" module-name="intellij.platform.resources.en" exported="" />
     <orderEntry type="module" module-name="intellij.platform.icons" />
     <orderEntry type="module" module-name="intellij.platform.projectModel" exported="" />
     <orderEntry type="module" module-name="intellij.platform.analysis" exported="" />
@@ -28,6 +27,7 @@
     <orderEntry type="module" module-name="intellij.platform.ide.util.io" />
     <orderEntry type="library" name="jcef" level="project" />
     <orderEntry type="module" module-name="intellij.platform.codeStyle" />
+    <orderEntry type="module" module-name="intellij.platform.credentialStore" exported="" />
     <orderEntry type="module" module-name="intellij.platform.remote.core" exported="" />
     <orderEntry type="module" module-name="intellij.platform.ide.core" exported="" />
     <orderEntry type="module" module-name="intellij.platform.util.text.matching" />

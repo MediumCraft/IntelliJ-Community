@@ -37,10 +37,7 @@ import com.intellij.util.containers.CollectionFactory;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.JBIterable;
 import org.intellij.lang.annotations.MagicConstant;
-import org.jetbrains.annotations.Contract;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
-import org.jetbrains.annotations.Unmodifiable;
+import org.jetbrains.annotations.*;
 
 import java.util.*;
 import java.util.function.Predicate;
@@ -1578,11 +1575,36 @@ public final class PsiUtil extends PsiUtilCore {
     return SOFT_KEYWORDS.get(keyword);
   }
 
+  /**
+   * @return containing class for {@code element} ignoring {@link PsiAnonymousClass} if {@code element} is located in corresponding expression list
+   */
+  @Nullable
+  public static PsiClass getContainingClass(PsiElement element) {
+    PsiClass currentClass;
+    while (true) {
+      currentClass = PsiTreeUtil.getParentOfType(element, PsiClass.class);
+      if (currentClass instanceof PsiAnonymousClass &&
+          PsiTreeUtil.isAncestor(((PsiAnonymousClass)currentClass).getArgumentList(), element, false)) {
+        element = currentClass;
+      } else {
+        return currentClass;
+      }
+    }
+  }
+
+  /** @return Whether or not the element is part of a markdown javadoc comment */
+  @Contract(value = "null -> false", pure = true)
+  public static boolean isInMarkdownDocComment(PsiElement element) {
+    PsiDocComment docComment = PsiTreeUtil.getParentOfType(element, PsiDocComment.class);
+    return docComment != null && docComment.isMarkdownComment();
+  }
+
   //<editor-fold desc="Deprecated stuff">
   /**
    * @deprecated  use {@link #isAvailable(JavaFeature, PsiElement)} instead to check whether a particular feature is available, rather 
    * than to check against a language level; if you still need an explicit language level check, just inline the method call.
    */
+  @ApiStatus.ScheduledForRemoval
   @Deprecated
   public static boolean isLanguageLevel10OrHigher(@NotNull PsiElement element) {
     return getLanguageLevel(element).isAtLeast(LanguageLevel.JDK_10);
@@ -1601,6 +1623,7 @@ public final class PsiUtil extends PsiUtilCore {
    * @deprecated use {@link #isAvailable(JavaFeature, PsiElement)} instead to check whether a particular feature is available, rather
    * than to check against a language level; if you still need an explicit language level check, just inline the method call.
    */
+  @ApiStatus.ScheduledForRemoval
   @Deprecated
   public static boolean isLanguageLevel14OrHigher(@NotNull PsiElement element) {
     return getLanguageLevel(element).isAtLeast(LanguageLevel.JDK_14);
@@ -1610,6 +1633,7 @@ public final class PsiUtil extends PsiUtilCore {
    * @deprecated use {@link #isAvailable(JavaFeature, PsiElement)} instead to check whether a particular feature is available, rather
    * than to check against a language level; if you still need an explicit language level check, just inline the method call.
    */
+  @ApiStatus.ScheduledForRemoval
   @Deprecated
   public static boolean isLanguageLevel16OrHigher(@NotNull PsiElement element) {
     return getLanguageLevel(element).isAtLeast(LanguageLevel.JDK_16);
@@ -1619,6 +1643,7 @@ public final class PsiUtil extends PsiUtilCore {
    * @deprecated use {@link #isAvailable(JavaFeature, PsiElement)} instead to check whether a particular feature is available, rather
    * than to check against a language level; if you still need an explicit language level check, just inline the method call.
    */
+  @ApiStatus.ScheduledForRemoval
   @Deprecated
   public static boolean isLanguageLevel17OrHigher(@NotNull PsiElement element) {
     return getLanguageLevel(element).isAtLeast(LanguageLevel.JDK_17);
@@ -1628,6 +1653,7 @@ public final class PsiUtil extends PsiUtilCore {
    * @deprecated use {@link #isAvailable(JavaFeature, PsiElement)} instead to check whether a particular feature is available, rather
    * than to check against a language level; if you still need an explicit language level check, just inline the method call.
    */
+  @ApiStatus.ScheduledForRemoval
   @Deprecated
   public static boolean isLanguageLevel18OrHigher(@NotNull PsiElement element) {
     return getLanguageLevel(element).isAtLeast(LanguageLevel.JDK_18);

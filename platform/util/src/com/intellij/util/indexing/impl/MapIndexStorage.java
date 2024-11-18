@@ -41,7 +41,7 @@ public class MapIndexStorage<Key, Value> implements IndexStorage<Key, Value>, Me
   public MapIndexStorage(Path storageFile,
                          @NotNull KeyDescriptor<Key> keyDescriptor,
                          @NotNull DataExternalizer<Value> valueExternalizer,
-                         final int cacheSize,
+                         int cacheSize,
                          boolean keyIsUniqueForIndexedFile) throws IOException {
     this(storageFile, keyDescriptor, valueExternalizer, cacheSize, keyIsUniqueForIndexedFile, true, false, false, null);
   }
@@ -49,7 +49,7 @@ public class MapIndexStorage<Key, Value> implements IndexStorage<Key, Value>, Me
   public MapIndexStorage(Path storageFile,
                          @NotNull KeyDescriptor<Key> keyDescriptor,
                          @NotNull DataExternalizer<Value> valueExternalizer,
-                         final int cacheSize,
+                         int cacheSize,
                          boolean keyIsUniqueForIndexedFile,
                          boolean initialize,
                          boolean readOnly,
@@ -171,7 +171,7 @@ public class MapIndexStorage<Key, Value> implements IndexStorage<Key, Value>, Me
   }
 
   @Override
-  public void addValue(final Key key, final int inputId, final Value value) throws StorageException {
+  public void addValue(Key key, int inputId, Value value) throws StorageException {
     if (myReadOnly) {
       throw new IncorrectOperationException("Index storage is read-only");
     }
@@ -220,7 +220,7 @@ public class MapIndexStorage<Key, Value> implements IndexStorage<Key, Value>, Me
     if (!myMap.isClosed()) {
       //TODO RC: inefficiency: we do need to _store_ all cached data -- but we don't want to clear the cache!
       //         With current implementation we get empty cache every time the flush() is called.
-      clearCachedMappings();
+      invalidateCachedMappings();
       if (myMap.isDirty()) myMap.force();
     }
   }
@@ -284,7 +284,7 @@ public class MapIndexStorage<Key, Value> implements IndexStorage<Key, Value>, Me
   }
 
   @Override
-  public @NotNull ChangeTrackingValueContainer<Value> read(final Key key) throws StorageException {
+  public @NotNull ChangeTrackingValueContainer<Value> read(Key key) throws StorageException {
     try {
       return myCache.read(key);
     }
@@ -360,7 +360,8 @@ public class MapIndexStorage<Key, Value> implements IndexStorage<Key, Value>, Me
   }
 
   @Internal
-  public final void clearCachedMappings() {
+  @Override
+  public final void invalidateCachedMappings() {
     myCache.invalidateAll();
   }
 
@@ -378,7 +379,7 @@ public class MapIndexStorage<Key, Value> implements IndexStorage<Key, Value>, Me
   @TestOnly
   public boolean processKeys(@NotNull Processor<? super Key> processor) throws StorageException {
     try {
-      clearCachedMappings(); // this will ensure that all new keys are made into the map
+      invalidateCachedMappings(); // this will ensure that all new keys are made into the map
       return doProcessKeys(processor);
     }
     catch (IOException e) {

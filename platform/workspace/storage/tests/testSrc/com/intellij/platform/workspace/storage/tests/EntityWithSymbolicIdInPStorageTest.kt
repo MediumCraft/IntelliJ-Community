@@ -7,6 +7,7 @@ import com.intellij.platform.workspace.storage.impl.exceptions.SymbolicIdAlready
 import com.intellij.platform.workspace.storage.testEntities.entities.*
 import com.intellij.testFramework.UsefulTestCase.assertEmpty
 import com.intellij.testFramework.UsefulTestCase.assertOneElement
+import com.intellij.testFramework.assertErrorLogged
 import org.junit.jupiter.api.Assertions
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Disabled
@@ -44,7 +45,7 @@ class EntityWithSymbolicIdInPStorageTest {
     val bar = builder addEntity LinkedListEntity("bar", LinkedListEntityId("baz"), MySource)
     builder.assertConsistency()
     assertEquals(bar, foo.next.resolve(builder))
-    builder.modifyEntity(bar) {
+    builder.modifyLinkedListEntity(bar) {
       myName = "baz"
     }
     builder.assertConsistency()
@@ -59,7 +60,7 @@ class EntityWithSymbolicIdInPStorageTest {
     val baz = builder addEntity LinkedListEntity("baz", LinkedListEntityId("foo"), MySource)
     builder.assertConsistency()
     assertEquals(bar, foo.next.resolve(builder))
-    val newFoo = builder.modifyEntity(foo) {
+    val newFoo = builder.modifyLinkedListEntity(foo) {
       next = LinkedListEntityId("baz")
     }
     builder.assertConsistency()
@@ -70,7 +71,7 @@ class EntityWithSymbolicIdInPStorageTest {
   fun `remove child entity with parent entity`() {
     val parent = builder addEntity XParentEntity("parent", MySource)
     builder addEntity XChildEntity("child", MySource) child@{
-      builder.modifyEntity(parent) parent@{
+      builder.modifyXParentEntity(parent) parent@{
         this@child.parentEntity = this@parent
       }
     }
@@ -83,7 +84,7 @@ class EntityWithSymbolicIdInPStorageTest {
   @Test
   fun `add entity with existing persistent id`() {
     builder = createEmptyBuilder()
-    assertThrowsLogError<SymbolicIdAlreadyExistsException> {
+    assertErrorLogged<SymbolicIdAlreadyExistsException> {
       builder addEntity NamedEntity("MyName", MySource) {
         this.additionalProperty = null
         children = emptyList()
@@ -118,7 +119,7 @@ class EntityWithSymbolicIdInPStorageTest {
   @Test
   fun `modify entity to repeat persistent id`() {
     builder = createEmptyBuilder()
-    assertThrowsLogError<SymbolicIdAlreadyExistsException> {
+    assertErrorLogged<SymbolicIdAlreadyExistsException> {
       builder addEntity NamedEntity("MyName", MySource) {
         this.additionalProperty = null
         children = emptyList()
@@ -127,7 +128,7 @@ class EntityWithSymbolicIdInPStorageTest {
         this.additionalProperty = null
         children = emptyList()
       }
-      builder.modifyEntity(namedEntity) {
+      builder.modifyNamedEntity(namedEntity) {
         this.myName = "MyName"
       }
     }
@@ -136,13 +137,13 @@ class EntityWithSymbolicIdInPStorageTest {
   @Test
   fun `modify entity to repeat persistent id - restoring after exception`() {
     builder = createEmptyBuilder()
-    assertThrowsLogError<SymbolicIdAlreadyExistsException> {
+    assertErrorLogged<SymbolicIdAlreadyExistsException> {
       builder addEntity NamedEntity("MyName", MySource) {
         this.additionalProperty = null
         children = emptyList()
       }
       val namedEntity = builder addEntity NamedEntity("AnotherId", MySource)
-      builder.modifyEntity(namedEntity) {
+      builder.modifyNamedEntity(namedEntity) {
         this.myName = "MyName"
       }
     }

@@ -2,33 +2,35 @@
 
 package org.jetbrains.kotlin.idea.gradleJava.scripting
 
-import com.intellij.openapi.externalSystem.util.ExternalSystemApiUtil
+import com.intellij.openapi.externalSystem.ExternalSystemModulePropertyManager
 import com.intellij.openapi.module.Module
-import com.intellij.openapi.module.ModuleManager
+import com.intellij.openapi.module.ModuleUtilCore
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.libraries.Library
+import com.intellij.openapi.util.io.toNioPathOrNull
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.openapi.vfs.VirtualFileManager
 import org.jetbrains.kotlin.idea.core.script.dependencies.ScriptAdditionalIdeaDependenciesProvider
-import org.jetbrains.plugins.gradle.settings.GradleProjectSettings
-import org.jetbrains.plugins.gradle.util.GradleConstants
+import org.jetbrains.plugins.gradle.settings.GradleLocalSettings
 
 class GradleScriptAdditionalIdeaDependenciesProvider : ScriptAdditionalIdeaDependenciesProvider() {
     override fun getRelatedModules(file: VirtualFile, project: Project): List<Module> {
-        val gradleSettings = ExternalSystemApiUtil.getSettings(project, GradleConstants.SYSTEM_ID)
-        val projectSettings = gradleSettings.linkedProjectsSettings.filterIsInstance<GradleProjectSettings>().firstOrNull()
-            ?: return emptyList()
-        val includedModulesPath: List<String> = projectSettings.compositeBuild?.compositeParticipants?.mapNotNull { part ->
-            projectSettings.modules.find { it == part.rootPath }
-        } ?: emptyList()
-        val includedModulesBuildSrcPaths = includedModulesPath.map { "$it/buildSrc" }
+        val module = ModuleUtilCore.findModuleForFile(file, project) ?: return emptyList()
+        val localSettings = GradleLocalSettings.getInstance(project)
+        val virtualFileManager = VirtualFileManager.getInstance()
+        val esOptions = ExternalSystemModulePropertyManager.getInstance(module)
 
-        val rootBuildSrcPath = "${projectSettings.externalProjectPath}/buildSrc"
+        val externalProjectPath = esOptions.getRootProjectPath()
+        val linkedProjectPath = esOptions.getLinkedProjectPath()
 
-        return (includedModulesPath + includedModulesBuildSrcPaths + rootBuildSrcPath).flatMap { path ->
-            ModuleManager.getInstance(project).modules.filter {
-                ExternalSystemApiUtil.getExternalProjectPath(it) == path
-            }
-        }
+        val projectBuildClassPath = localSettings.projectBuildClasspath[externalProjectPath] ?: return emptyList()
+        val moduleBuildClassPath = projectBuildClassPath.modulesBuildClasspath[linkedProjectPath] ?: return emptyList()
+
+        return moduleBuildClassPath.entries.asSequence()
+            .mapNotNull { it.toNioPathOrNull() }
+            .mapNotNull { virtualFileManager.findFileByNioPath(it) }
+            .mapNotNull { ModuleUtilCore.findModuleForFile(it, project) }
+            .toList()
     }
 
     override fun getRelatedLibraries(file: VirtualFile, project: Project): List<Library> {

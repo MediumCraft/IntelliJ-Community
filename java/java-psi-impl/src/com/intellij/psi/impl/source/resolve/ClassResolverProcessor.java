@@ -107,6 +107,7 @@ public class ClassResolverProcessor implements PsiScopeProcessor, NameHint, Elem
 
     PsiFile file = myPlace == null ? null : FileContextUtil.getContextFile(myContainingFile);
 
+    //other implicit imports processed as PsiImportStatements
     String[] defaultPackages = file instanceof PsiJavaFile ? ((PsiJavaFile)file).getImplicitlyImportedPackages() : DEFAULT_PACKAGES;
     String packageName = StringUtil.getPackageName(fqn);
     if (ArrayUtil.contains(packageName, defaultPackages)) {
@@ -200,6 +201,21 @@ public class ClassResolverProcessor implements PsiScopeProcessor, NameHint, Elem
       psiClass = psiClass.getContainingClass();
     }
     return false;
+  }
+
+  @Override
+  public boolean executeForUnresolved() {
+    if (myCurrentFileContext instanceof PsiImportStatementBase) {
+      PsiImportStatementBase importStatement = (PsiImportStatementBase)myCurrentFileContext;
+      PsiJavaCodeReferenceElement importRef = importStatement.getImportReference();
+      if (importRef != null && !importStatement.isOnDemand()) {
+        String name = importRef.getReferenceName();
+        if (myClassName.equals(name)) {
+          return false;
+        }
+      }
+    }
+    return true;
   }
 
   @Override

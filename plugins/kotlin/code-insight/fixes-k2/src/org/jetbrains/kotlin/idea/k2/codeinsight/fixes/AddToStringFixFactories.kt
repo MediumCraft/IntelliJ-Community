@@ -2,9 +2,9 @@
 package org.jetbrains.kotlin.idea.k2.codeinsight.fixes
 
 import com.intellij.psi.PsiElement
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
+import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.fir.diagnostics.KaFirDiagnostic
-import org.jetbrains.kotlin.analysis.api.types.KtType
+import org.jetbrains.kotlin.analysis.api.types.KaType
 import org.jetbrains.kotlin.idea.codeinsight.api.applicators.fixes.KotlinQuickFixFactory
 import org.jetbrains.kotlin.idea.quickfix.AddToStringFix
 import org.jetbrains.kotlin.psi.KtExpression
@@ -12,11 +12,10 @@ import org.jetbrains.kotlin.psi.KtProperty
 
 object AddToStringFixFactories {
 
-    context(KtAnalysisSession)
-    private fun getFixes(element: PsiElement?, expectedType: KtType, actualType: KtType): List<AddToStringFix> {
+    private fun KaSession.getFixes(element: PsiElement?, expectedType: KaType, actualType: KaType): List<AddToStringFix> {
         if (element !is KtExpression) return emptyList()
         return buildList {
-            if (expectedType.isString || expectedType.isCharSequence) {
+            if (expectedType.isStringType || expectedType.isCharSequenceType) {
                 add(AddToStringFix(element, false))
                 if (expectedType.isMarkedNullable && actualType.isMarkedNullable) {
                     add(AddToStringFix(element, true))

@@ -16,7 +16,7 @@ abstract class MavenParentProjectFileAsyncProcessor<RESULT_TYPE>(private val myP
               projectFile: VirtualFile,
               parentDesc: MavenParentDesc?): RESULT_TYPE? {
     var parentDesc = parentDesc
-    val superPom = MavenUtil.getEffectiveSuperPomWithNoRespectToWrapper(myProject)
+    val superPom = MavenUtil.resolveSuperPomFile(myProject, projectFile)
     if (superPom == null || projectFile == superPom) return null
 
     var result: RESULT_TYPE? = null
@@ -57,7 +57,7 @@ abstract class MavenParentProjectFileAsyncProcessor<RESULT_TYPE>(private val myP
   private suspend fun findInLocalRepository(generalSettings: MavenGeneralSettings, parentDesc: MavenParentDesc): RESULT_TYPE? {
     var result: RESULT_TYPE? = null
     val parentFile: VirtualFile?
-    val parentIoFile = MavenArtifactUtil.getArtifactFile(generalSettings.effectiveLocalRepository, parentDesc.parentId, "pom")
+    val parentIoFile = MavenArtifactUtil.getArtifactFile(generalSettings.effectiveRepositoryPath, parentDesc.parentId, "pom")
     parentFile = LocalFileSystem.getInstance().findFileByNioFile(parentIoFile)
     if (parentFile != null) {
       result = processRepositoryParent(parentFile)

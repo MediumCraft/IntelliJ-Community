@@ -2,6 +2,8 @@
 package com.intellij.vcs.log.history;
 
 import com.intellij.diff.impl.DiffEditorViewer;
+import com.intellij.diff.tools.util.DiffDataKeys;
+import com.intellij.diff.util.DiffUtil;
 import com.intellij.ide.ui.customization.CustomActionsSchema;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.*;
@@ -9,11 +11,9 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.EmptyRunnable;
-import com.intellij.openapi.util.ValueKey;
 import com.intellij.openapi.vcs.FilePath;
 import com.intellij.openapi.vcs.VcsDataKeys;
 import com.intellij.openapi.vcs.changes.Change;
-import com.intellij.openapi.vcs.changes.EditorTabDiffPreviewManager;
 import com.intellij.openapi.vcs.history.VcsFileRevision;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.GuiUtils;
@@ -26,8 +26,6 @@ import com.intellij.ui.switcher.QuickActionProvider;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.components.BorderLayoutPanel;
 import com.intellij.util.ui.table.ComponentsListFocusTraversalPolicy;
-import com.intellij.util.ui.update.Activatable;
-import com.intellij.util.ui.update.UiNotifyConnector;
 import com.intellij.vcs.log.UnsupportedHistoryFiltersException;
 import com.intellij.vcs.log.VcsCommitMetadata;
 import com.intellij.vcs.log.VcsLogBundle;
@@ -63,7 +61,7 @@ import java.util.Objects;
 
 import static com.intellij.util.containers.ContainerUtil.getFirstItem;
 
-class FileHistoryPanel extends JPanel implements DataProvider, Disposable {
+class FileHistoryPanel extends JPanel implements UiDataProvider, Disposable {
   private static final @NotNull @NonNls String HELP_ID = "reference.versionControl.toolwindow.history";
 
   private final @NotNull Project myProject;
@@ -85,11 +83,11 @@ class FileHistoryPanel extends JPanel implements DataProvider, Disposable {
 
   private final @NotNull History myHistory;
 
-  public FileHistoryPanel(@NotNull AbstractVcsLogUi logUi, @NotNull FileHistoryModel fileHistoryModel,
-                          @NotNull FileHistoryFilterUi filterUi, @NotNull VcsLogData logData,
-                          @NotNull FilePath filePath, @NotNull VirtualFile root,
-                          @NotNull VcsLogColorManager colorManager,
-                          @NotNull Disposable disposable) {
+  FileHistoryPanel(@NotNull AbstractVcsLogUi logUi, @NotNull FileHistoryModel fileHistoryModel,
+                   @NotNull FileHistoryFilterUi filterUi, @NotNull VcsLogData logData,
+                   @NotNull FilePath filePath, @NotNull VirtualFile root,
+                   @NotNull VcsLogColorManager colorManager,
+                   @NotNull Disposable disposable) {
     myProject = logData.getProject();
 
     myFilePath = filePath;
@@ -98,7 +96,7 @@ class FileHistoryPanel extends JPanel implements DataProvider, Disposable {
     myFileHistoryModel = fileHistoryModel;
     myProperties = logUi.getProperties();
 
-    myGraphTable = new VcsLogGraphTable(logUi.getId(), logData, logUi.getProperties(), colorManager,
+    myGraphTable = new VcsLogGraphTable(logUi, logData, logUi.getProperties(), colorManager,
                                         () -> logUi.requestMore(EmptyRunnable.INSTANCE), disposable) {
       @Override
       protected void updateEmptyText() {
@@ -237,6 +235,7 @@ class FileHistoryPanel extends JPanel implements DataProvider, Disposable {
   @NotNull
   FileHistoryDiffProcessor createDiffPreview(boolean isInEditor) {
     FileHistoryDiffProcessor diffPreview = new FileHistoryDiffProcessor(myProject, () -> getSelectedChange(), isInEditor, this);
+
     ListSelectionListener selectionListener = e -> {
       int[] selection = myGraphTable.getSelectedRows();
       ApplicationManager.getApplication().invokeLater(() -> diffPreview.updatePreview(),
@@ -252,64 +251,49 @@ class FileHistoryPanel extends JPanel implements DataProvider, Disposable {
                                                         o -> Disposer.isDisposed(diffPreview));
       }
     };
-    UiNotifyConnector.installOn(diffPreview.getComponent(), new Activatable() {
-      @Override
-      public void showNotify() {
-        diffPreview.updatePreview();
-      }
-    });
-
     myGraphTable.getModel().addTableModelListener(modelListener);
     Disposer.register(diffPreview, () -> myGraphTable.getModel().removeTableModelListener(modelListener));
+
+    DiffUtil.installShowNotifyListener(diffPreview.getComponent(), () -> diffPreview.updatePreview());
 
     return diffPreview;
   }
 
   @Override
-  public @Nullable Object getData(@NotNull String dataId) {
-    return ValueKey.match(dataId)
-      .ifEq(VcsDataKeys.CHANGES).or(VcsDataKeys.SELECTED_CHANGES).thenGet(() -> {
-        Change change = getSelectedChange();
-        if (change != null) {
-          return new Change[]{change};
-        }
-        return null;
-      })
-      .ifEq(VcsLogInternalDataKeys.LOG_UI_PROPERTIES).then(myProperties)
-      .ifEq(VcsDataKeys.FILE_PATH).then(myFilePath)
-      .ifEq(VcsLogInternalDataKeys.VCS_LOG_VISIBLE_ROOTS).thenGet(() -> Collections.singleton(myRoot))
-      .ifEq(VcsDataKeys.VCS_NON_LOCAL_HISTORY_SESSION).then(false)
-      .ifEq(VcsLogInternalDataKeys.LOG_DIFF_HANDLER).thenGet(() -> myFileHistoryModel.getDiffHandler())
-      .ifEq(EditorTabDiffPreviewManager.EDITOR_TAB_DIFF_PREVIEW).thenGet(() -> myEditorDiffPreview)
-      .ifEq(VcsLogInternalDataKeys.FILE_HISTORY_MODEL).thenGet(() -> myFileHistoryModel.createSnapshot())
-      .ifEq(QuickActionProvider.KEY).thenGet(() -> new ComponentQuickActionProvider(this))
-      .ifEq(PlatformCoreDataKeys.BGT_DATA_PROVIDER).thenGet(() -> {
-        List<VcsCommitMetadata> details = myGraphTable.getSelection().getCachedMetadata();
-        FileHistoryModel modelSnapshot = myFileHistoryModel.createSnapshot();
-        return (slowId) -> getSlowData(slowId, modelSnapshot, details);
-      })
-      .ifEq(PlatformCoreDataKeys.HELP_ID).then(HELP_ID)
-      .ifEq(History.KEY).then(myHistory)
-      .orNull();
-  }
+  public void uiDataSnapshot(@NotNull DataSink sink) {
+    Change change = getSelectedChange();
+    if (change != null) {
+      Change[] changes = {change};
+      sink.set(VcsDataKeys.CHANGES, changes);
+      sink.set(VcsDataKeys.SELECTED_CHANGES, changes);
+    }
+    sink.set(VcsLogInternalDataKeys.LOG_UI_PROPERTIES, myProperties);
+    sink.set(VcsDataKeys.FILE_PATH, myFilePath);
+    sink.set(VcsLogInternalDataKeys.VCS_LOG_VISIBLE_ROOTS, Collections.singleton(myRoot));
+    sink.set(VcsDataKeys.VCS_NON_LOCAL_HISTORY_SESSION, false);
+    sink.set(VcsLogInternalDataKeys.LOG_DIFF_HANDLER, myFileHistoryModel.getDiffHandler());
+    sink.set(DiffDataKeys.EDITOR_TAB_DIFF_PREVIEW, myEditorDiffPreview);
+    sink.set(VcsLogInternalDataKeys.FILE_HISTORY_MODEL, myFileHistoryModel.createSnapshot());
+    sink.set(QuickActionProvider.KEY, new ComponentQuickActionProvider(this));
+    sink.set(PlatformCoreDataKeys.HELP_ID, HELP_ID);
+    sink.set(History.KEY, myHistory);
 
-  private @Nullable Object getSlowData(@NotNull String dataId, @NotNull FileHistoryModel model, @NotNull List<VcsCommitMetadata> details) {
-    return ValueKey.match(dataId)
-      .ifEq(VcsDataKeys.VCS_FILE_REVISION).thenGet(() -> {
-        if (details.isEmpty()) return null;
-        return model.createRevision(getFirstItem(details));
-      })
-      .ifEq(VcsDataKeys.VCS_FILE_REVISIONS).thenGet(() -> {
-        if (details.isEmpty() || details.size() > VcsLogUtil.MAX_SELECTED_COMMITS) return null;
-        return ContainerUtil.mapNotNull(details, model::createRevision).toArray(new VcsFileRevision[0]);
-      })
-      .ifEq(CommonDataKeys.VIRTUAL_FILE).thenGet(myFilePath::getVirtualFile)
-      .ifEq(VcsDataKeys.VCS_VIRTUAL_FILE).thenGet(() -> {
-        if (details.isEmpty()) return null;
-        VcsCommitMetadata detail = Objects.requireNonNull(getFirstItem(details));
-        return FileHistoryUtil.createVcsVirtualFile(model.createRevision(detail));
-      })
-      .orNull();
+    List<VcsCommitMetadata> details = myGraphTable.getSelection().getCachedMetadata();
+    FileHistoryModel model = myFileHistoryModel.createSnapshot();
+    sink.lazy(VcsDataKeys.VCS_FILE_REVISION, () -> {
+      if (details.isEmpty()) return null;
+      return model.createRevision(getFirstItem(details));
+    });
+    sink.lazy(VcsDataKeys.VCS_FILE_REVISIONS, () -> {
+      if (details.isEmpty() || details.size() > VcsLogUtil.MAX_SELECTED_COMMITS) return null;
+      return ContainerUtil.mapNotNull(details, model::createRevision).toArray(new VcsFileRevision[0]);
+    });
+    sink.lazy(CommonDataKeys.VIRTUAL_FILE, myFilePath::getVirtualFile);
+    sink.lazy(VcsDataKeys.VCS_VIRTUAL_FILE, () -> {
+      if (details.isEmpty()) return null;
+      VcsCommitMetadata detail = Objects.requireNonNull(getFirstItem(details));
+      return FileHistoryUtil.createVcsVirtualFile(model.createRevision(detail));
+    });
   }
 
   @Nullable

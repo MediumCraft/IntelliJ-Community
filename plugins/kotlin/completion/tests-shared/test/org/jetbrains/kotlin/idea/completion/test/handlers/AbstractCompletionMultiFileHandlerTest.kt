@@ -34,7 +34,7 @@ abstract class AbstractCompletionMultiFileHandlerTest : KotlinFixtureCompletionB
     fun testClassWithClassObject() = doTest()
     fun testGlobalFunctionImportInLambda() = doTest()
     fun testObjectInStringTemplate() = doTest()
-    fun testPropertyFunctionConflict() = doTest()
+    fun testPropertyFunctionConflict() = doTest(tailText = "(i: Int) (a.b)")
     fun testPropertyFunctionConflict2() = doTest(tailText = " { Int, Int -> ... } (i: (Int, Int) -> Unit) (a.b)")
     fun testExclCharInsertImport() = doTest('!')
     fun testPropertyKeysWithPrefixEnter() = doTest('\n', "TestBundle.properties")
@@ -44,8 +44,11 @@ abstract class AbstractCompletionMultiFileHandlerTest : KotlinFixtureCompletionB
     fun testNotImportedExtension() = doTest()
     fun testNotImportedTypeAlias() = doTest()
     fun testKT12077() = doTest()
+    fun testClassInRootPackage() = doTest()
+    fun testInImportEscaped() = if (isFirPlugin) doTest(tailText = " (`foo bar`)") else Unit
     fun testPackageDirective() = if (isFirPlugin) doTest() else Unit
     fun testPackageInImportDirective() = if (isFirPlugin) doTest() else Unit
+    fun testJavaEnumCompletionEntry() = if (isFirPlugin) doTest(extraFileNames = arrayOf("JavaEnum.java")) else Unit
 
     protected fun getTestFileName(): String = "${getTestName(false)}-1.kt"
 

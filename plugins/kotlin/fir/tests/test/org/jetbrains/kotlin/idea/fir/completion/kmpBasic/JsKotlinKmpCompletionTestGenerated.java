@@ -94,6 +94,16 @@ public abstract class JsKotlinKmpCompletionTestGenerated extends AbstractKotlinK
             runTest("../../completion/testData/basic/common/annotations/FunctionAnnotation2.kt");
         }
 
+        @TestMetadata("NestedAnnotation.kt")
+        public void testNestedAnnotation() throws Exception {
+            runTest("../../completion/testData/basic/common/annotations/NestedAnnotation.kt");
+        }
+
+        @TestMetadata("NestedAnnotation2.kt")
+        public void testNestedAnnotation2() throws Exception {
+            runTest("../../completion/testData/basic/common/annotations/NestedAnnotation2.kt");
+        }
+
         @TestMetadata("NoCatchParameterAutopopup.kt")
         public void testNoCatchParameterAutopopup() throws Exception {
             runTest("../../completion/testData/basic/common/annotations/NoCatchParameterAutopopup.kt");
@@ -426,6 +436,16 @@ public abstract class JsKotlinKmpCompletionTestGenerated extends AbstractKotlinK
             runTest("../../completion/testData/basic/common/boldOrGrayed/AfterNullableAutoCast2.kt");
         }
 
+        @TestMetadata("Deprecated.kt")
+        public void testDeprecated() throws Exception {
+            runTest("../../completion/testData/basic/common/boldOrGrayed/Deprecated.kt");
+        }
+
+        @TestMetadata("DeprecatedGetter.kt")
+        public void testDeprecatedGetter() throws Exception {
+            runTest("../../completion/testData/basic/common/boldOrGrayed/DeprecatedGetter.kt");
+        }
+
         @TestMetadata("ImmediateExtensionMembers1.kt")
         public void testImmediateExtensionMembers1() throws Exception {
             runTest("../../completion/testData/basic/common/boldOrGrayed/ImmediateExtensionMembers1.kt");
@@ -489,6 +509,16 @@ public abstract class JsKotlinKmpCompletionTestGenerated extends AbstractKotlinK
         @TestMetadata("MemberAfterNullable.kt")
         public void testMemberAfterNullable() throws Exception {
             runTest("../../completion/testData/basic/common/boldOrGrayed/MemberAfterNullable.kt");
+        }
+
+        @TestMetadata("NonDeprecatedGetter.kt")
+        public void testNonDeprecatedGetter() throws Exception {
+            runTest("../../completion/testData/basic/common/boldOrGrayed/NonDeprecatedGetter.kt");
+        }
+
+        @TestMetadata("NonDeprecatedSetter.kt")
+        public void testNonDeprecatedSetter() throws Exception {
+            runTest("../../completion/testData/basic/common/boldOrGrayed/NonDeprecatedSetter.kt");
         }
 
         @TestMetadata("NonPredictableSmartCast.kt")
@@ -669,9 +699,68 @@ public abstract class JsKotlinKmpCompletionTestGenerated extends AbstractKotlinK
             runTest("../../completion/testData/basic/common/dslMarker/noDslCompletionForNonDslReciever.kt");
         }
 
+        @TestMetadata("property.kt")
+        public void testProperty() throws Exception {
+            runTest("../../completion/testData/basic/common/dslMarker/property.kt");
+        }
+
         @TestMetadata("root.kt")
         public void testRoot() throws Exception {
             runTest("../../completion/testData/basic/common/dslMarker/root.kt");
+        }
+    }
+
+    @RunWith(JUnit3RunnerWithInners.class)
+    @TestMetadata("../../completion/testData/basic/common/enums")
+    public static class Enums extends AbstractKotlinKmpCompletionTest {
+        @java.lang.Override
+        @org.jetbrains.annotations.NotNull
+        public final KotlinPluginMode getPluginMode() {
+            return KotlinPluginMode.K2;
+        }
+
+        @java.lang.Override
+        public KMPTestPlatform getTestPlatform() {
+            return KMPTestPlatform.Js;
+        }
+
+        private void runTest(String testDataFilePath) throws Exception {
+            KotlinTestUtils.runTest(this::doTest, this, testDataFilePath);
+        }
+
+        @TestMetadata("EnumEntryCompletion.kt")
+        public void testEnumEntryCompletion() throws Exception {
+            runTest("../../completion/testData/basic/common/enums/EnumEntryCompletion.kt");
+        }
+
+        @TestMetadata("EnumEntryCompletionRendering.kt")
+        public void testEnumEntryCompletionRendering() throws Exception {
+            runTest("../../completion/testData/basic/common/enums/EnumEntryCompletionRendering.kt");
+        }
+
+        @TestMetadata("EnumEntryEmptyCompletion.kt")
+        public void testEnumEntryEmptyCompletion() throws Exception {
+            runTest("../../completion/testData/basic/common/enums/EnumEntryEmptyCompletion.kt");
+        }
+
+        @TestMetadata("ExpectedEnumEntryCompletion.kt")
+        public void testExpectedEnumEntryCompletion() throws Exception {
+            runTest("../../completion/testData/basic/common/enums/ExpectedEnumEntryCompletion.kt");
+        }
+
+        @TestMetadata("InvisibleEnumEntryCompletion.kt")
+        public void testInvisibleEnumEntryCompletion() throws Exception {
+            runTest("../../completion/testData/basic/common/enums/InvisibleEnumEntryCompletion.kt");
+        }
+
+        @TestMetadata("NoExpectedEnumEntryCompletion.kt")
+        public void testNoExpectedEnumEntryCompletion() throws Exception {
+            runTest("../../completion/testData/basic/common/enums/NoExpectedEnumEntryCompletion.kt");
+        }
+
+        @TestMetadata("NoInvisibleEnumEntryCompletion.kt")
+        public void testNoInvisibleEnumEntryCompletion() throws Exception {
+            runTest("../../completion/testData/basic/common/enums/NoInvisibleEnumEntryCompletion.kt");
         }
     }
 
@@ -1033,6 +1122,16 @@ public abstract class JsKotlinKmpCompletionTestGenerated extends AbstractKotlinK
         @TestMetadata("JavaTypeExtension.kt")
         public void testJavaTypeExtension() throws Exception {
             runTest("../../completion/testData/basic/common/extensions/JavaTypeExtension.kt");
+        }
+
+        @TestMetadata("KTIJ-28743.kt")
+        public void testKTIJ_28743() throws Exception {
+            runTest("../../completion/testData/basic/common/extensions/KTIJ-28743.kt");
+        }
+
+        @TestMetadata("KTIJ-30225.kt")
+        public void testKTIJ_30225() throws Exception {
+            runTest("../../completion/testData/basic/common/extensions/KTIJ-30225.kt");
         }
 
         @TestMetadata("KotlinGenericTypeExtension.kt")
@@ -1784,6 +1883,11 @@ public abstract class JsKotlinKmpCompletionTestGenerated extends AbstractKotlinK
             runTest("../../completion/testData/basic/common/namedArguments/PrivateFunction.kt");
         }
 
+        @TestMetadata("PrivateFunction2.kt")
+        public void testPrivateFunction2() throws Exception {
+            runTest("../../completion/testData/basic/common/namedArguments/PrivateFunction2.kt");
+        }
+
         @TestMetadata("TypeAliasParameter.kt")
         public void testTypeAliasParameter() throws Exception {
             runTest("../../completion/testData/basic/common/namedArguments/TypeAliasParameter.kt");
@@ -1877,6 +1981,21 @@ public abstract class JsKotlinKmpCompletionTestGenerated extends AbstractKotlinK
             KotlinTestUtils.runTest(this::doTest, this, testDataFilePath);
         }
 
+        @TestMetadata("ObjectMethodCompletion.kt")
+        public void testObjectMethodCompletion() throws Exception {
+            runTest("../../completion/testData/basic/common/objects/ObjectMethodCompletion.kt");
+        }
+
+        @TestMetadata("ObjectMethodCompletionRendering.kt")
+        public void testObjectMethodCompletionRendering() throws Exception {
+            runTest("../../completion/testData/basic/common/objects/ObjectMethodCompletionRendering.kt");
+        }
+
+        @TestMetadata("ObjectMethodEmptyCompletion.kt")
+        public void testObjectMethodEmptyCompletion() throws Exception {
+            runTest("../../completion/testData/basic/common/objects/ObjectMethodEmptyCompletion.kt");
+        }
+
         @TestMetadata("PropertyFromCompanionObjectFromTypeAliasToNestedInObjectClass.kt")
         public void testPropertyFromCompanionObjectFromTypeAliasToNestedInObjectClass() throws Exception {
             runTest("../../completion/testData/basic/common/objects/PropertyFromCompanionObjectFromTypeAliasToNestedInObjectClass.kt");
@@ -1965,6 +2084,11 @@ public abstract class JsKotlinKmpCompletionTestGenerated extends AbstractKotlinK
             runTest("../../completion/testData/basic/common/override/AfterVarKeyword.kt");
         }
 
+        @TestMetadata("ContextReceiver.kt")
+        public void testContextReceiver() throws Exception {
+            runTest("../../completion/testData/basic/common/override/ContextReceiver.kt");
+        }
+
         @TestMetadata("Generics.kt")
         public void testGenerics() throws Exception {
             runTest("../../completion/testData/basic/common/override/Generics.kt");
@@ -1978,6 +2102,11 @@ public abstract class JsKotlinKmpCompletionTestGenerated extends AbstractKotlinK
         @TestMetadata("InConstructorParameters2.kt")
         public void testInConstructorParameters2() throws Exception {
             runTest("../../completion/testData/basic/common/override/InConstructorParameters2.kt");
+        }
+
+        @TestMetadata("MethodNameMatch.kt")
+        public void testMethodNameMatch() throws Exception {
+            runTest("../../completion/testData/basic/common/override/MethodNameMatch.kt");
         }
 
         @TestMetadata("NoOverrideAfterFunKeyword.kt")
@@ -2223,9 +2352,19 @@ public abstract class JsKotlinKmpCompletionTestGenerated extends AbstractKotlinK
             KotlinTestUtils.runTest(this::doTest, this, testDataFilePath);
         }
 
+        @TestMetadata("KTIJ-26747.kt")
+        public void testKTIJ_26747() throws Exception {
+            runTest("../../completion/testData/basic/common/primaryConstructor/KTIJ-26747.kt");
+        }
+
         @TestMetadata("parameterDefaultValue.kt")
         public void testParameterDefaultValue() throws Exception {
             runTest("../../completion/testData/basic/common/primaryConstructor/parameterDefaultValue.kt");
+        }
+
+        @TestMetadata("parameterDefaultValueNotContainsUnitializedParams.kt")
+        public void testParameterDefaultValueNotContainsUnitializedParams() throws Exception {
+            runTest("../../completion/testData/basic/common/primaryConstructor/parameterDefaultValueNotContainsUnitializedParams.kt");
         }
 
         @TestMetadata("previousParameter.kt")
@@ -2380,6 +2519,26 @@ public abstract class JsKotlinKmpCompletionTestGenerated extends AbstractKotlinK
         @TestMetadata("smartCast.kt")
         public void testSmartCast() throws Exception {
             runTest("../../completion/testData/basic/common/primitiveCompletion/smartCast.kt");
+        }
+
+        @TestMetadata("smartCastAssignedLaterVariable.kt")
+        public void testSmartCastAssignedLaterVariable() throws Exception {
+            runTest("../../completion/testData/basic/common/primitiveCompletion/smartCastAssignedLaterVariable.kt");
+        }
+
+        @TestMetadata("smartCastBySafeCastAndEarlyReturn.kt")
+        public void testSmartCastBySafeCastAndEarlyReturn() throws Exception {
+            runTest("../../completion/testData/basic/common/primitiveCompletion/smartCastBySafeCastAndEarlyReturn.kt");
+        }
+
+        @TestMetadata("smartCastReassignedVariable.kt")
+        public void testSmartCastReassignedVariable() throws Exception {
+            runTest("../../completion/testData/basic/common/primitiveCompletion/smartCastReassignedVariable.kt");
+        }
+
+        @TestMetadata("smartCastReassignedVariable2.kt")
+        public void testSmartCastReassignedVariable2() throws Exception {
+            runTest("../../completion/testData/basic/common/primitiveCompletion/smartCastReassignedVariable2.kt");
         }
 
         @TestMetadata("stringCompletion.kt")
@@ -2677,6 +2836,11 @@ public abstract class JsKotlinKmpCompletionTestGenerated extends AbstractKotlinK
         @TestMetadata("CompanionObjectMembers.kt")
         public void testCompanionObjectMembers() throws Exception {
             runTest("../../completion/testData/basic/common/staticMembers/CompanionObjectMembers.kt");
+        }
+
+        @TestMetadata("EnumRendering.kt")
+        public void testEnumRendering() throws Exception {
+            runTest("../../completion/testData/basic/common/staticMembers/EnumRendering.kt");
         }
 
         @TestMetadata("EnumWithoutCompanionObject.kt")
@@ -3429,6 +3593,11 @@ public abstract class JsKotlinKmpCompletionTestGenerated extends AbstractKotlinK
             runTest("../../completion/testData/basic/common/KTIJ20039.kt");
         }
 
+        @TestMetadata("KTIJ-26747.kt")
+        public void testKTIJ_26747() throws Exception {
+            runTest("../../completion/testData/basic/common/KTIJ-26747.kt");
+        }
+
         @TestMetadata("KeywordsAreLowInParameterTypeCompletion1.kt")
         public void testKeywordsAreLowInParameterTypeCompletion1() throws Exception {
             runTest("../../completion/testData/basic/common/KeywordsAreLowInParameterTypeCompletion1.kt");
@@ -3462,6 +3631,11 @@ public abstract class JsKotlinKmpCompletionTestGenerated extends AbstractKotlinK
         @TestMetadata("LocalMultideclarationValues.kt")
         public void testLocalMultideclarationValues() throws Exception {
             runTest("../../completion/testData/basic/common/LocalMultideclarationValues.kt");
+        }
+
+        @TestMetadata("MapEntry.kt")
+        public void testMapEntry() throws Exception {
+            runTest("../../completion/testData/basic/common/MapEntry.kt");
         }
 
         @TestMetadata("NamedObject.kt")
@@ -3732,6 +3906,11 @@ public abstract class JsKotlinKmpCompletionTestGenerated extends AbstractKotlinK
         @TestMetadata("TypeArgOfOwnerClass.kt")
         public void testTypeArgOfOwnerClass() throws Exception {
             runTest("../../completion/testData/basic/common/TypeArgOfOwnerClass.kt");
+        }
+
+        @TestMetadata("TypeParamAsTypeArg.kt")
+        public void testTypeParamAsTypeArg() throws Exception {
+            runTest("../../completion/testData/basic/common/TypeParamAsTypeArg.kt");
         }
 
         @TestMetadata("TypeParameterFromOuterClass.kt")

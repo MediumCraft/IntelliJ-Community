@@ -194,7 +194,8 @@ public interface PsiSearchHelper {
                                   boolean caseSensitive,
                                   boolean processInjectedPsi);
 
-  default boolean hasIdentifierInFile(@NotNull PsiFile file, @NotNull String name) {
+  @ApiStatus.Internal
+  default boolean hasIdentifierInFile(@NotNull PsiFile psiFile, @NotNull String name) {
     throw new UnsupportedOperationException();
   }
 
@@ -214,14 +215,14 @@ public interface PsiSearchHelper {
   @NotNull
   SearchCostResult isCheapEnoughToSearch(@NotNull String name,
                                          @NotNull GlobalSearchScope scope,
-                                         @Nullable PsiFile fileToIgnoreOccurrencesIn,
+                                         @Nullable PsiFile psiFileToIgnoreOccurrencesIn,
                                          @Nullable ProgressIndicator progress);
 
   @NotNull
   default SearchCostResult isCheapEnoughToSearch(@NotNull String name,
                                                  @NotNull GlobalSearchScope scope,
-                                                 @Nullable PsiFile fileToIgnoreOccurrencesIn) {
-    return isCheapEnoughToSearch(name, scope, fileToIgnoreOccurrencesIn, null);
+                                                 @Nullable PsiFile psiFileToIgnoreOccurrencesIn) {
+    return isCheapEnoughToSearch(name, scope, psiFileToIgnoreOccurrencesIn, null);
   }
 
   enum SearchCostResult {

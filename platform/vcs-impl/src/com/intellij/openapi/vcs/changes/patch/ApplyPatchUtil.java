@@ -18,6 +18,7 @@ import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.Ref;
+import com.intellij.openapi.util.text.HtmlChunk;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.VcsBundle;
 import com.intellij.openapi.vcs.VcsNotifier;
@@ -29,6 +30,7 @@ import com.intellij.util.ObjectUtils;
 import com.intellij.util.concurrency.annotations.RequiresBackgroundThread;
 import com.intellij.util.concurrency.annotations.RequiresEdt;
 import com.intellij.vcsUtil.VcsUtil;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -42,6 +44,7 @@ import static com.intellij.openapi.vcs.VcsNotificationIdsHolder.PATCH_APPLY_CANN
 import static com.intellij.openapi.vcs.VcsNotificationIdsHolder.PATCH_APPLY_NOT_PATCH_FILE;
 import static com.intellij.openapi.vcs.changes.patch.PatchFileType.isPatchFile;
 
+@ApiStatus.Internal
 public final class ApplyPatchUtil {
   private static final Logger LOG = Logger.getInstance(ApplyPatchUtil.class);
 
@@ -58,12 +61,12 @@ public final class ApplyPatchUtil {
     String patchPath = file.getPath();
     if (vFile == null) {
       VcsNotifier.getInstance(project).notifyWeakError(PATCH_APPLY_CANNOT_FIND_PATCH_FILE,
-                                                       VcsBundle.message("patch.apply.can.t.find.patch.file.warning", patchPath));
+                                                       VcsBundle.message("patch.apply.can.t.find.patch.file.warning", HtmlChunk.text(patchPath)));
       return false;
     }
     if (!isPatchFile(vFile)) {
       VcsNotifier.getInstance(project).notifyWeakError(PATCH_APPLY_NOT_PATCH_FILE,
-                                                       VcsBundle.message("patch.apply.not.patch.type.file.error", vFile.getPath()));
+                                                       VcsBundle.message("patch.apply.not.patch.type.file.error", HtmlChunk.text(vFile.getPath())));
       return false;
     }
 

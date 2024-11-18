@@ -1,12 +1,13 @@
 // Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.kotlin.idea.k2.codeinsight.intentions
 
-import com.intellij.codeInsight.intention.LowPriorityAction
+import com.intellij.codeInsight.intention.PriorityAction
 import com.intellij.modcommand.ActionContext
 import com.intellij.modcommand.ModPsiUpdater
+import com.intellij.modcommand.Presentation
 import com.intellij.openapi.util.TextRange
 import com.intellij.psi.PsiElement
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
+import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.config.LanguageFeature
 import org.jetbrains.kotlin.idea.base.projectStructure.languageVersionSettings
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
@@ -21,18 +22,24 @@ import org.jetbrains.kotlin.psi.KtValueArgument
 import org.jetbrains.kotlin.psi.KtValueArgumentList
 
 internal class AddNameToArgumentIntention :
-    KotlinApplicableModCommandAction<KtValueArgument, AddNameToArgumentIntention.Context>(KtValueArgument::class),
-    LowPriorityAction {
+    KotlinApplicableModCommandAction<KtValueArgument, AddNameToArgumentIntention.Context>(KtValueArgument::class) {
 
-    class Context(val argumentName: Name)
+    data class Context(
+        val argumentName: Name,
+    )
 
-    override fun getFamilyName(): String = KotlinBundle.message("add.name.to.argument")
+    override fun getFamilyName(): String =
+        KotlinBundle.message("add.name.to.argument")
 
-    override fun getActionName(
-      actionContext: ActionContext,
-      element: KtValueArgument,
-      elementContext: Context,
-    ): String = KotlinBundle.message("add.0.to.argument", elementContext.argumentName)
+    override fun getPresentation(
+        context: ActionContext,
+        element: KtValueArgument,
+    ): Presentation? {
+        val (argumentName) = getElementContext(context, element)
+            ?: return null
+        return Presentation.of(KotlinBundle.message("add.0.to.argument", argumentName))
+            .withPriority(PriorityAction.Priority.LOW)
+    }
 
     override fun getApplicableRanges(element: KtValueArgument): List<TextRange> =
         ApplicabilityRanges.valueArgumentExcludingLambda(element)
@@ -50,7 +57,7 @@ internal class AddNameToArgumentIntention :
                 element == argumentList.arguments.last { !it.isNamed() }
     }
 
-    context(KtAnalysisSession)
+    context(KaSession)
     override fun prepareContext(element: KtValueArgument): Context? {
         return getStableNameFor(element)?.let { Context(it) }
     }

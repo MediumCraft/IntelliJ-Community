@@ -19,10 +19,7 @@ import com.intellij.platform.backend.workspace.WorkspaceModel;
 import com.intellij.platform.workspace.jps.entities.ModuleEntity;
 import com.intellij.platform.workspace.storage.EntityStorage;
 import com.intellij.util.containers.ContainerUtil;
-import com.intellij.util.indexing.AdditionalIndexableFileSet;
-import com.intellij.util.indexing.EntityIndexingServiceEx;
-import com.intellij.util.indexing.IndexableFilesIndex;
-import com.intellij.util.indexing.IndexableSetContributor;
+import com.intellij.util.indexing.*;
 import com.intellij.util.indexing.dependenciesCache.DependenciesIndexedStatusService;
 import com.intellij.util.indexing.roots.kind.IndexableSetOrigin;
 import com.intellij.workspaceModel.core.fileIndex.EntityStorageKind;
@@ -42,12 +39,10 @@ import static com.intellij.util.indexing.roots.LibraryIndexableFilesIteratorImpl
 @ApiStatus.Experimental
 @ApiStatus.Internal
 public final class IndexableFilesIndexImpl implements IndexableFilesIndex {
-  @NotNull
-  private final Project project;
+  private final @NotNull Project project;
   private final AdditionalIndexableFileSet filesFromIndexableSetContributors;
 
-  @NotNull
-  public static IndexableFilesIndexImpl getInstanceImpl(@NotNull Project project) {
+  public static @NotNull IndexableFilesIndexImpl getInstanceImpl(@NotNull Project project) {
     return (IndexableFilesIndexImpl)IndexableFilesIndex.getInstance(project);
   }
 
@@ -68,7 +63,7 @@ public final class IndexableFilesIndexImpl implements IndexableFilesIndex {
     if (files.isEmpty()) return Collections.emptyList();
     OriginClassifier classifier = OriginClassifier.classify(project, files);
     Collection<IndexableFilesIterator> iterators =
-      EntityIndexingServiceEx.getInstanceEx().createIteratorsForOrigins(project, classifier.entityStorage, classifier.myEntityPointers,
+      ProjectEntityIndexingService.Companion.getInstance(project).createIteratorsForOrigins(classifier.entityStorage, classifier.myEntityPointers,
                                                                         classifier.sdks, classifier.libraryIds,
                                                                         classifier.filesFromAdditionalLibraryRootsProviders,
                                                                         classifier.filesFromIndexableSetContributors);
@@ -80,8 +75,7 @@ public final class IndexableFilesIndexImpl implements IndexableFilesIndex {
     return ReadAction.nonBlocking(this::doGetIndexingIterators).expireWith(project).executeSynchronously();
   }
 
-  @NotNull
-  private List<IndexableFilesIterator> doGetIndexingIterators() {
+  private @NotNull List<IndexableFilesIterator> doGetIndexingIterators() {
     EntityStorage entityStorage = WorkspaceModel.getInstance(project).getCurrentSnapshot();
     List<IndexableFilesIterator> iterators = new ArrayList<>();
 

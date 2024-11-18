@@ -17,7 +17,6 @@ import com.intellij.psi.*;
 import com.intellij.psi.scope.DelegatingScopeProcessor;
 import com.intellij.psi.scope.PsiScopeProcessor;
 import com.intellij.psi.stubs.StubElement;
-import com.intellij.psi.templateLanguages.TemplateLanguageFileViewProvider;
 import com.intellij.psi.util.PsiModificationTracker;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.QualifiedName;
@@ -28,12 +27,12 @@ import com.jetbrains.python.PyNames;
 import com.jetbrains.python.PythonFileType;
 import com.jetbrains.python.PythonLanguage;
 import com.jetbrains.python.ast.PyAstElementVisitor;
-import com.jetbrains.python.ast.PyAstFunction;
 import com.jetbrains.python.ast.impl.PyUtilCore;
 import com.jetbrains.python.codeInsight.controlflow.ControlFlowCache;
 import com.jetbrains.python.documentation.docstrings.DocStringUtil;
 import com.jetbrains.python.psi.*;
 import com.jetbrains.python.psi.impl.references.PyReferenceImpl;
+import com.jetbrains.python.psi.impl.stubs.PyVersionSpecificStubBaseKt;
 import com.jetbrains.python.psi.resolve.*;
 import com.jetbrains.python.psi.stubs.PyFileStub;
 import com.jetbrains.python.psi.types.PyModuleType;
@@ -70,8 +69,9 @@ public class PyFileImpl extends PsiFileBase implements PyFile, PyExpression {
     private ExportedNameCache(long modificationStamp) {
       myModificationStamp = modificationStamp;
 
-      final StubElement stub = getStub();
-      processDeclarations(PyPsiUtils.collectAllStubChildren(PyFileImpl.this, stub), element -> {
+      final StubElement<?> stub = getStub();
+      LanguageLevel languageLevel = PythonLanguageLevelPusher.getLanguageLevelForFile(PyFileImpl.this);
+      processDeclarations(PyFileImpl.this, stub, languageLevel, element -> {
         if (element instanceof PsiNamedElement namedElement &&
             !(element instanceof PyKeywordArgument) &&
             !(stub == null && element.getParent() instanceof PyImportElement)) {
@@ -102,13 +102,16 @@ public class PyFileImpl extends PsiFileBase implements PyFile, PyExpression {
       Collections.reverse(myImportedNameDefiners);
     }
 
-    private static boolean processDeclarations(@NotNull List<PsiElement> elements, @NotNull Processor<? super PsiElement> processor) {
-      for (PsiElement child : elements) {
+    private static boolean processDeclarations(@NotNull PsiElement element,
+                                               @Nullable StubElement<?> stub,
+                                               @NotNull LanguageLevel languageLevel,
+                                               @NotNull Processor<? super PsiElement> processor) {
+      for (PsiElement child : collectAllChildren(element, stub, languageLevel)) {
         if (!processor.process(child)) {
           return false;
         }
         if (child instanceof PyExceptPart part) {
-          if (!processDeclarations(PyPsiUtils.collectAllStubChildren(part, part.getStub()), processor)) {
+          if (!processDeclarations(part, part.getStub(), languageLevel, processor)) {
             return false;
           }
         }
@@ -223,8 +226,13 @@ public class PyFileImpl extends PsiFileBase implements PyFile, PyExpression {
   }
 
   @Override
+  public @Nullable PyTargetExpression findTopLevelAttribute(@NotNull String name) {
+    return findByName(name, getTopLevelAttributes());
+  }
+
+  @Override
   public @NotNull List<PyTypeAliasStatement> getTypeAliasStatements() {
-    return PyPsiUtils.collectStubChildren(this, getGreenStub(), PyTypeAliasStatement.class);
+    return collectChildren(PyTypeAliasStatement.class);
   }
 
   @Override
@@ -245,22 +253,7 @@ public class PyFileImpl extends PsiFileBase implements PyFile, PyExpression {
 
   @Override
   public LanguageLevel getLanguageLevel() {
-    if (myOriginalFile != null) {
-      PsiFile originalPythonFile = myOriginalFile;
-      // myOriginalFile could be an instance of base language
-      // see PostfixLiveTemplate#copyFile
-      if (myOriginalFile.getViewProvider() instanceof TemplateLanguageFileViewProvider) {
-        originalPythonFile = myOriginalFile.getViewProvider().getPsi(PythonLanguage.getInstance());
-      }
-      if (originalPythonFile instanceof PyFile) {
-        return ((PyFile)originalPythonFile).getLanguageLevel();
-      }
-    }
-    VirtualFile virtualFile = getVirtualFile();
-    if (virtualFile == null) {
-      virtualFile = getViewProvider().getVirtualFile();
-    }
-    return PythonLanguageLevelPusher.getLanguageLevelForVirtualFile(getProject(), virtualFile);
+    return PythonLanguageLevelPusher.getLanguageLevelForFile(this);
   }
 
   @Override
@@ -366,18 +359,18 @@ public class PyFileImpl extends PsiFileBase implements PyFile, PyExpression {
   @Override
   @NotNull
   public List<PyClass> getTopLevelClasses() {
-    return PyPsiUtils.collectStubChildren(this, getGreenStub(), PyClass.class);
+    return collectChildren(PyClass.class);
   }
 
   @NotNull
   @Override
   public List<PyFunction> getTopLevelFunctions() {
-    return PyPsiUtils.collectStubChildren(this, getGreenStub(), PyFunction.class);
+    return collectChildren(PyFunction.class);
   }
 
   @Override
   public List<PyTargetExpression> getTopLevelAttributes() {
-    return PyPsiUtils.collectStubChildren(this, getGreenStub(), PyTargetExpression.class);
+    return collectChildren(PyTargetExpression.class);
   }
 
   @Override
@@ -486,7 +479,7 @@ public class PyFileImpl extends PsiFileBase implements PyFile, PyExpression {
   @NotNull
   public List<PyImportElement> getImportTargets() {
     final List<PyImportElement> ret = new ArrayList<>();
-    final List<PyImportStatement> imports = PyPsiUtils.collectStubChildren(this, getGreenStub(), PyImportStatement.class);
+    final List<PyImportStatement> imports = collectChildren(PyImportStatement.class);
     for (PyImportStatement one : imports) {
       ContainerUtil.addAll(ret, one.getImportElements());
     }
@@ -496,7 +489,7 @@ public class PyFileImpl extends PsiFileBase implements PyFile, PyExpression {
   @Override
   @NotNull
   public List<PyFromImportStatement> getFromImports() {
-    return PyPsiUtils.collectStubChildren(this, getGreenStub(), PyFromImportStatement.class);
+    return collectChildren(PyFromImportStatement.class);
   }
 
   @Nullable
@@ -701,7 +694,7 @@ public class PyFileImpl extends PsiFileBase implements PyFile, PyExpression {
 
   public String extractDeprecationMessage() {
     if (canHaveDeprecationMessage(getText())) {
-      return PyAstFunction.extractDeprecationMessage(getStatements());
+      return PyFunction.extractDeprecationMessage(getStatements());
     }
     else {
       return null;
@@ -740,20 +733,8 @@ public class PyFileImpl extends PsiFileBase implements PyFile, PyExpression {
 
   @Nullable
   @Override
-  public String getDocStringValue() {
-    return DocStringUtil.getDocStringValue(this);
-  }
-
-  @Nullable
-  @Override
   public StructuredDocString getStructuredDocString() {
     return DocStringUtil.getStructuredDocString(this);
-  }
-
-  @Nullable
-  @Override
-  public PyStringLiteralExpression getDocStringExpression() {
-    return DocStringUtil.findDocStringExpression(this);
   }
 
   @Override
@@ -852,5 +833,61 @@ public class PyFileImpl extends PsiFileBase implements PyFile, PyExpression {
         return null;
       }
     };
+  }
+
+  @NotNull
+  private <T extends PyElement> List<T> collectChildren(Class<T> type) {
+    @Nullable StubElement<?> stub = getGreenStub();
+    @NotNull LanguageLevel languageLevel = PythonLanguageLevelPusher.getLanguageLevelForFile(this);
+    final List<T> result = new ArrayList<>();
+    if (stub != null) {
+      for (StubElement<?> child : PyVersionSpecificStubBaseKt.getChildrenStubs(stub, languageLevel)) {
+        PsiElement childPsi = child.getPsi();
+        if (type.isInstance(childPsi)) {
+          result.add(type.cast(childPsi));
+        }
+      }
+    }
+    else {
+      acceptChildren(new PyVersionAwareTopLevelElementVisitor(languageLevel) {
+        @Override
+        protected void checkAddElement(PsiElement node) {
+          if (type.isInstance(node)) {
+            result.add(type.cast(node));
+          }
+        }
+
+        @Override
+        public void visitPyStatement(@NotNull PyStatement node) {
+          if (PyStatement.class.isAssignableFrom(type) && !(node instanceof PyCompoundStatement)) {
+            checkAddElement(node);
+            return;
+          }
+          super.visitPyStatement(node);
+        }
+      });
+    }
+    return result;
+  }
+
+  @NotNull
+  private static List<PsiElement> collectAllChildren(@NotNull PsiElement element,
+                                                     @Nullable StubElement<?> stub,
+                                                     @NotNull LanguageLevel languageLevel) {
+    List<PsiElement> result = new ArrayList<>();
+    if (stub != null) {
+      for (StubElement<?> child : PyVersionSpecificStubBaseKt.getChildrenStubs(stub, languageLevel)) {
+        result.add(child.getPsi());
+      }
+    }
+    else {
+      element.acceptChildren(new PyVersionAwareTopLevelElementVisitor(languageLevel) {
+        @Override
+        protected void checkAddElement(PsiElement node) {
+          result.add(node);
+        }
+      });
+    }
+    return result;
   }
 }

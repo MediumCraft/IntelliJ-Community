@@ -1,12 +1,12 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.vcs.changes;
 
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProcessCanceledException;
-import com.intellij.openapi.progress.util.BackgroundTaskUtil;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vcs.FilePath;
 import com.intellij.openapi.vcs.changes.local.ChangeListCommand;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Collection;
@@ -14,6 +14,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 
+@ApiStatus.Internal
 public final class DelayedNotificator implements ChangeListListener {
   private static final Logger LOG = Logger.getInstance(DelayedNotificator.class);
 
@@ -152,6 +153,6 @@ public final class DelayedNotificator implements ChangeListListener {
 
   @NotNull
   private ChangeListListener getMulticaster() {
-    return BackgroundTaskUtil.syncPublisher(myProject, ChangeListListener.TOPIC);
+    return myProject.getMessageBus().syncPublisher(ChangeListListener.TOPIC);
   }
 }

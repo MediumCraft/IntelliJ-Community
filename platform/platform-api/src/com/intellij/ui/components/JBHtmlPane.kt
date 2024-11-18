@@ -4,6 +4,7 @@ package com.intellij.ui.components
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.service
+import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.editor.colors.EditorColorsScheme
 import com.intellij.util.containers.addAllIfNotNull
 import com.intellij.util.ui.*
@@ -17,9 +18,12 @@ import org.jetbrains.annotations.Nls
 import java.awt.AWTEvent
 import java.awt.Color
 import java.awt.Graphics
+import java.awt.Image
 import java.awt.event.ActionEvent
 import java.awt.event.KeyEvent
 import java.beans.PropertyChangeEvent
+import java.net.URL
+import java.util.*
 import javax.swing.JEditorPane
 import javax.swing.KeyStroke
 import javax.swing.text.Document
@@ -105,7 +109,7 @@ import javax.swing.text.html.StyleSheet
 @Suppress("LeakingThis")
 open class JBHtmlPane(
   private val myStyleConfiguration: JBHtmlPaneStyleConfiguration,
-  private val myPaneConfiguration: JBHtmlPaneConfiguration
+  private val myPaneConfiguration: JBHtmlPaneConfiguration,
 ) : JEditorPane(), Disposable {
 
   private val service: ImplService = ApplicationManager.getApplication().service()
@@ -129,7 +133,6 @@ open class JBHtmlPane(
     val extensions = ArrayList(myPaneConfiguration.extensions)
     extensions.addAllIfNotNull(
       icons { key: String -> myPaneConfiguration.iconResolver(key) },
-      ExtendableHTMLViewFactory.Extensions.BASE64_IMAGES,
       ExtendableHTMLViewFactory.Extensions.INLINE_VIEW_EX,
       ExtendableHTMLViewFactory.Extensions.PARAGRAPH_VIEW_EX,
       ExtendableHTMLViewFactory.Extensions.LINE_VIEW_EX,
@@ -144,6 +147,7 @@ open class JBHtmlPane(
     val editorKit = HTMLEditorKitBuilder()
       .replaceViewFactoryExtensions(*extensions.toTypedArray())
       .withFontResolver(myPaneConfiguration.fontResolver ?: service.defaultEditorCssFontResolver())
+      .withUnderlinedHoveredHyperlink(myPaneConfiguration.underlinedHoveredHyperlink)
       .build()
     updateDocumentationPaneDefaultCssRules(editorKit)
 
@@ -169,7 +173,12 @@ open class JBHtmlPane(
 
   override fun setText(t: @Nls String?) {
     myText = t?.let { service.transpileHtmlPaneInput(it) } ?: ""
-    super.setText(myText)
+    try {
+      super.setText(myText)
+    }
+    catch (e: Throwable) {
+      thisLogger().error("Failed to set contents of the HTML pane", e)
+    }
   }
 
   override fun setEditorKit(kit: EditorKit) {
@@ -214,7 +223,8 @@ open class JBHtmlPane(
     super.setDocument(doc)
     doc.putProperty("IgnoreCharsetDirective", true)
     if (doc is StyledDocument) {
-      doc.putProperty("imageCache", myPaneConfiguration.imageResolverFactory(this))
+      doc.putProperty("imageCache", myPaneConfiguration.imageResolverFactory(this)
+                                    ?: service.createDefaultImageResolver(this))
     }
   }
 
@@ -228,6 +238,8 @@ open class JBHtmlPane(
     fun getDefaultStyleSheet(paneBackgroundColor: Color, configuration: JBHtmlPaneStyleConfiguration): StyleSheet
 
     fun getEditorColorsSchemeStyleSheet(editorColorsScheme: EditorColorsScheme): StyleSheet
+
+    fun createDefaultImageResolver(pane: JBHtmlPane): Dictionary<URL, Image>
 
   }
 

@@ -8,10 +8,8 @@ import io.opentelemetry.api.common.Attributes
 import io.opentelemetry.api.trace.Span
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
-import java.nio.file.Path
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.CopyOnWriteArrayList
 
 enum class PatchOverwriteMode {
   TRUE,
@@ -20,7 +18,6 @@ enum class PatchOverwriteMode {
 }
 
 class ModuleOutputPatcher {
-  private val patchDirs = ConcurrentHashMap<String, CopyOnWriteArrayList<Path>>()
   private val patches = ConcurrentHashMap<String, MutableMap<String, ByteArray>>()
 
   fun patchModuleOutput(moduleName: String, path: String, content: String, overwrite: PatchOverwriteMode = PatchOverwriteMode.FALSE) {
@@ -82,8 +79,6 @@ class ModuleOutputPatcher {
     return patches.get(moduleName)?.entries?.firstOrNull { it.key == "META-INF/plugin.xml" }?.value
            ?: error("patched plugin.xml not found for $moduleName module")
   }
-
-  internal fun getPatchedDir(moduleName: String): Collection<Path> = patchDirs.get(moduleName) ?: emptyList()
 
   internal fun getPatchedContent(moduleName: String): Map<String, ByteArray> = patches.get(moduleName) ?: emptyMap()
 }

@@ -8,6 +8,7 @@ import com.intellij.psi.*;
 import com.intellij.psi.impl.ResolveScopeManager;
 import com.intellij.psi.impl.cache.TypeAnnotationContainer;
 import com.intellij.psi.impl.cache.TypeInfo;
+import com.intellij.psi.impl.source.SourceTreeToPsiMap;
 import com.intellij.psi.impl.source.resolve.ResolveCache;
 import com.intellij.psi.impl.source.tree.JavaElementType;
 import com.intellij.psi.impl.source.tree.TreeElement;
@@ -20,10 +21,7 @@ import com.intellij.util.IncorrectOperationException;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 
 public class ClsJavaCodeReferenceElementImpl extends ClsElementImpl implements PsiAnnotatedJavaCodeReferenceElement {
   private final PsiElement myParent;
@@ -53,7 +51,7 @@ public class ClsJavaCodeReferenceElementImpl extends ClsElementImpl implements P
     myAnnotations = annotations;
     String prefix = PsiNameHelper.getOuterClassReference(canonicalText);
     TypeAnnotationContainer container = prefix.isEmpty() ? TypeAnnotationContainer.EMPTY : annotations.forEnclosingClass();
-    myQualifier = container.isEmpty() ? null : new ClsJavaCodeReferenceElementImpl(this, prefix, container);
+    myQualifier = container == TypeAnnotationContainer.EMPTY ? null : new ClsJavaCodeReferenceElementImpl(this, prefix, container);
   }
 
   @Override
@@ -92,7 +90,7 @@ public class ClsJavaCodeReferenceElementImpl extends ClsElementImpl implements P
   @Override
   public @NotNull String getCanonicalText(boolean annotated, PsiAnnotation @Nullable [] annotations) {
     String text = getCanonicalText();
-    if (!annotated || annotations == null) return text;
+    if (!annotated) return text;
 
     StringBuilder sb = new StringBuilder();
 
@@ -108,7 +106,7 @@ public class ClsJavaCodeReferenceElementImpl extends ClsElementImpl implements P
       simpleNamePos = prefix.length() + 1;
     }
 
-    PsiNameHelper.appendAnnotations(sb, Arrays.asList(annotations), true);
+    PsiNameHelper.appendAnnotations(sb, annotations == null ? Collections.emptyList() : Arrays.asList(annotations), true);
 
     int typeArgPos = text.indexOf('<', simpleNamePos);
     if (typeArgPos == -1) {
@@ -137,15 +135,15 @@ public class ClsJavaCodeReferenceElementImpl extends ClsElementImpl implements P
     if (resolve == null) return null;
     if (resolve instanceof PsiClass) {
       Map<PsiTypeParameter, PsiType> substitutionMap = new HashMap<>();
-      int index = 0;
+      int index = typeElements.length - 1;
       for (PsiTypeParameter parameter : PsiUtil.typeParametersIterable((PsiClass)resolve)) {
-        if (index >= typeElements.length) {
+        if (index < 0) {
           substitutionMap.put(parameter, null);
         }
         else {
           substitutionMap.put(parameter, typeElements[index].getType());
         }
-        index++;
+        index--;
       }
       collectOuterClassTypeArgs((PsiClass)resolve, myCanonicalText, substitutionMap);
       return new CandidateInfo(resolve, PsiSubstitutor.createSubstitutor(substitutionMap));
@@ -302,6 +300,12 @@ public class ClsJavaCodeReferenceElementImpl extends ClsElementImpl implements P
   @Override
   protected void setMirror(@NotNull TreeElement element) throws InvalidMirrorException {
     setMirrorCheckingType(element, JavaElementType.JAVA_CODE_REFERENCE);
+
+    PsiJavaCodeReferenceElement mirror = SourceTreeToPsiMap.treeToPsiNotNull(element);
+    PsiReferenceParameterList list = getParameterList();
+    if (list != null) {
+      setMirror(list, mirror.getParameterList());
+    }
   }
 
   @Override

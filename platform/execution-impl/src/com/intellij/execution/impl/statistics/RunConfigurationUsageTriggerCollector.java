@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.execution.impl.statistics;
 
 import com.intellij.execution.EnvFilesOptions;
@@ -21,6 +21,7 @@ import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.concurrency.NonUrgentExecutor;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -30,9 +31,10 @@ import java.util.List;
 import static com.intellij.execution.impl.statistics.RunConfigurationTypeUsagesCollector.LOCAL_TYPE_ID;
 import static com.intellij.execution.impl.statistics.RunConfigurationTypeUsagesCollector.createFeatureUsageData;
 
+@ApiStatus.Internal
 public final class RunConfigurationUsageTriggerCollector extends CounterUsagesCollector {
   public static final String GROUP_NAME = "run.configuration.exec";
-  private static final EventLogGroup GROUP = new EventLogGroup(GROUP_NAME, 75);
+  private static final EventLogGroup GROUP = new EventLogGroup(GROUP_NAME, 78);
 
   public static final IntEventField ALTERNATIVE_JRE_VERSION = EventFields.Int("alternative_jre_version");
   private static final ObjectEventField ADDITIONAL_FIELD = EventFields.createAdditionalDataField(GROUP_NAME, "started");
@@ -40,7 +42,7 @@ public final class RunConfigurationUsageTriggerCollector extends CounterUsagesCo
                                                                                            RunConfigurationExecutorUtilValidator.class);
   private static final BooleanEventField IS_RERUN = EventFields.Boolean("is_rerun");
   private static final BooleanEventField IS_RUNNING_CURRENT_FILE = EventFields.Boolean("is_running_current_file");
-  private static final BooleanEventField IS_DUMB_MODE = EventFields.Boolean("dumb");
+  private static final BooleanEventField IS_SERVICE_VIEW = EventFields.Boolean("service_view");
 
   /**
    * The type of the target the run configuration is being executed with. {@code null} stands for the local machine target.
@@ -67,7 +69,8 @@ public final class RunConfigurationUsageTriggerCollector extends CounterUsagesCo
       RunConfigurationTypeUsagesCollector.ID_FIELD,
       EventFields.PluginInfo,
       ENV_FILES_COUNT,
-      IS_DUMB_MODE
+      EventFields.Dumb,
+      IS_SERVICE_VIEW
     },
     new EventField<?>[]{FINISH_TYPE},
     null,
@@ -86,10 +89,11 @@ public final class RunConfigurationUsageTriggerCollector extends CounterUsagesCo
                                                        @Nullable RunConfiguration runConfiguration,
                                                        boolean isRerun,
                                                        boolean isRunningCurrentFile,
-                                                       boolean isDumb) {
+                                                       boolean isDumb,
+                                                       boolean isServiceView) {
     return ACTIVITY_GROUP
       .startedAsync(project, () -> ReadAction.nonBlocking(
-          () -> buildContext(project, factory, executor, runConfiguration, isRerun, isRunningCurrentFile, isDumb)
+          () -> buildContext(project, factory, executor, runConfiguration, isRerun, isRunningCurrentFile, isDumb, isServiceView)
         )
         .expireWith(project)
         .submit(NonUrgentExecutor.getInstance()));
@@ -102,10 +106,11 @@ public final class RunConfigurationUsageTriggerCollector extends CounterUsagesCo
                                                                  @Nullable RunConfiguration runConfiguration,
                                                                  boolean isRerun,
                                                                  boolean isRunningCurrentFile,
-                                                                 boolean isDumb) {
+                                                                 boolean isDumb,
+                                                                 boolean isServiceView) {
     return ACTIVITY_GROUP
       .startedAsyncWithParent(project, parentActivity, () -> ReadAction.nonBlocking(
-          () -> buildContext(project, factory, executor, runConfiguration, isRerun, isRunningCurrentFile, isDumb)
+          () -> buildContext(project, factory, executor, runConfiguration, isRerun, isRunningCurrentFile, isDumb, isServiceView)
         )
         .expireWith(project)
         .submit(NonUrgentExecutor.getInstance()));
@@ -117,13 +122,15 @@ public final class RunConfigurationUsageTriggerCollector extends CounterUsagesCo
                                                           @Nullable RunConfiguration runConfiguration,
                                                           boolean isRerun,
                                                           boolean isRunningCurrentFile,
-                                                          boolean isDumb) {
+                                                          boolean isDumb,
+                                                          boolean isServiceView) {
     List<EventPair<?>> eventPairs = createFeatureUsageData(factory.getType(), factory);
     ExecutorGroup<?> group = ExecutorGroup.getGroupIfProxy(executor);
     eventPairs.add(EXECUTOR.with(group != null ? group.getId() : executor.getId()));
     eventPairs.add(IS_RERUN.with(isRerun));
     eventPairs.add(IS_RUNNING_CURRENT_FILE.with(isRunningCurrentFile));
-    eventPairs.add(IS_DUMB_MODE.with(isDumb));
+    eventPairs.add(EventFields.Dumb.with(isDumb));
+    eventPairs.add(IS_SERVICE_VIEW.with(isServiceView));
 
     if (runConfiguration instanceof FusAwareRunConfiguration) {
       List<EventPair<?>> additionalData = ((FusAwareRunConfiguration)runConfiguration).getAdditionalUsageData();
@@ -165,6 +172,7 @@ public final class RunConfigurationUsageTriggerCollector extends CounterUsagesCo
     }
   }
 
+  @ApiStatus.Internal
   public static final class RunConfigurationExecutorUtilValidator extends CustomValidationRule {
     @Override
     public @NotNull String getRuleId() {
@@ -183,6 +191,7 @@ public final class RunConfigurationUsageTriggerCollector extends CounterUsagesCo
     }
   }
 
+  @ApiStatus.Internal
   public static final class RunTargetValidator extends CustomValidationRule {
     public static final String RULE_ID = "run_target";
 
@@ -206,5 +215,6 @@ public final class RunConfigurationUsageTriggerCollector extends CounterUsagesCo
     }
   }
 
+  @ApiStatus.Internal
   public enum RunConfigurationFinishType {FAILED_TO_START, UNKNOWN, TERMINATED_BY_STOP, TERMINATED_DUE_TO_RERUN}
 }

@@ -1,6 +1,7 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.navbar.frontend
 
+import com.intellij.ide.navigationToolbar.NavBarLeftSideExtension
 import com.intellij.ide.ui.NavBarLocation
 import com.intellij.ide.ui.ToolbarSettings
 import com.intellij.ide.ui.UISettings
@@ -217,7 +218,9 @@ internal class MyNavBarWrapperPanel(private val project: Project, useAsComponent
     if (show) {
       ApplicationManager.getApplication().invokeLater {
         val navBarPanel = getNavBarPanel()
-        add(navBarPanel, BorderLayout.CENTER)
+        if (navBarPanel.parent != this) { // do not fire events without need
+          add(navBarPanel, BorderLayout.CENTER)
+        }
         navBarPanel.updateUI()
       }
     }

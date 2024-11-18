@@ -19,12 +19,15 @@ import com.intellij.openapi.roots.ProjectRootManager
 import com.intellij.openapi.roots.ui.configuration.SdkTestCase
 import com.intellij.openapi.roots.ui.configuration.SdkTestCase.Companion.assertSdk
 import com.intellij.openapi.roots.ui.configuration.SdkTestCase.TestSdkGenerator
+import com.intellij.testFramework.VfsTestUtil
 import com.intellij.testFramework.replaceService
+import com.intellij.util.lang.JavaVersion
 import org.jetbrains.plugins.gradle.service.project.open.linkAndSyncGradleProject
-import org.jetbrains.plugins.gradle.testFramework.util.awaitAnyGradleProjectReload
+import org.jetbrains.plugins.gradle.testFramework.util.awaitGradleProjectConfiguration
 import org.jetbrains.plugins.gradle.testFramework.util.createBuildFile
 import org.jetbrains.plugins.gradle.testFramework.util.createSettingsFile
 import org.jetbrains.plugins.gradle.tooling.GradleJvmResolver
+import org.jetbrains.plugins.gradle.tooling.JavaVersionRestriction
 
 abstract class GradleProjectSdkResolverTestCase : GradleImportingTestCase() {
 
@@ -54,20 +57,20 @@ abstract class GradleProjectSdkResolverTestCase : GradleImportingTestCase() {
   }
 
   suspend fun loadProject() {
-    awaitAnyGradleProjectReload {
+    awaitGradleProjectConfiguration(myProject) {
       linkAndSyncGradleProject(myProject, projectPath)
     }
   }
 
   suspend fun reloadProject() {
-    awaitAnyGradleProjectReload {
+    awaitGradleProjectConfiguration(myProject) {
       val importSpec = ImportSpecBuilder(myProject, externalSystemId)
       ExternalSystemUtil.refreshProject(projectPath, importSpec)
     }
   }
 
   fun resolveRealTestSdk(): Sdk {
-    val homePath = GradleJvmResolver.resolveGradleJvmHomePath(currentGradleVersion)
+    val homePath = GradleJvmResolver.resolveGradleJvmHomePath(currentGradleVersion, JavaVersionRestriction.NO)
     val sdkInfo = createSdkInfo(JavaSdk.getInstance(), homePath)
     return TestSdkGenerator.createTestSdk(sdkInfo)
   }
@@ -114,5 +117,10 @@ abstract class GradleProjectSdkResolverTestCase : GradleImportingTestCase() {
     createBuildFile {
       withJavaPlugin()
     }
+  }
+
+  fun createDaemonJvmPropertiesFile(sdk: Sdk) {
+    val version = JavaVersion.tryParse(sdk.versionString!!)
+    VfsTestUtil.createFile(projectRoot, "gradle/gradle-daemon-jvm.properties", "toolchainVersion=$version")
   }
 }

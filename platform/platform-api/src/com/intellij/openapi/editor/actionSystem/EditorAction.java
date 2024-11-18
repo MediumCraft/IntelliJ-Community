@@ -154,7 +154,7 @@ public abstract class EditorAction extends AnAction implements DumbAware, LightE
     DataContext dataContext = e.getDataContext();
     Editor editor = getEditor(dataContext);
     if (editor == null) {
-      if (ActionPlaces.isPopupPlace(e.getPlace())) {
+      if (e.isFromContextMenu()) {
         presentation.setEnabledAndVisible(false);
       }
       else {
@@ -181,7 +181,7 @@ public abstract class EditorAction extends AnAction implements DumbAware, LightE
     if (PROJECT.getData(original) == editor.getProject()) {
       return original;
     }
-    return CustomizedDataContext.create(original, dataId -> PROJECT.is(dataId) ? editor.getProject() : null);
+    return CustomizedDataContext.withSnapshot(original, sink -> sink.set(PROJECT, editor.getProject()));
   }
 
   public synchronized void clearDynamicHandlersCache() {

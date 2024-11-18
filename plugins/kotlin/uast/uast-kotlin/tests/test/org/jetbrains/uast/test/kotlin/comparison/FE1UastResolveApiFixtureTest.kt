@@ -1,4 +1,4 @@
-// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.uast.test.kotlin.comparison
 
 import com.intellij.testFramework.LightProjectDescriptor
@@ -20,6 +20,14 @@ class FE1UastResolveApiFixtureTest : KotlinLightCodeInsightFixtureTestCase(), Ua
 
     fun testResolveStringFromUast() {
         checkResolveStringFromUast(myFixture, project)
+    }
+
+    fun testResolveBuiltinOperator() {
+        checkResolveBuiltinOperator(myFixture, project)
+    }
+
+    fun testResolveBuiltinClass() {
+        checkResolveBuiltinClass(myFixture, project)
     }
 
     fun testMultiResolve() {
@@ -58,8 +66,16 @@ class FE1UastResolveApiFixtureTest : KotlinLightCodeInsightFixtureTestCase(), Ua
         checkMultiResolveJvmOverloads(myFixture)
     }
 
-    fun testLocalResolve() {
-        checkLocalResolve(myFixture)
+    fun testLocalResolve_class() {
+        checkLocalResolve_class(myFixture)
+    }
+
+    fun testLocalResolve_function() {
+        checkLocalResolve_function(myFixture)
+    }
+
+    fun testGetJavaClass() {
+        checkGetJavaClass(myFixture)
     }
 
     fun testResolveLocalDefaultConstructor() {
@@ -92,6 +108,10 @@ class FE1UastResolveApiFixtureTest : KotlinLightCodeInsightFixtureTestCase(), Ua
 
     fun testResolveImplicitLambdaParameter_binary() {
         checkResolveImplicitLambdaParameter_binary(myFixture)
+    }
+
+    fun testNullityOfResolvedLambdaParameter() {
+        checkNullityOfResolvedLambdaParameter(myFixture)
     }
 
     fun testResolveSyntheticMethod() {
@@ -132,6 +152,10 @@ class FE1UastResolveApiFixtureTest : KotlinLightCodeInsightFixtureTestCase(), Ua
 
     fun testArgumentMappingSAM_methodReference() {
         checkArgumentMappingSAM_methodReference(myFixture)
+    }
+
+    fun testParameterForArgument_extensionReceiver_suspend() {
+        checkParameterForArgument_extensionReceiver_suspend(myFixture)
     }
 
     fun testSyntheticEnumMethods() {
@@ -230,12 +254,20 @@ class FE1UastResolveApiFixtureTest : KotlinLightCodeInsightFixtureTestCase(), Ua
         checkResolveThisExpressionAsLambdaReceiver(myFixture)
     }
 
+    fun testResolveThisExpressionForExtensionFunctionType() {
+        checkResolveThisExpressionForExtensionFunctionType(myFixture)
+    }
+
     fun testResolvePropertiesInCompanionObjectFromBinaryDependency() {
         checkResolvePropertiesInCompanionObjectFromBinaryDependency(myFixture)
     }
 
     fun testResolvePropertiesInInnerClassFromBinaryDependency() {
         checkResolvePropertiesInInnerClassFromBinaryDependency(myFixture)
+    }
+
+    fun testResolveConstructorCallFromLibrary() {
+        checkResolveConstructorCallFromLibrary(myFixture)
     }
 
     fun testResolveTopLevelInlineReifiedFromLibrary() {
@@ -252,5 +284,21 @@ class FE1UastResolveApiFixtureTest : KotlinLightCodeInsightFixtureTestCase(), Ua
 
     fun testResolveInnerInlineFromLibrary() {
         checkResolveInnerInlineFromLibrary(myFixture)
+    }
+
+    fun testResolveJvmNameOnFunctionFromLibrary() {
+        checkResolveJvmNameOnFunctionFromLibrary(myFixture)
+    }
+
+    fun testResolveJvmNameOnGetterFromLibrary() {
+        checkResolveJvmNameOnGetterFromLibrary(myFixture)
+    }
+
+    fun testResolveJvmNameOnSetterFromLibrary() {
+        checkResolveJvmNameOnSetterFromLibrary(myFixture)
+    }
+
+    fun testResolveProtoDSL() {
+        checkResolveProtoDSL(myFixture, isK2 = false)
     }
 }

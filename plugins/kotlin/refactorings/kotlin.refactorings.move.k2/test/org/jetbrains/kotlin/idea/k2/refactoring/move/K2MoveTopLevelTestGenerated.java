@@ -35,6 +35,11 @@ public class K2MoveTopLevelTestGenerated extends AbstractK2MoveTopLevelTest {
         runTest("../../idea/tests/testData/refactoring/moveTopLevel/java/moveTopLevelClassToAnotherPackage/moveTopLevelClassToAnotherPackage.test");
     }
 
+    @TestMetadata("kotlin/callableReference/callableReference.test")
+    public void testKotlin_callableReference_CallableReference() throws Exception {
+        runTest("../../idea/tests/testData/refactoring/moveTopLevel/kotlin/callableReference/callableReference.test");
+    }
+
     @TestMetadata("kotlin/callsAndCallableRefs/internalUsages/differentSourceAndTargetWithFqNames/differentSourceAndTargetWithFqNames.test")
     public void testKotlin_callsAndCallableRefs_internalUsages_differentSourceAndTargetWithFqNames_DifferentSourceAndTargetWithFqNames() throws Exception {
         runTest("../../idea/tests/testData/refactoring/moveTopLevel/kotlin/callsAndCallableRefs/internalUsages/differentSourceAndTargetWithFqNames/differentSourceAndTargetWithFqNames.test");
@@ -88,6 +93,11 @@ public class K2MoveTopLevelTestGenerated extends AbstractK2MoveTopLevelTest {
     @TestMetadata("kotlin/classWithInitializer/classWithInitializer.test")
     public void testKotlin_classWithInitializer_ClassWithInitializer() throws Exception {
         runTest("../../idea/tests/testData/refactoring/moveTopLevel/kotlin/classWithInitializer/classWithInitializer.test");
+    }
+
+    @TestMetadata("kotlin/classWithPrimaryConstructor/classWithPrimaryConstructor.test")
+    public void testKotlin_classWithPrimaryConstructor_ClassWithPrimaryConstructor() throws Exception {
+        runTest("../../idea/tests/testData/refactoring/moveTopLevel/kotlin/classWithPrimaryConstructor/classWithPrimaryConstructor.test");
     }
 
     @TestMetadata("kotlin/companionExtensionMemberRef/companionExtensionMemberRef.test")
@@ -185,6 +195,11 @@ public class K2MoveTopLevelTestGenerated extends AbstractK2MoveTopLevelTest {
         runTest("../../idea/tests/testData/refactoring/moveTopLevel/kotlin/invokeOperatorInternalUsage/invokeOperatorInternalUsage.test");
     }
 
+    @TestMetadata("kotlin/iteratorOperatorInternalUsage/iteratorOperatorInternalUsage.test")
+    public void testKotlin_iteratorOperatorInternalUsage_IteratorOperatorInternalUsage() throws Exception {
+        runTest("../../idea/tests/testData/refactoring/moveTopLevel/kotlin/iteratorOperatorInternalUsage/iteratorOperatorInternalUsage.test");
+    }
+
     @TestMetadata("kotlin/kt17032/kt17032.test")
     public void testKotlin_kt17032_Kt17032() throws Exception {
         runTest("../../idea/tests/testData/refactoring/moveTopLevel/kotlin/kt17032/kt17032.test");
@@ -225,9 +240,24 @@ public class K2MoveTopLevelTestGenerated extends AbstractK2MoveTopLevelTest {
         runTest("../../idea/tests/testData/refactoring/moveTopLevel/kotlin/moveClassWithImportsRetained/moveClassWithImportsRetained.test");
     }
 
+    @TestMetadata("kotlin/moveClassWithJavaAnnotation/moveClassWithJavaAnnotation.test")
+    public void testKotlin_moveClassWithJavaAnnotation_MoveClassWithJavaAnnotation() throws Exception {
+        runTest("../../idea/tests/testData/refactoring/moveTopLevel/kotlin/moveClassWithJavaAnnotation/moveClassWithJavaAnnotation.test");
+    }
+
     @TestMetadata("kotlin/moveClassWithLongFunction/moveClassWithLongFunction.test")
     public void testKotlin_moveClassWithLongFunction_MoveClassWithLongFunction() throws Exception {
         runTest("../../idea/tests/testData/refactoring/moveTopLevel/kotlin/moveClassWithLongFunction/moveClassWithLongFunction.test");
+    }
+
+    @TestMetadata("kotlin/moveCollectionLiteralUsage/moveCollectionLiteralUsage.test")
+    public void testKotlin_moveCollectionLiteralUsage_MoveCollectionLiteralUsage() throws Exception {
+        runTest("../../idea/tests/testData/refactoring/moveTopLevel/kotlin/moveCollectionLiteralUsage/moveCollectionLiteralUsage.test");
+    }
+
+    @TestMetadata("kotlin/moveDeleteIfOnlyFileAnnotation/moveDeleteIfOnlyFileAnnotation.test")
+    public void testKotlin_moveDeleteIfOnlyFileAnnotation_MoveDeleteIfOnlyFileAnnotation() throws Exception {
+        runTest("../../idea/tests/testData/refactoring/moveTopLevel/kotlin/moveDeleteIfOnlyFileAnnotation/moveDeleteIfOnlyFileAnnotation.test");
     }
 
     @TestMetadata("kotlin/moveEscapedKeyword/moveEscapedKeyword.test")
@@ -250,6 +280,26 @@ public class K2MoveTopLevelTestGenerated extends AbstractK2MoveTopLevelTest {
         runTest("../../idea/tests/testData/refactoring/moveTopLevel/kotlin/moveFromDefaultPackage/moveFromDefaultPackage.test");
     }
 
+    @TestMetadata("kotlin/moveFunctionNameClashErasedTypes/moveFunctionNameClashErasedTypes.test")
+    public void testKotlin_moveFunctionNameClashErasedTypes_MoveFunctionNameClashErasedTypes() throws Exception {
+        runTest("../../idea/tests/testData/refactoring/moveTopLevel/kotlin/moveFunctionNameClashErasedTypes/moveFunctionNameClashErasedTypes.test");
+    }
+
+    @TestMetadata("kotlin/moveFunctionNameClash/moveFunctionNameClash.test")
+    public void testKotlin_moveFunctionNameClash_MoveFunctionNameClash() throws Exception {
+        runTest("../../idea/tests/testData/refactoring/moveTopLevel/kotlin/moveFunctionNameClash/moveFunctionNameClash.test");
+    }
+
+    @TestMetadata("kotlin/moveFunctionNoClashDifferentParameterCount/moveFunctionNoClashDifferentParameterCount.test")
+    public void testKotlin_moveFunctionNoClashDifferentParameterCount_MoveFunctionNoClashDifferentParameterCount() throws Exception {
+        runTest("../../idea/tests/testData/refactoring/moveTopLevel/kotlin/moveFunctionNoClashDifferentParameterCount/moveFunctionNoClashDifferentParameterCount.test");
+    }
+
+    @TestMetadata("kotlin/moveFunctionNoNameClash/moveFunctionNoNameClash.test")
+    public void testKotlin_moveFunctionNoNameClash_MoveFunctionNoNameClash() throws Exception {
+        runTest("../../idea/tests/testData/refactoring/moveTopLevel/kotlin/moveFunctionNoNameClash/moveFunctionNoNameClash.test");
+    }
+
     @TestMetadata("kotlin/moveFunctionToFile/moveFunctionToFile.test")
     public void testKotlin_moveFunctionToFile_MoveFunctionToFile() throws Exception {
         runTest("../../idea/tests/testData/refactoring/moveTopLevel/kotlin/moveFunctionToFile/moveFunctionToFile.test");
@@ -263,6 +313,11 @@ public class K2MoveTopLevelTestGenerated extends AbstractK2MoveTopLevelTest {
     @TestMetadata("kotlin/moveFunctionWithImportsRetained/moveFunctionWithImportsRetained.test")
     public void testKotlin_moveFunctionWithImportsRetained_MoveFunctionWithImportsRetained() throws Exception {
         runTest("../../idea/tests/testData/refactoring/moveTopLevel/kotlin/moveFunctionWithImportsRetained/moveFunctionWithImportsRetained.test");
+    }
+
+    @TestMetadata("kotlin/moveMultipleWithComments/moveMultipleWithComments.test")
+    public void testKotlin_moveMultipleWithComments_MoveMultipleWithComments() throws Exception {
+        runTest("../../idea/tests/testData/refactoring/moveTopLevel/kotlin/moveMultipleWithComments/moveMultipleWithComments.test");
     }
 
     @TestMetadata("kotlin/moveObjectToFile/moveObjectToFile.test")
@@ -315,6 +370,21 @@ public class K2MoveTopLevelTestGenerated extends AbstractK2MoveTopLevelTest {
         runTest("../../idea/tests/testData/refactoring/moveTopLevel/kotlin/moveReferenceToImportedJavaStatic/moveReferenceToImportedJavaStatic.test");
     }
 
+    @TestMetadata("kotlin/moveSealedClassInheritorToSamePackage/moveSealedClassInheritorToSamePackage.test")
+    public void testKotlin_moveSealedClassInheritorToSamePackage_MoveSealedClassInheritorToSamePackage() throws Exception {
+        runTest("../../idea/tests/testData/refactoring/moveTopLevel/kotlin/moveSealedClassInheritorToSamePackage/moveSealedClassInheritorToSamePackage.test");
+    }
+
+    @TestMetadata("kotlin/moveSealedClassInheritor/moveSealedClassInheritor.test")
+    public void testKotlin_moveSealedClassInheritor_MoveSealedClassInheritor() throws Exception {
+        runTest("../../idea/tests/testData/refactoring/moveTopLevel/kotlin/moveSealedClassInheritor/moveSealedClassInheritor.test");
+    }
+
+    @TestMetadata("kotlin/moveSealedClassToSamePackage/moveSealedClassToSamePackage.test")
+    public void testKotlin_moveSealedClassToSamePackage_MoveSealedClassToSamePackage() throws Exception {
+        runTest("../../idea/tests/testData/refactoring/moveTopLevel/kotlin/moveSealedClassToSamePackage/moveSealedClassToSamePackage.test");
+    }
+
     @TestMetadata("kotlin/moveSealedClassWithImplsToAnotherPackage/moveSealedClassWithImplsToAnotherPackage.test")
     public void testKotlin_moveSealedClassWithImplsToAnotherPackage_MoveSealedClassWithImplsToAnotherPackage() throws Exception {
         runTest("../../idea/tests/testData/refactoring/moveTopLevel/kotlin/moveSealedClassWithImplsToAnotherPackage/moveSealedClassWithImplsToAnotherPackage.test");
@@ -325,9 +395,19 @@ public class K2MoveTopLevelTestGenerated extends AbstractK2MoveTopLevelTest {
         runTest("../../idea/tests/testData/refactoring/moveTopLevel/kotlin/moveSealedClassWithImplsToAnotherPackage/moveSealedClassWithNestedImplsToAnotherPackage.test");
     }
 
+    @TestMetadata("kotlin/moveSealedClassWithNestedImplsToAnotherPackageConflict/moveSealedClassWithNestedImplsToAnotherPackageConflict.test")
+    public void testKotlin_moveSealedClassWithNestedImplsToAnotherPackageConflict_MoveSealedClassWithNestedImplsToAnotherPackageConflict() throws Exception {
+        runTest("../../idea/tests/testData/refactoring/moveTopLevel/kotlin/moveSealedClassWithNestedImplsToAnotherPackageConflict/moveSealedClassWithNestedImplsToAnotherPackageConflict.test");
+    }
+
     @TestMetadata("kotlin/moveSealedClassWithNestedImplsToAnotherPackage/moveSealedClassWithNestedImplsToAnotherPackage.test")
     public void testKotlin_moveSealedClassWithNestedImplsToAnotherPackage_MoveSealedClassWithNestedImplsToAnotherPackage() throws Exception {
         runTest("../../idea/tests/testData/refactoring/moveTopLevel/kotlin/moveSealedClassWithNestedImplsToAnotherPackage/moveSealedClassWithNestedImplsToAnotherPackage.test");
+    }
+
+    @TestMetadata("kotlin/moveSealedClass/moveSealedClass.test")
+    public void testKotlin_moveSealedClass_MoveSealedClass() throws Exception {
+        runTest("../../idea/tests/testData/refactoring/moveTopLevel/kotlin/moveSealedClass/moveSealedClass.test");
     }
 
     @TestMetadata("kotlin/moveTypealiasToFile/moveTypealiasToFile.test")
@@ -435,6 +515,11 @@ public class K2MoveTopLevelTestGenerated extends AbstractK2MoveTopLevelTest {
         runTest("../../idea/tests/testData/refactoring/moveTopLevel/kotlin/singletonsAndStatics/singletonsAndStatics.test");
     }
 
+    @TestMetadata("kotlin/staticUsageFromSuperClass/staticUsageFromSuperClass.test")
+    public void testKotlin_staticUsageFromSuperClass_StaticUsageFromSuperClass() throws Exception {
+        runTest("../../idea/tests/testData/refactoring/moveTopLevel/kotlin/staticUsageFromSuperClass/staticUsageFromSuperClass.test");
+    }
+
     @TestMetadata("kotlin/superReferences/superReferences.test")
     public void testKotlin_superReferences_SuperReferences() throws Exception {
         runTest("../../idea/tests/testData/refactoring/moveTopLevel/kotlin/superReferences/superReferences.test");
@@ -448,5 +533,15 @@ public class K2MoveTopLevelTestGenerated extends AbstractK2MoveTopLevelTest {
     @TestMetadata("kotlin/unaffectedQualifiedReferences/unaffectedQualifiedReferences.test")
     public void testKotlin_unaffectedQualifiedReferences_UnaffectedQualifiedReferences() throws Exception {
         runTest("../../idea/tests/testData/refactoring/moveTopLevel/kotlin/unaffectedQualifiedReferences/unaffectedQualifiedReferences.test");
+    }
+
+    @TestMetadata("kotlin/unaryOperatorReference/unaryOperatorReference.test")
+    public void testKotlin_unaryOperatorReference_UnaryOperatorReference() throws Exception {
+        runTest("../../idea/tests/testData/refactoring/moveTopLevel/kotlin/unaryOperatorReference/unaryOperatorReference.test");
+    }
+
+    @TestMetadata("kotlin/usageInJavaExtendsList/usageInJavaExtendsList.test")
+    public void testKotlin_usageInJavaExtendsList_UsageInJavaExtendsList() throws Exception {
+        runTest("../../idea/tests/testData/refactoring/moveTopLevel/kotlin/usageInJavaExtendsList/usageInJavaExtendsList.test");
     }
 }

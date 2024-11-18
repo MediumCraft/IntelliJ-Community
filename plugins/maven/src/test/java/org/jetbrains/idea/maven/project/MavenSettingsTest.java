@@ -38,32 +38,12 @@ public class MavenSettingsTest extends MavenTestCase {
     assertEquals("changed ", log[0]);
   }
 
-  public void testCloningImportingSettingsWithoutListeners() {
-    final String[] log = new String[]{""};
-
-    MavenImportingSettings s = new MavenImportingSettings();
-    s.addListener(new MavenImportingSettings.Listener() {
-      @Override
-      public void createModuleForAggregatorsChanged() {
-        log[0] += "changed ";
-      }
-
-      @Override
-      public void updateAllProjectStructure() {
-      }
-    });
-
-    s.setCreateModulesForAggregators(true);
-    s.setCreateModulesForAggregators(false);
-    assertEquals("changed ", log[0]);
-
-    s.clone().setCreateModulesForAggregators(true);
-    s.clone().setCreateModulesForAggregators(false);
-    assertEquals("changed ", log[0]);
-  }
-
   public void testImportingSettings() {
-    allowAccessToDirsIfExists(System.getenv("JAVA_HOME"));
+    var javaHome = System.getenv("JAVA_HOME");
+    if (javaHome != null) {
+      allowAccessToDirsIfExists(System.getenv("JAVA_HOME"));
+    }
+
     assertEquals(new MavenImportingSettings(), new MavenImportingSettings());
     MavenImportingConfigurable importingConfigurable = new MavenImportingConfigurable(getProject());
     importingConfigurable.reset();

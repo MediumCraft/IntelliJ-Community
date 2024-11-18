@@ -270,7 +270,7 @@ class RepositoryLibraryUtils(private val project: Project, private val cs: Corou
 
     if (entity.propertiesXmlTag == newXmlTag) return false
 
-    builder.modifyEntity(entity) {
+    builder.modifyLibraryPropertiesEntity(entity) {
       propertiesXmlTag = newXmlTag
     }
     return true
@@ -587,6 +587,6 @@ class RepositoryLibraryUtils(private val project: Project, private val cs: Corou
 
 private fun LibraryPropertiesEntity.isRepositoryLibraryProperties() = propertiesXmlTag != null && REPOSITORY_LIBRARY_KIND.kindId == library.typeId?.name
 
-private fun LibraryPropertiesEntity.toRepositoryLibraryProperties(): RepositoryLibraryProperties? {
+fun LibraryPropertiesEntity.toRepositoryLibraryProperties(): RepositoryLibraryProperties? {
   return if (isRepositoryLibraryProperties()) deserialize(JDOMUtil.load(checkNotNull(propertiesXmlTag))) else null
 }

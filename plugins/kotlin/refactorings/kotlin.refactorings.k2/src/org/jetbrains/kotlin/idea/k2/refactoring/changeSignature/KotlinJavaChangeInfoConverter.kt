@@ -7,6 +7,7 @@ import com.intellij.psi.util.PsiSuperMethodUtil
 import com.intellij.refactoring.changeSignature.*
 import com.intellij.refactoring.util.CanonicalTypes
 import com.intellij.usageView.UsageInfo
+import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
 import org.jetbrains.kotlin.analysis.api.analyze
 import org.jetbrains.kotlin.analysis.api.permissions.KaAllowAnalysisFromWriteAction
 import org.jetbrains.kotlin.analysis.api.permissions.KaAllowAnalysisOnEdt
@@ -17,7 +18,7 @@ import org.jetbrains.kotlin.asJava.unwrapped
 import org.jetbrains.kotlin.descriptors.Visibilities
 import org.jetbrains.kotlin.descriptors.Visibility
 import org.jetbrains.kotlin.idea.KotlinLanguage
-import org.jetbrains.kotlin.idea.base.psi.isExpectDeclaration
+import org.jetbrains.kotlin.psi.psiUtil.isExpectDeclaration
 import org.jetbrains.kotlin.idea.refactoring.changeSignature.KotlinValVar
 import org.jetbrains.kotlin.load.java.JvmAbi
 import org.jetbrains.kotlin.psi.*
@@ -160,15 +161,15 @@ class KotlinJavaChangeInfoConverter: JavaChangeInfoConverter {
         )
     }
 
-    @OptIn(KaAllowAnalysisOnEdt::class, KaAllowAnalysisFromWriteAction::class)
+    @OptIn(KaAllowAnalysisOnEdt::class, KaAllowAnalysisFromWriteAction::class, KaExperimentalApi::class)
     private fun createPsiType(ktTypeText: String, originalFunction: PsiElement, unitToVoid: Boolean = false): PsiType {
         val project = originalFunction.project
         val codeFragment = KtPsiFactory(project).createTypeCodeFragment(ktTypeText, originalFunction)
         return allowAnalysisOnEdt {
             allowAnalysisFromWriteAction {
                 analyze(codeFragment) {
-                    val ktType = codeFragment.getContentElement()?.getKtType()!!
-                    if (unitToVoid && ktType.isUnit) PsiTypes.voidType() else ktType.asPsiType(originalFunction, true)!!
+                    val ktType = codeFragment.getContentElement()?.type!!
+                    if (unitToVoid && ktType.isUnitType) PsiTypes.voidType() else ktType.asPsiType(originalFunction, true)!!
                 }
             }
         }
@@ -260,20 +261,20 @@ class KotlinJavaChangeInfoConverter: JavaChangeInfoConverter {
         val psiMethod = changeInfo.method
         val oldName = if (p.oldIndex >= 0) changeInfo.oldParameterNames[p.oldIndex] else p.name
         return KotlinParameterInfo(
-            p.oldIndex,
-            KotlinTypeInfo(p.typeWrapper.getType(psiMethod).canonicalText, useSiteKtElement),
-            oldName,
-            KotlinValVar.None,
-            p.defaultValue?.let {
+            originalIndex = p.oldIndex,
+            originalType = KotlinTypeInfo(p.typeWrapper.getType(psiMethod).canonicalText, useSiteKtElement),
+            name = oldName,
+            valOrVar = KotlinValVar.None,
+            defaultValueForCall = p.defaultValue?.let {
                 try {
                     KtPsiFactory(psiMethod.project).createExpression(it)
                 } catch (_: Throwable) {
                     null
                 }
             },
-            false,
-            null,
-            useSiteKtElement
+            defaultValueAsDefaultParameter = false,
+            defaultValue = null,
+            context = useSiteKtElement
         ).apply {
             name = p.name
         }

@@ -3,7 +3,6 @@
 
 package com.intellij.platform.ijent
 
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.util.containers.map2Array
 
@@ -16,17 +15,8 @@ fun getIjentGrpcArgv(
   selfDeleteOnExit: Boolean = false,
   usrBinEnv: String = "/usr/bin/env",
 ): List<String> {
-  val (debuggingLogLevel, backtrace) = when {
-    ApplicationManager.getApplication()?.isUnitTestMode == true -> "trace" to true
-    LOG.isTraceEnabled -> "trace" to true
-    LOG.isDebugEnabled -> "debug" to true
-    else -> "info" to false
-  }
-
   return listOfNotNull(
     usrBinEnv,
-    "RUST_LOG=ijent=$debuggingLogLevel",
-    if (backtrace) "RUST_BACKTRACE=1" else null,
     *additionalEnv.entries.map2Array { (k, v) -> "$k=$v" },
     // "gdbserver", "0.0.0.0:12345",  // https://sourceware.org/gdb/onlinedocs/gdb/Connecting.html
     remotePathToIjent,

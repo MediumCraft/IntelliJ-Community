@@ -1,4 +1,4 @@
-// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.kotlin.idea.k2.refactoring.safeDelete
 
 import com.intellij.openapi.actionSystem.ex.ActionUtil
@@ -23,14 +23,13 @@ import com.intellij.util.Processor
 import com.intellij.util.containers.map2Array
 import org.jetbrains.annotations.TestOnly
 import org.jetbrains.kotlin.analysis.api.analyze
-import org.jetbrains.kotlin.analysis.api.symbols.KtCallableSymbol
-import org.jetbrains.kotlin.analysis.api.symbols.KtClassOrObjectSymbol
-import org.jetbrains.kotlin.analysis.api.symbols.KtSymbol
-import org.jetbrains.kotlin.analysis.api.symbols.markers.KtSymbolWithModality
+import org.jetbrains.kotlin.analysis.api.symbols.KaCallableSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaClassSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaSymbolModality
+import org.jetbrains.kotlin.analysis.api.symbols.KaSymbol
 import org.jetbrains.kotlin.asJava.elements.KtLightMethod
 import org.jetbrains.kotlin.asJava.toLightMethods
 import org.jetbrains.kotlin.asJava.unwrapped
-import org.jetbrains.kotlin.descriptors.Modality
 import org.jetbrains.kotlin.idea.base.analysis.api.utils.analyzeInModalWindow
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.k2.refactoring.KotlinFirRefactoringsSettings
@@ -128,12 +127,12 @@ class KotlinFirSafeDeleteProcessor : SafeDeleteProcessorDelegateBase() {
         val containingClass = element.containingClass()
         if (containingClass != null) {
             analyze(containingClass) {
-                val elementClassSymbol = containingClass.getSymbol() as KtClassOrObjectSymbol
+                val elementClassSymbol = containingClass.symbol as KaClassSymbol
 
-                fun isMultipleInheritance(function: KtSymbol): Boolean {
-                    val superMethods = (function as? KtCallableSymbol)?.getDirectlyOverriddenSymbols() ?: return false
+                fun isMultipleInheritance(function: KaSymbol): Boolean {
+                    val superMethods = (function as? KaCallableSymbol)?.directlyOverriddenSymbols ?: return false
                     return superMethods.any {
-                        val superClassSymbol = it.getContainingSymbol() as? KtClassOrObjectSymbol ?: return@any false
+                        val superClassSymbol = it.containingDeclaration as? KaClassSymbol ?: return@any false
                         val superMethod = it.psi ?: return@any false
                         return@any !isInside(superMethod) && !superClassSymbol.isSubClassOf(elementClassSymbol)
                     }
@@ -144,8 +143,8 @@ class KotlinFirSafeDeleteProcessor : SafeDeleteProcessorDelegateBase() {
                     val original = m.unwrapped
                     if (original != null && !allElementsToDelete.contains(original)) {
                         val oSymbol = when (original) {
-                            is KtDeclaration -> original.getSymbol()
-                            is PsiMember -> original.getCallableSymbol()
+                            is KtDeclaration -> original.symbol
+                            is PsiMember -> original.callableSymbol
                             else -> null
                         }
 
@@ -304,9 +303,8 @@ class KotlinFirSafeDeleteProcessor : SafeDeleteProcessorDelegateBase() {
             if (modifierList != null && modifierList.hasModifier(KtTokens.ABSTRACT_KEYWORD)) return null
 
             return analyzeInModalWindow(element as KtDeclaration, RefactoringBundle.message("detecting.possible.conflicts")) {
-                (element.getSymbol() as? KtCallableSymbol)?.getAllOverriddenSymbols()
-                    ?.asSequence()
-                    ?.filter { (it as? KtSymbolWithModality)?.modality == Modality.ABSTRACT }
+                (element.symbol as? KaCallableSymbol)?.allOverriddenSymbols
+                    ?.filter { it.modality == KaSymbolModality.ABSTRACT }
                     ?.mapNotNull { it.psi }
                     ?.mapTo(ArrayList()) {
                         KotlinK2RefactoringsBundle.message(

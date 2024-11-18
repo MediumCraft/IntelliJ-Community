@@ -6,7 +6,6 @@ import com.intellij.collaboration.async.launchNow
 import com.intellij.diff.util.DiffDrawUtil
 import com.intellij.diff.util.DiffUtil
 import com.intellij.icons.AllIcons
-import com.intellij.openapi.application.EDT
 import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.application.asContextElement
 import com.intellij.openapi.editor.CustomFoldRegion
@@ -32,7 +31,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
-import org.jetbrains.annotations.ApiStatus
 import java.awt.Graphics
 import java.awt.Rectangle
 import java.awt.event.MouseEvent
@@ -42,7 +40,6 @@ import kotlin.properties.Delegates.observable
 /**
  * Draws and handles review controls in gutter
  */
-@ApiStatus.Internal
 class CodeReviewEditorGutterControlsRenderer
 private constructor(private val model: CodeReviewEditorGutterControlsModel,
                     private val editor: EditorEx)
@@ -114,6 +111,16 @@ private constructor(private val model: CodeReviewEditorGutterControlsModel,
     val yShift = if (lineData.hasComments) editor.lineHeight else 0
     // do not paint if there's not enough space
     if (yShift > 0 && lineData.yRangeWithInlays.last - lineData.yRangeWithInlays.first < yShift + editor.lineHeight) return
+
+    val hasCommentsInFoldedRegion = lineData.foldedRegion?.let { fRegion ->
+      val linesWithComments = state?.linesWithComments ?: return@let false
+      val (frStart, frEnd) = with(editor.document) {
+        getLineNumber(fRegion.startOffset) to getLineNumber(fRegion.endOffset)
+      }
+
+      (frStart..frEnd).any { line -> line in linesWithComments }
+    } ?: false
+    if (hasCommentsInFoldedRegion) return
 
     val rawIcon = if (lineData.columnHovered) AllIcons.General.InlineAddHover else AllIcons.General.InlineAdd
     val icon = EditorUIUtil.scaleIcon(rawIcon, editor)

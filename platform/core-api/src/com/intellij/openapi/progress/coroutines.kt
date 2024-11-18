@@ -8,6 +8,7 @@ import com.intellij.concurrency.installThreadContext
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.application.contextModality
+import com.intellij.openapi.application.isLockStoredInContext
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.util.Computable
 import com.intellij.openapi.util.IntellijInternalApi
@@ -17,6 +18,7 @@ import com.intellij.util.concurrency.annotations.RequiresBackgroundThread
 import com.intellij.util.concurrency.annotations.RequiresBlockingContext
 import com.intellij.util.ui.EDT
 import kotlinx.coroutines.*
+import kotlinx.coroutines.internal.intellij.IntellijCoroutines
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.ApiStatus.Internal
 import kotlin.coroutines.ContinuationInterceptor
@@ -32,7 +34,7 @@ private val LOG = Logger.getInstance("#com.intellij.openapi.progress")
  * This function might suspend if the coroutine is paused,
  * or yield if the coroutine has a lower priority while a higher priority task is running.
  *
- * @throws CancellationException if the coroutine is canceled; the exception is also thrown if coroutine is canceled while suspended
+ * @throws CancellationException if the coroutine is canceled. The exception is also thrown if the coroutine is canceled while suspended.
  * @see ensureActive
  * @see coroutineSuspender
  */
@@ -118,18 +120,36 @@ suspend fun checkCanceled() {
 @RequiresBackgroundThread(generateAssertion = false)
 @RequiresBlockingContext
 fun <T> runBlockingCancellable(action: suspend CoroutineScope.() -> T): T {
-  return runBlockingCancellable(allowOrphan = false, action)
+  return runBlockingCancellable(allowOrphan = false, compensateParallelism = true, action)
 }
 
-private fun <T> runBlockingCancellable(allowOrphan: Boolean, action: suspend CoroutineScope.() -> T): T {
+/**
+ * Do not use this overload unless you absolutely certain that you should.
+ * Consider using [runBlockingCancellable] without [compensateParallelism] argument instead.
+ */
+@Internal
+@InternalCoroutinesApi
+@RequiresBackgroundThread(generateAssertion = false)
+@RequiresBlockingContext
+fun <T> runBlockingCancellable(compensateParallelism: Boolean, action: suspend CoroutineScope.() -> T): T {
+  return runBlockingCancellable(allowOrphan = false, compensateParallelism = compensateParallelism, action)
+}
+
+private fun <T> runBlockingCancellable(allowOrphan: Boolean, compensateParallelism: Boolean, action: suspend CoroutineScope.() -> T): T {
   assertBackgroundThreadOrWriteAction()
   return prepareThreadContext { ctx ->
     if (!allowOrphan && ctx[Job] == null && !Cancellation.isInNonCancelableSection()) {
       LOG.error(IllegalStateException("There is no ProgressIndicator or Job in this thread, the current job is not cancellable."))
     }
     try {
-      @Suppress("RAW_RUN_BLOCKING")
-      runBlocking(ctx + readActionContext(), action)
+      if (compensateParallelism) {
+        @OptIn(InternalCoroutinesApi::class)
+        IntellijCoroutines.runBlockingWithParallelismCompensation(ctx + readActionContext(), action)
+      }
+      else {
+        @Suppress("RAW_RUN_BLOCKING")
+        runBlocking(ctx + readActionContext(), action)
+      }
     }
     catch (pce: ProcessCanceledException) {
       throw pce
@@ -153,7 +173,19 @@ private fun <T> runBlockingCancellable(allowOrphan: Boolean, action: suspend Cor
 @RequiresBackgroundThread(generateAssertion = false)
 @RequiresBlockingContext
 fun <T> runBlockingMaybeCancellable(action: suspend CoroutineScope.() -> T): T {
-  return runBlockingCancellable(allowOrphan = true, action)
+  return runBlockingCancellable(allowOrphan = true, compensateParallelism = true, action)
+}
+
+/**
+ * Do not use this overload unless you absolutely certain that you should.
+ * Consider using [runBlockingMaybeCancellable] without the [compensateParallelism] argument instead.
+ */
+@Internal
+@InternalCoroutinesApi
+@RequiresBackgroundThread(generateAssertion = false)
+@RequiresBlockingContext
+fun <T> runBlockingMaybeCancellable(compensateParallelism: Boolean, action: suspend CoroutineScope.() -> T): T {
+  return runBlockingCancellable(allowOrphan = true, compensateParallelism = compensateParallelism, action)
 }
 
 @Deprecated(
@@ -294,6 +326,7 @@ fun currentThreadCoroutineScope() : CoroutineScope {
         | If the transition from coroutines to blocking code happens in the same stack frame as the call to this function, the transition should use `blockingContext`.
         | If the transition occurs in the different stack frame, then the transition should use `blockingContextScope` to set up a `Job` on this frame.""".trimMargin()))
   }
+  @Suppress("SSBasedInspection")
   return CoroutineScope(threadContext)
 }
 
@@ -332,7 +365,7 @@ internal fun <T> blockingContextInner(currentContext: CoroutineContext, action: 
  * @see runBlockingCancellable
  * @see ProgressManager.runProcess
  */
-@Internal
+@ApiStatus.Experimental
 suspend fun <T> coroutineToIndicator(action: () -> T): T {
   val ctx = coroutineContext
   return contextToIndicator(ctx, action)
@@ -447,8 +480,16 @@ private fun assertBackgroundThreadOrWriteAction() {
 @Internal
 fun readActionContext(): CoroutineContext {
   val application = ApplicationManager.getApplication()
-  return if (application != null && application.isReadAccessAllowed) {
-    RunBlockingUnderReadActionMarker
+  return if (application != null) {
+    if (isLockStoredInContext) {
+      application.lockStateAsCoroutineContext
+    }
+    else if (application.isReadAccessAllowed) {
+      RunBlockingUnderReadActionMarker
+    }
+    else {
+      EmptyCoroutineContext
+    }
   }
   else {
     EmptyCoroutineContext
@@ -458,7 +499,13 @@ fun readActionContext(): CoroutineContext {
 @IntellijInternalApi
 @Internal
 fun CoroutineContext.isRunBlockingUnderReadAction(): Boolean {
-  return this[RunBlockingUnderReadActionMarker] != null
+  return if (isLockStoredInContext) {
+    val application = ApplicationManager.getApplication()
+    application != null && application.hasLockStateInContext(this)
+  }
+  else {
+    this[RunBlockingUnderReadActionMarker] != null
+  }
 }
 
 private object RunBlockingUnderReadActionMarker

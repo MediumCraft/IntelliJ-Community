@@ -16,6 +16,8 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.diagnostic.ReportingClassSubstitutor;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.progress.ProcessCanceledException;
+import com.intellij.openapi.project.DumbService;
+import com.intellij.openapi.project.PossiblyDumbAware;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Iconable;
 import com.intellij.psi.PsiElement;
@@ -29,7 +31,8 @@ import org.jetbrains.annotations.TestOnly;
 
 import java.util.List;
 
-public final class QuickFixWrapper implements IntentionAction, PriorityAction, CustomizableIntentionAction, ReportingClassSubstitutor {
+public final class QuickFixWrapper implements IntentionAction, PriorityAction, CustomizableIntentionAction, ReportingClassSubstitutor,
+                                              PossiblyDumbAware {
   private static final Logger LOG = Logger.getInstance(QuickFixWrapper.class);
 
   private final ProblemDescriptor myDescriptor;
@@ -173,7 +176,7 @@ public final class QuickFixWrapper implements IntentionAction, PriorityAction, C
    * @deprecated use {@link QuickFixWrapper#unwrap(CommonIntentionAction)} instead. Avoid {@code instanceof QuickFixWrapper} checks,
    * as the implementation may be different in the future
    */
-  @Deprecated
+  @Deprecated(forRemoval = true)
   public @NotNull LocalQuickFix getFix() {
     return myFix;
   }
@@ -308,5 +311,10 @@ public final class QuickFixWrapper implements IntentionAction, PriorityAction, C
     public String toString() {
       return "ModCommandQuickFixAction[fix=" + myFix + "]";
     }
+  }
+
+  @Override
+  public boolean isDumbAware() {
+    return DumbService.isDumbAware(myFix);
   }
 }

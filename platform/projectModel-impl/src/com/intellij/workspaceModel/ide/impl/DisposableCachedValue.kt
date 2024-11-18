@@ -22,7 +22,7 @@ import java.util.concurrent.LinkedBlockingQueue
 import kotlin.system.measureTimeMillis
 
 @ApiStatus.Obsolete
-class DisposableCachedValue<R : Disposable>(
+internal class DisposableCachedValue<R : Disposable>(
   private val entityStorage: () -> VersionedEntityStorage,
   private val cachedValue: CachedValue<R>,
   private val cacheName: String = "-",
@@ -88,7 +88,7 @@ class DisposableCachedValue<R : Disposable>(
  * This approach is rather hacky and should be replaced with a different solution based on Workspace Model read trace
  */
 @Service(Service.Level.PROJECT)
-class CachedValuesDisposer(project: Project) : Disposable {
+internal class CachedValuesDisposer(project: Project) : Disposable {
   private val toBeDisposedValues = LinkedBlockingQueue<Disposable>()
 
   init {

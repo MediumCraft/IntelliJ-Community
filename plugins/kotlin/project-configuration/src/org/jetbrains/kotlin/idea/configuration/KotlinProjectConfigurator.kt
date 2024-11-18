@@ -8,6 +8,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.DependencyScope
 import com.intellij.openapi.roots.ExternalLibraryDescriptor
 import com.intellij.psi.PsiElement
+import com.intellij.util.concurrency.annotations.RequiresEdt
 import org.jetbrains.kotlin.config.ApiVersion
 import org.jetbrains.kotlin.config.LanguageFeature
 import org.jetbrains.kotlin.idea.base.projectStructure.ModuleSourceRootGroup
@@ -40,6 +41,11 @@ class AutoConfigurationSettings(
 )
 
 interface KotlinProjectConfigurator {
+
+    /**
+     * Returns false if the Kotlin not configured dialog should be suppressed even when Kotlin is not configured.
+     */
+    fun shouldShowNotConfiguredDialog(): Boolean = true
 
     /**
      * Checks if the [module] can be automatically configured with Kotlin.
@@ -86,6 +92,7 @@ interface KotlinProjectConfigurator {
         return emptySet()
     }
 
+    @RequiresEdt
     @JvmSuppressWildcards
     fun configure(project: Project, excludeModules: Collection<Module>)
 

@@ -1,4 +1,4 @@
-// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.workspace.storage.impl.url
 
 import com.intellij.openapi.util.io.FileUtil
@@ -12,11 +12,13 @@ import it.unimi.dsi.fastutil.Hash.Strategy
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap
 import it.unimi.dsi.fastutil.ints.IntArrayList
 import it.unimi.dsi.fastutil.objects.ObjectOpenCustomHashSet
+import org.jetbrains.annotations.ApiStatus
 
-public open class VirtualFileUrlManagerImpl : VirtualFileUrlManager {
+@ApiStatus.Internal
+public open class VirtualFileUrlManagerImpl(isRootDirCaseSensitive: Boolean = false) : VirtualFileUrlManager {
   private val idGenerator = IntIdGenerator()
   private var emptyUrl: VirtualFileUrl? = null
-  private val fileNameStore = VirtualFileNameStore()
+  private val fileNameStore = VirtualFileNameStore(isRootDirCaseSensitive)
   private val id2NodeMapping = Int2ObjectOpenHashMap<FilePathNode>()
   private val rootNode = FilePathNode(0, 0)
 
@@ -94,6 +96,12 @@ public open class VirtualFileUrlManagerImpl : VirtualFileUrlManager {
     parentVfu as VirtualFileUrlImpl
     return add(relativePath, id2NodeMapping.get(parentVfu.id))
   }
+
+  /**
+   * Returns class of instances produced by [createVirtualFileUrl], it's used during serialization. 
+   */
+  public open val virtualFileUrlImplementationClass: Class<out VirtualFileUrl>
+    get() = VirtualFileUrlImpl::class.java
 
   protected open fun createVirtualFileUrl(id: Int, manager: VirtualFileUrlManagerImpl): VirtualFileUrl {
     return VirtualFileUrlImpl(id, manager)

@@ -37,7 +37,6 @@ public final class PlatformUtils {
   public static final String APPCODE_PREFIX = "AppCode";
   public static final String AQUA_PREFIX = "Aqua";
   public static final String CLION_PREFIX = "CLion";
-  public static final String MOBILE_IDE_PREFIX = "MobileIDE";
   public static final String PYCHARM_PREFIX = "Python";
   public static final String PYCHARM_CE_PREFIX = "PyCharmCore";
   public static final String DATASPELL_PREFIX = "DataSpell";
@@ -60,11 +59,10 @@ public final class PlatformUtils {
   public static final String CWM_GUEST_PREFIX = "CodeWithMeGuest";
   public static final String JETBRAINS_CLIENT_PREFIX = "JetBrainsClient";
   public static final String GATEWAY_PREFIX = "Gateway";
-  public static final String QODANA_PREFIX = "Qodana";
 
   @SuppressWarnings("SSBasedInspection") private static final Set<String> COMMERCIAL_EDITIONS = new HashSet<>(Arrays.asList(
-    IDEA_PREFIX, APPCODE_PREFIX, CLION_PREFIX, MOBILE_IDE_PREFIX, PYCHARM_PREFIX, DATASPELL_PREFIX, RUBY_PREFIX, PHP_PREFIX, WEB_PREFIX,
-    DBE_PREFIX, RIDER_PREFIX, GOIDE_PREFIX));
+    IDEA_PREFIX, APPCODE_PREFIX, CLION_PREFIX, PYCHARM_PREFIX, DATASPELL_PREFIX, RUBY_PREFIX, PHP_PREFIX, WEB_PREFIX,
+    DBE_PREFIX, RIDER_PREFIX, GOIDE_PREFIX, RUSTROVER_PREFIX, AQUA_PREFIX));
 
   public static @NotNull String getPlatformPrefix() {
     return getPlatformPrefix(IDEA_PREFIX);
@@ -137,12 +135,8 @@ public final class PlatformUtils {
     return is(CLION_PREFIX);
   }
 
-  public static boolean isMobileIde() {
-    return is(MOBILE_IDE_PREFIX);
-  }
-
   public static boolean isCidr() {
-    return isAppCode() || isCLion() || isMobileIde();
+    return isAppCode() || isCLion();
   }
 
   public static boolean isPyCharm() {
@@ -211,6 +205,10 @@ public final class PlatformUtils {
 
   public static boolean isRustRover() {
     return is(RUSTROVER_PREFIX);
+  }
+
+  public static boolean isQodana() {
+    return SystemProperties.getBooleanProperty("qodana.application", false);
   }
 
   private static boolean is(String idePrefix) {

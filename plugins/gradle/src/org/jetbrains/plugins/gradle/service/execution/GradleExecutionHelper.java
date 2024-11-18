@@ -2,7 +2,6 @@
 package org.jetbrains.plugins.gradle.service.execution;
 
 import com.intellij.execution.configurations.GeneralCommandLine;
-import com.intellij.execution.target.TargetEnvironmentConfiguration;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationInfo;
 import com.intellij.openapi.application.ApplicationManager;
@@ -15,7 +14,6 @@ import com.intellij.openapi.externalSystem.model.task.ExternalSystemTaskNotifica
 import com.intellij.openapi.externalSystem.service.execution.ExternalSystemExecutionAware;
 import com.intellij.openapi.externalSystem.service.execution.ExternalSystemJdkUtil;
 import com.intellij.openapi.externalSystem.service.execution.ExternalSystemRunConfiguration;
-import com.intellij.openapi.externalSystem.service.execution.TargetEnvironmentConfigurationProvider;
 import com.intellij.openapi.externalSystem.util.ExternalSystemTelemetryUtil;
 import com.intellij.openapi.externalSystem.util.OutputWrapper;
 import com.intellij.openapi.progress.ProcessCanceledException;
@@ -42,7 +40,7 @@ import org.jetbrains.plugins.gradle.properties.GradleProperties;
 import org.jetbrains.plugins.gradle.properties.GradlePropertiesFile;
 import org.jetbrains.plugins.gradle.properties.models.Property;
 import org.jetbrains.plugins.gradle.service.execution.cmd.GradleCommandLineOptionsProvider;
-import org.jetbrains.plugins.gradle.service.project.GradleOperationHelperExtension;
+import org.jetbrains.plugins.gradle.service.project.GradleExecutionHelperExtension;
 import org.jetbrains.plugins.gradle.settings.GradleExecutionSettings;
 import org.jetbrains.plugins.gradle.util.GradleConstants;
 import org.jetbrains.plugins.gradle.util.cmd.node.GradleCommandLine;
@@ -58,30 +56,6 @@ import static org.jetbrains.plugins.gradle.GradleConnectorService.withGradleConn
 public class GradleExecutionHelper {
 
   private static final Logger LOG = Logger.getInstance(GradleExecutionHelper.class);
-
-  public @NotNull BuildLauncher getBuildLauncher(
-    @NotNull ProjectConnection connection,
-    @NotNull ExternalSystemTaskId id,
-    @NotNull List<String> tasksAndArguments,
-    @NotNull GradleExecutionSettings settings,
-    @NotNull ExternalSystemTaskNotificationListener listener
-  ) {
-    BuildLauncher operation = connection.newBuild();
-    prepare(connection, operation, id, tasksAndArguments, settings, listener);
-    return operation;
-  }
-
-  public @NotNull TestLauncher getTestLauncher(
-    @NotNull ProjectConnection connection,
-    @NotNull ExternalSystemTaskId id,
-    @NotNull List<String> tasksAndArguments,
-    @NotNull GradleExecutionSettings settings,
-    @NotNull ExternalSystemTaskNotificationListener listener
-  ) {
-    var operation = connection.newTestLauncher();
-    prepare(connection, operation, id, tasksAndArguments, settings, listener);
-    return operation;
-  }
 
   public <T> T execute(@NotNull String projectPath,
                        @Nullable GradleExecutionSettings settings,
@@ -101,6 +75,7 @@ public class GradleExecutionHelper {
       projectDir = projectPathFile.getParent();
       if (settings != null) {
         List<String> arguments = settings.getArguments();
+        // Setting the custom build file location is deprecated since Gradle 7.6, see IDEA-359161 for more details.
         if (!arguments.contains("-b") && !arguments.contains("--build-file")) {
           settings.withArguments("-b", projectPath);
         }
@@ -128,21 +103,12 @@ public class GradleExecutionHelper {
       });
   }
 
-  public static void prepare(
+  @ApiStatus.Internal
+  public static void prepareForExecution(
     @NotNull ProjectConnection connection,
     @NotNull LongRunningOperation operation,
+    @NotNull CancellationToken cancellationToken,
     @NotNull ExternalSystemTaskId id,
-    @NotNull GradleExecutionSettings settings,
-    @NotNull ExternalSystemTaskNotificationListener listener
-  ) {
-    prepare(connection, operation, id, Collections.emptyList(), settings, listener);
-  }
-
-  private static void prepare(
-    @NotNull ProjectConnection connection,
-    @NotNull LongRunningOperation operation,
-    @NotNull ExternalSystemTaskId id,
-    @NotNull List<String> tasksAndArguments,
     @NotNull GradleExecutionSettings settings,
     @NotNull ExternalSystemTaskNotificationListener listener
   ) {
@@ -156,18 +122,21 @@ public class GradleExecutionHelper {
 
     setupLogging(settings, buildEnvironment);
 
-    setupArguments(operation, tasksAndArguments, settings);
+    setupArguments(operation, settings);
 
     setupEnvironment(operation, settings);
 
-    setupJavaHome(operation, settings);
+    setupJavaHome(operation, settings, id);
 
     setupProgressListeners(operation, settings, id, listener, buildEnvironment);
 
     setupStandardIO(operation, settings, id, listener);
 
-    GradleOperationHelperExtension.EP_NAME
-      .forEachExtensionSafe(proc -> proc.prepareForExecution(id, operation, settings, buildEnvironment));
+    operation.withCancellationToken(cancellationToken);
+
+    GradleExecutionHelperExtension.EP_NAME.forEachExtensionSafe(proc -> {
+      proc.prepareForExecution(id, operation, settings, buildEnvironment);
+    });
   }
 
   private static void clearSystemProperties(LongRunningOperation operation) {
@@ -254,9 +223,12 @@ public class GradleExecutionHelper {
 
   private static void setupJavaHome(
     @NotNull LongRunningOperation operation,
-    @NotNull GradleExecutionSettings settings
+    @NotNull GradleExecutionSettings settings,
+    @NotNull ExternalSystemTaskId id
   ) {
-    final String javaHome = settings.getJavaHome();
+    var javaHome = GradleDaemonJvmHelper.isExecutingUpdateDaemonJvmTask(settings)
+                   ? GradleDaemonJvmHelper.getGradleJvmForUpdateDaemonJvmTask(id)
+                   : settings.getJavaHome();
     if (javaHome != null && new File(javaHome).isDirectory()) {
       LOG.debug("Java home to set for Gradle operation: " + javaHome);
       operation.setJavaHome(new File(javaHome));
@@ -265,14 +237,9 @@ public class GradleExecutionHelper {
 
   private static void setupArguments(
     @NotNull LongRunningOperation operation,
-    @NotNull List<String> tasksAndArguments,
     @NotNull GradleExecutionSettings settings
   ) {
-    var commandLine = GradleCommandLineUtil.parseCommandLine(
-      tasksAndArguments,
-      settings.getArguments()
-    );
-    commandLine = fixUpGradleCommandLine(commandLine);
+    var commandLine = fixUpGradleCommandLine(settings.getCommandLine());
 
     LOG.info("Passing command-line to Gradle Tooling API: " +
              StringUtil.join(obfuscatePasswordParameters(commandLine.getTokens()), " "));
@@ -413,10 +380,8 @@ public class GradleExecutionHelper {
     @NotNull LongRunningOperation operation,
     @NotNull GradleExecutionSettings settings
   ) {
-    TargetEnvironmentConfigurationProvider environmentConfigurationProvider =
-      ExternalSystemExecutionAware.Companion.getEnvironmentConfigurationProvider(settings);
-    TargetEnvironmentConfiguration environmentConfiguration =
-      environmentConfigurationProvider != null ? environmentConfigurationProvider.getEnvironmentConfiguration() : null;
+    var environmentConfigurationProvider = ExternalSystemExecutionAware.getEnvironmentConfigurationProvider(settings);
+    var environmentConfiguration = ObjectUtils.doIfNotNull(environmentConfigurationProvider, it -> it.getEnvironmentConfiguration());
     if (environmentConfiguration != null && !LocalGradleExecutionAware.LOCAL_TARGET_TYPE_ID.equals(environmentConfiguration.getTypeId())) {
       if (settings.isPassParentEnvs()) {
         LOG.warn("Host system environment variables will not be passed for the target run.");
@@ -445,23 +410,8 @@ public class GradleExecutionHelper {
   @ApiStatus.Internal
   @VisibleForTesting
   static List<String> mergeJvmArgs(@NotNull List<String> jvmArgs, @NotNull List<String> jvmArgsFromIdeSettings) {
-    MultiMap<String, String> argumentsMap = MultiMap.createLinkedSet();
-    String lastKey = null;
-    for (String jvmArg : ContainerUtil.concat(jvmArgs, jvmArgsFromIdeSettings)) {
-      if (jvmArg.startsWith("-")) {
-        argumentsMap.putValue(jvmArg, "");
-        lastKey = jvmArg;
-      }
-      else {
-        if (lastKey != null) {
-          argumentsMap.putValue(lastKey, jvmArg);
-          lastKey = null;
-        }
-        else {
-          argumentsMap.putValue(jvmArg, "");
-        }
-      }
-    }
+    List<String> mergedJvmArgs = ContainerUtil.concat(jvmArgs, jvmArgsFromIdeSettings);
+    MultiMap<String, String> argumentsMap = parseJvmArgs(mergedJvmArgs);
 
     Map<String, String> mergedKeys = new LinkedHashMap<>();
     Set<String> argKeySet = new LinkedHashSet<>(argumentsMap.keySet());
@@ -503,6 +453,27 @@ public class GradleExecutionHelper {
     return result;
   }
 
+  private static @NotNull MultiMap<@NotNull String, @NotNull String> parseJvmArgs(@NotNull List<@NotNull String> args) {
+    MultiMap<String, String> result = MultiMap.createLinkedSet();
+    String lastKey = null;
+    for (String jvmArg : args) {
+      if (jvmArg.startsWith("-")) {
+        result.putValue(jvmArg, "");
+        lastKey = jvmArg;
+      }
+      else {
+        if (lastKey != null) {
+          result.putValue(lastKey, jvmArg);
+          lastKey = null;
+        }
+        else {
+          result.putValue(jvmArg, "");
+        }
+      }
+    }
+    return result;
+  }
+
   private static Couple<String> splitArg(String arg) {
     int i = arg.indexOf('=');
     return i <= 0 ? Couple.of(arg, "") : Couple.of(arg.substring(0, i), arg.substring(i));
@@ -525,10 +496,7 @@ public class GradleExecutionHelper {
           modelBuilder.withCancellationToken(cancellationToken);
         }
         if (settings != null) {
-          final String javaHome = settings.getJavaHome();
-          if (javaHome != null && new File(javaHome).isDirectory()) {
-            modelBuilder.setJavaHome(new File(javaHome));
-          }
+          setupJavaHome(modelBuilder, settings, taskId);
         }
         // do not use connection.getModel methods since it doesn't allow to handle progress events
         // and we can miss gradle tooling client side events like distribution download.

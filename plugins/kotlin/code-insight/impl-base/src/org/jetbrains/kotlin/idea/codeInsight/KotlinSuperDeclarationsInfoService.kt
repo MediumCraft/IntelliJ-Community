@@ -10,10 +10,10 @@ import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.kotlin.analysis.api.analyze
 import org.jetbrains.kotlin.analysis.api.permissions.KaAllowAnalysisOnEdt
 import org.jetbrains.kotlin.analysis.api.permissions.allowAnalysisOnEdt
-import org.jetbrains.kotlin.analysis.api.symbols.KtCallableSymbol
-import org.jetbrains.kotlin.analysis.api.symbols.KtClassOrObjectSymbol
-import org.jetbrains.kotlin.analysis.api.symbols.KtValueParameterSymbol
-import org.jetbrains.kotlin.analysis.api.types.KtNonErrorClassType
+import org.jetbrains.kotlin.analysis.api.symbols.KaCallableSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaClassSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaValueParameterSymbol
+import org.jetbrains.kotlin.analysis.api.types.KaClassType
 import org.jetbrains.kotlin.name.StandardClassIds
 import org.jetbrains.kotlin.psi.*
 
@@ -43,18 +43,17 @@ object SuperDeclarationProvider {
     fun findSuperDeclarations(declaration: KtDeclaration): List<SuperDeclaration> {
         allowAnalysisOnEdt {
             analyze(declaration) {
-                val superSymbols = when (val symbol = declaration.getSymbol()) {
-                    is KtValueParameterSymbol -> symbol.generatedPrimaryConstructorProperty?.getDirectlyOverriddenSymbols()?.asSequence()
-                        ?: emptySequence()
+                val superSymbols = when (val symbol = declaration.symbol) {
+                    is KaValueParameterSymbol -> symbol.generatedPrimaryConstructorProperty?.directlyOverriddenSymbols ?: emptySequence()
 
-                    is KtCallableSymbol -> symbol.getDirectlyOverriddenSymbols().asSequence()
-                    is KtClassOrObjectSymbol -> symbol.superTypes.asSequence().mapNotNull { (it as? KtNonErrorClassType)?.classSymbol }
+                    is KaCallableSymbol -> symbol.directlyOverriddenSymbols
+                    is KaClassSymbol -> symbol.superTypes.asSequence().mapNotNull { (it as? KaClassType)?.symbol }
                     else -> emptySequence()
                 }
 
                 return buildList {
                     for (superSymbol in superSymbols) {
-                        if (superSymbol is KtClassOrObjectSymbol && StandardClassIds.Any == superSymbol.classId) {
+                        if (superSymbol is KaClassSymbol && StandardClassIds.Any == superSymbol.classId) {
                             continue
                         }
                         when (val psi = superSymbol.psi) {

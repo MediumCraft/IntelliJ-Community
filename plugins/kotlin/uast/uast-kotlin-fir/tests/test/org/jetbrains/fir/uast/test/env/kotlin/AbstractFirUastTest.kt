@@ -1,12 +1,10 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.fir.uast.test.env.kotlin
 
 import com.intellij.core.CoreApplicationEnvironment
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.extensions.Extensions
-import com.intellij.openapi.util.registry.Registry
-import com.intellij.openapi.util.registry.RegistryValue
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.testFramework.LightProjectDescriptor
@@ -28,6 +26,7 @@ import org.jetbrains.uast.kotlin.BaseKotlinUastResolveProviderService
 import org.jetbrains.uast.kotlin.FirKotlinUastResolveProviderService
 import org.jetbrains.uast.kotlin.evaluation.KotlinEvaluatorExtension
 import org.jetbrains.uast.kotlin.internal.FirCliKotlinUastResolveProviderService
+import org.jetbrains.uast.kotlin.internal.FirKotlinUastLibraryPsiProviderService
 import java.io.File
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -46,9 +45,9 @@ abstract class AbstractFirUastTest : KotlinLightCodeInsightFixtureTestCase() {
     private fun registerExtensionPointAndServiceIfNeeded() {
         val area = Extensions.getRootArea()
         CoreApplicationEnvironment.registerExtensionPoint(
-            area,
-            UastLanguagePlugin.extensionPointName,
-            UastLanguagePlugin::class.java
+          area,
+          UastLanguagePlugin.EP,
+          UastLanguagePlugin::class.java
         )
         area.getExtensionPoint(UEvaluatorExtension.EXTENSION_POINT_NAME).registerExtension(KotlinEvaluatorExtension(), project)
         val service = FirCliKotlinUastResolveProviderService()
@@ -62,19 +61,20 @@ abstract class AbstractFirUastTest : KotlinLightCodeInsightFixtureTestCase() {
             FirKotlinUastResolveProviderService::class.java,
             service
         )
+
+        application.registerServiceInstance(
+            FirKotlinUastLibraryPsiProviderService::class.java,
+            FirKotlinUastLibraryPsiProviderService.Default(),
+        )
     }
 
     override fun setUp() {
         super.setUp()
         registerExtensionPointAndServiceIfNeeded()
-        scriptSupportRegistry.setValue(true)
     }
-
-    private val scriptSupportRegistry: RegistryValue get() = Registry.get("kotlin.k2.scripting.enabled")
 
     override fun tearDown() {
         runAll(
-            { scriptSupportRegistry.resetToDefault() },
             { project.invalidateAllCachesForUastTests() },
             { super.tearDown() },
         )

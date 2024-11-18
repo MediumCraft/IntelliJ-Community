@@ -4,6 +4,7 @@ package com.intellij.refactoring.extractMethod.newImpl
 import com.intellij.codeInsight.AnnotationUtil
 import com.intellij.codeInsight.Nullability
 import com.intellij.codeInsight.NullableNotNullManager
+import com.intellij.codeInsight.generation.GenerateMembersUtil
 import com.intellij.java.refactoring.JavaRefactoringBundle
 import com.intellij.openapi.util.TextRange
 import com.intellij.psi.*
@@ -187,7 +188,7 @@ private fun findFlowData(analyzer: CodeFragmentAnalyzer, flowOutput: FlowOutput)
 
 private fun findVariableData(analyzer: CodeFragmentAnalyzer, variables: List<PsiVariable>, inferNullity: Boolean): DataOutput {
   val variable = when {
-    variables.size > 1 -> throw ExtractMultipleVariablesException(variables, analyzer.elements)
+    variables.size > 1 -> throw ExtractException(JavaRefactoringBundle.message("extract.method.error.many.outputs"), variables)
     analyzer.elements.singleOrNull() is PsiExpression && variables.isNotEmpty() ->
       throw ExtractException(JavaRefactoringBundle.message("extract.method.error.variable.in.expression"), variables)
     variables.isEmpty() -> return EmptyOutput()
@@ -212,6 +213,7 @@ internal fun updateMethodAnnotations(method: PsiMethod, inputParameters: List<In
     val returnedExpressions = PsiUtil.findReturnStatements(method).mapNotNull(PsiReturnStatement::getReturnValue)
     val resultNullability = CodeFragmentAnalyzer.inferNullability(returnedExpressions)
     ExtractMethodHelper.addNullabilityAnnotation(method.returnTypeElement, resultNullability)
+    GenerateMembersUtil.sortModifiers(method, null)
   }
   val parameters = method.parameterList.parameters
   inputParameters

@@ -54,7 +54,8 @@ interface GradleBuildScriptBuilder<BSB : GradleBuildScriptBuilder<BSB>> : Gradle
   fun applyPlugin(plugin: String): BSB
   fun applyPluginFrom(path: String): BSB
 
-  fun withPlugin(id: String, version: String? = null): BSB
+  fun withPlugin(id: String) = withPlugin(id, null)
+  fun withPlugin(id: String, version: String?): BSB
 
   fun withJavaPlugin(): BSB
   fun withJavaLibraryPlugin(): BSB
@@ -68,6 +69,7 @@ interface GradleBuildScriptBuilder<BSB : GradleBuildScriptBuilder<BSB>> : Gradle
   fun withKotlinJsPlugin(): BSB
   fun withKotlinMultiplatformPlugin(): BSB
   fun withKotlinJvmToolchain(jvmTarget: Int): BSB
+  fun withKotlinDsl(): BSB
   fun withGroovyPlugin(): BSB
   fun withGroovyPlugin(version: String): BSB
   fun withApplicationPlugin(

@@ -22,6 +22,7 @@ import com.intellij.psi.codeStyle.CommonCodeStyleSettings
 import com.intellij.util.cancelOnDispose
 import kotlinx.coroutines.*
 import org.jetbrains.annotations.ApiStatus
+import org.jetbrains.annotations.ApiStatus.Internal
 import java.util.concurrent.atomic.AtomicReference
 import java.util.function.Supplier
 import kotlin.math.max
@@ -29,6 +30,7 @@ import kotlin.math.max
 private val LOG = logger<SettingsImpl>()
 internal const val EDITOR_SHOW_SPECIAL_CHARS: String = "editor.show.special.chars"
 
+@Internal
 class SettingsImpl internal constructor(private val editor: EditorImpl?, kind: EditorKind?, project: Project?) : EditorSettings {
   private var languageSupplier: (() -> Language?)? = null
 
@@ -142,6 +144,14 @@ class SettingsImpl internal constructor(private val editor: EditorImpl?, kind: E
 
   override fun setRightMarginShown(`val`: Boolean) {
     state.myIsRightMarginShown = `val`
+  }
+
+  override fun isHighlightSelectionOccurrences(): Boolean {
+    return state.myIsHighlightSelectionOccurrences
+  }
+
+  override fun setHighlightSelectionOccurrences(`val`: Boolean) {
+    state.myIsHighlightSelectionOccurrences = `val`
   }
 
   override fun isWhitespacesShown(): Boolean {
@@ -501,6 +511,10 @@ class SettingsImpl internal constructor(private val editor: EditorImpl?, kind: E
     state.myIsWheelFontChangeEnabled = `val`
   }
 
+  override fun resetWheelFontChangeEnabled() {
+    state.clearOverriding(state::myIsWheelFontChangeEnabled)
+  }
+
   override fun isMouseClickSelectionHonorsCamelWords(): Boolean {
     return state.myIsMouseClickSelectionHonorsCamelWords
   }
@@ -718,9 +732,11 @@ class SettingsImpl internal constructor(private val editor: EditorImpl?, kind: E
                 defaultValue = result
                 newGetValueResult = overwrittenValue ?: cachedValue ?: defaultValue
               }
-              fireEditorRefresh(false)
-              if (oldGetValueResult != newGetValueResult) {
-                fireValueChanged(newGetValueResult)
+              writeIntentReadAction {
+                fireEditorRefresh(false)
+                if (oldGetValueResult != newGetValueResult) {
+                  fireValueChanged(newGetValueResult)
+                }
               }
             }
           }

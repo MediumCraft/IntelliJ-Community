@@ -30,6 +30,7 @@ import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 import java.awt.*;
+import java.util.concurrent.ExecutorService;
 
 import static com.intellij.openapi.editor.colors.EditorColors.REFERENCE_HYPERLINK_COLOR;
 import static com.intellij.xdebugger.impl.inline.InlineDebugRenderer.INDENT;
@@ -37,11 +38,18 @@ import static com.intellij.xdebugger.impl.inline.InlineDebugRenderer.NAME_VALUE_
 
 @ApiStatus.Internal
 public abstract class InlineDebugRendererBase implements EditorCustomElementRenderer {
+
+  private static final ExecutorService inExecutionPointRepainterExecutor =
+    AppExecutorUtil.createBoundedApplicationPoolExecutor("InlineDebugRenderer in Execution Point Repainter", 1);
+
   public boolean isInExecutionPointCached;
 
   protected int myRemoveXCoordinate = Integer.MAX_VALUE;
   protected int myTextStartXCoordinate;
   protected boolean isHovered = false;
+  protected String specialRenderId = "";
+
+  public void onClick(Inlay inlay, @NotNull EditorMouseEvent event) {}
 
   @Override
   public void paint(@NotNull Inlay inlay, @NotNull Graphics g, @NotNull Rectangle r, @NotNull TextAttributes textAttributes) {
@@ -58,7 +66,7 @@ public abstract class InlineDebugRendererBase implements EditorCustomElementRend
                         })
       .coalesceBy(inlay)
       .expireWith(inlay)
-      .submit(AppExecutorUtil.getAppExecutorService());
+      .submit(inExecutionPointRepainterExecutor);
 
     TextAttributes inlineAttributes = getAttributes(editor);
     if (inlineAttributes == null || inlineAttributes.getForegroundColor() == null) return;
@@ -248,4 +256,9 @@ public abstract class InlineDebugRendererBase implements EditorCustomElementRend
 
   @RequiresBackgroundThread
   abstract protected boolean calculateIsInExecutionPoint();
+
+  @ApiStatus.Internal
+  public String getSpecialRenderId() {
+    return specialRenderId;
+  }
 }

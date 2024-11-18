@@ -111,7 +111,7 @@ public abstract class AbstractTreeClassChooserDialog<T extends PsiNamedElement> 
     myScope = scope;
     myElementClass = elementClass;
     myClassFilter = classFilter == null ? allFilter() : classFilter;
-    myComparator = comparator == null ? AlphaComparator.INSTANCE : comparator;
+    myComparator = comparator == null ? AlphaComparator.getInstance() : comparator;
     myBaseClass = baseClass;
     myInitialClass = initialClass;
     myIsShowMembers = isShowMembers;
@@ -305,7 +305,7 @@ public abstract class AbstractTreeClassChooserDialog<T extends PsiNamedElement> 
   }
 
   @Override
-  public T getSelected() {
+  public @Nullable T getSelected() {
     return getExitCode() == OK_EXIT_CODE ? mySelectedClass : null;
   }
 

@@ -1,6 +1,8 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.configurationStore
 
+import com.intellij.codeWithMe.ClientId
+import com.intellij.codeWithMe.asContextElement
 import com.intellij.diagnostic.PluginException
 import com.intellij.ide.IdeBundle
 import com.intellij.ide.SaveAndSyncHandler
@@ -14,6 +16,7 @@ import com.intellij.openapi.application.PathManager
 import com.intellij.openapi.application.ex.ApplicationManagerEx
 import com.intellij.openapi.components.*
 import com.intellij.openapi.components.impl.stores.IComponentStore
+import com.intellij.openapi.components.impl.stores.stateStore
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.progress.ProcessCanceledException
@@ -29,6 +32,7 @@ import com.intellij.util.ExceptionUtil
 import com.intellij.util.concurrency.annotations.RequiresEdt
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.ApiStatus.Internal
 import org.jetbrains.annotations.CalledInAny
@@ -98,7 +102,10 @@ suspend fun saveSettings(componentManager: ComponentManager, forceSavingAllSetti
   storeReloadManager?.reloadChangedStorageFiles()
   storeReloadManager?.blockReloadingProjectOnExternalChanges()
   try {
-    componentManager.stateStore.save(forceSavingAllSettings)
+    // Force local ClientId: settings are not saved on disk under a remote ClientId
+    withContext(ClientId.localId.asContextElement()) {
+      componentManager.stateStore.save(forceSavingAllSettings)
+    }
     return true
   }
   catch (e: UnresolvedReadOnlyFilesException) {
@@ -270,4 +277,5 @@ fun forPoorJavaClientOnlySaveProjectIndEdtDoNotUseThisMethod(project: Project, f
   }
 }
 
+@Internal
 class UnresolvedReadOnlyFilesException(val files: List<VirtualFile>) : RuntimeException()

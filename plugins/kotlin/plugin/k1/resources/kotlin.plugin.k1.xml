@@ -34,6 +34,7 @@
   <xi:include href="platform-kind-resolution-fe10.xml"/>
   <xi:include href="jvm.xml"/>
   <xi:include href="jvm-k1.xml"/>
+  <xi:include href="actions-fe10.xml"/>
 
   <!--suppress XmlPathReference -->
   <xi:include href="ultimate-plugin.xml">
@@ -43,24 +44,27 @@
   <xi:include href="parcelize.k1.xml"/>
 
   <content>
-    <module name="kotlin.base.analysis-api-providers"/>
+    <module name="kotlin.base.analysis-api-platform"/>
+    <module name="kotlin.base.external-build-system"/>
     <module name="kotlin.base.fe10.plugin"/>
-    <module name="kotlin.base.fe10.analysis-api-providers"/>
+    <module name="kotlin.base.fe10.analysis-api-platform"/>
     <module name="kotlin.base.fe10.project-structure"/>
     <module name="kotlin.gradle.gradle-tooling"/>
     <module name="kotlin.gradle.gradle"/>
     <module name="kotlin.gradle.code-insight-common"/>
     <module name="kotlin.gradle.code-insight-groovy"/>
+    <module name="kotlin.gradle.code-insight-toml"/>
     <module name="kotlin.gradle.gradle-java"/>
     <module name="kotlin.maven"/>
     <module name="kotlin.onboarding"/>
+    <module name="kotlin.onboarding.gradle"/>
     <module name="kotlin.project-wizard.idea"/>
     <module name="kotlin.project-wizard.idea.k1"/>
     <module name="kotlin.project-wizard.gradle"/>
     <module name="kotlin.project-wizard.maven"/>
     <module name="kotlin.project-wizard.compose"/>
     <module name="kotlin.jvm-decompiler"/>
-    <module name="kotlin.jvm-debugger.sequence"/>
+    <module name="kotlin.jvm-debugger.sequence.k1"/>
     <module name="kotlin.run-configurations.junit"/>
     <module name="kotlin.run-configurations.junit-fe10"/>
     <module name="kotlin.run-configurations.testng"/>

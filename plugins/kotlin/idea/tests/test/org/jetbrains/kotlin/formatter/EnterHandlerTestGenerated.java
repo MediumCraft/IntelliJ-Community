@@ -695,6 +695,11 @@ public abstract class EnterHandlerTestGenerated extends AbstractEnterHandlerTest
                 runTest("testData/editor/enterHandler/controlFlowConstructions/WhenEntryArrow.after.kt");
             }
 
+            @TestMetadata("WhenEntryArrowNoIndentBeforeArrow.after.kt")
+            public void testWhenEntryArrowNoIndentBeforeArrow() throws Exception {
+                runTest("testData/editor/enterHandler/controlFlowConstructions/WhenEntryArrowNoIndentBeforeArrow.after.kt");
+            }
+
             @TestMetadata("WhenWithCondition.after.kt")
             public void testWhenWithCondition() throws Exception {
                 runTest("testData/editor/enterHandler/controlFlowConstructions/WhenWithCondition.after.kt");
@@ -2323,6 +2328,11 @@ public abstract class EnterHandlerTestGenerated extends AbstractEnterHandlerTest
             @TestMetadata("SplitStringByEnterExistingParentheses.after.kt")
             public void testSplitStringByEnterExistingParentheses() throws Exception {
                 runTest("testData/editor/enterHandler/SplitStringByEnterExistingParentheses.after.kt");
+            }
+
+            @TestMetadata("SplitStringByEnterMultiCaret.after.kt")
+            public void testSplitStringByEnterMultiCaret() throws Exception {
+                runTest("testData/editor/enterHandler/SplitStringByEnterMultiCaret.after.kt");
             }
         }
     }

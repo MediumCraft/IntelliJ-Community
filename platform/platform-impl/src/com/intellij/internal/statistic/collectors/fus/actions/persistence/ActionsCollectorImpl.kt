@@ -1,9 +1,10 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.internal.statistic.collectors.fus.actions.persistence
 
 import com.intellij.codeInsight.lookup.LookupManager
 import com.intellij.featureStatistics.FeatureUsageTracker
 import com.intellij.ide.actions.ActionsCollector
+import com.intellij.ide.actions.ToolwindowFusEventFields
 import com.intellij.ide.plugins.IdeaPluginDescriptor
 import com.intellij.internal.statistic.collectors.fus.DataContextUtils
 import com.intellij.internal.statistic.eventLog.events.*
@@ -16,6 +17,7 @@ import com.intellij.openapi.actionSystem.*
 import com.intellij.openapi.actionSystem.ex.ActionUtil
 import com.intellij.openapi.actionSystem.impl.FusAwareAction
 import com.intellij.openapi.actionSystem.impl.Utils
+import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.application.runReadAction
 import com.intellij.openapi.keymap.Keymap
 import com.intellij.openapi.project.DumbService
@@ -26,10 +28,12 @@ import com.intellij.psi.PsiDocumentManager
 import com.intellij.util.TimeoutUtil
 import it.unimi.dsi.fastutil.objects.Object2LongMaps
 import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap
+import org.jetbrains.annotations.ApiStatus
 import java.awt.event.InputEvent
 import java.lang.ref.WeakReference
 import java.util.*
 
+@ApiStatus.Internal
 class ActionsCollectorImpl : ActionsCollector() {
   private data class ActionUpdateStatsKey(val actionId: String, val language: String)
 
@@ -56,7 +60,7 @@ class ActionsCollectorImpl : ActionsCollector() {
 
   override fun recordUpdate(action: AnAction, event: AnActionEvent, durationMs: Long) {
     if (durationMs <= 5) return
-    val dataContext = Utils.getCachedDataContext(event.dataContext)
+    val dataContext = Utils.getCachedOnlyDataContext(event.dataContext)
     val project = CommonDataKeys.PROJECT.getData(dataContext)
     ActionsEventLogGroup.ACTION_UPDATED.log(project) {
       val info = getPluginInfo(action.javaClass)
@@ -118,6 +122,11 @@ class ActionsCollectorImpl : ActionsCollector() {
     }
 
     @JvmStatic
+    fun recordActionInvoked(project: Project, dataBuilder: MutableList<EventPair<*>>.() -> Unit) {
+      record(ActionsEventLogGroup.ACTION_FINISHED, project, dataBuilder)
+    }
+
+    @JvmStatic
     fun recordActionInvoked(project: Project?,
                             action: AnAction?,
                             event: AnActionEvent?,
@@ -132,7 +141,7 @@ class ActionsCollectorImpl : ActionsCollector() {
                                   submenu: Boolean,
                                   durationMs: Long,
                                   result: List<AnAction>?) {
-      val dataContext = Utils.getCachedDataContext(context)
+      val dataContext = Utils.getCachedOnlyDataContext(context)
       val project = CommonDataKeys.PROJECT.getData(dataContext)
       ActionsEventLogGroup.ACTION_GROUP_EXPANDED.log(project) {
         val info = getPluginInfo(action.javaClass)
@@ -149,6 +158,15 @@ class ActionsCollectorImpl : ActionsCollector() {
     }
 
     @JvmStatic
+    fun record(eventId: VarargEventId, project: Project?, dataBuilder: MutableList<EventPair<*>>.() -> Unit) {
+      val projectPairs = projectData(project)
+      eventId.log(project) {
+        addAll(projectPairs)
+        dataBuilder()
+      }
+    }
+
+    @JvmStatic
     fun record(eventId: VarargEventId,
                project: Project?,
                action: AnAction?,
@@ -156,18 +174,13 @@ class ActionsCollectorImpl : ActionsCollector() {
                customDataProvider: (MutableList<EventPair<*>>) -> Unit) {
       if (action == null) return
 
-      val isDumb = project
-        ?.takeIf { !project.isDisposed }
-        ?.let { DumbService.isDumb(project) }
-      val incompleteDependenciesMode = project
-        ?.takeIf { !project.isDisposed }
-        ?.getServiceIfCreated(IncompleteDependenciesService::class.java)
-        ?.getState()
-      val isLookupActive = project
-        ?.takeIf { !project.isDisposed }
+      val isLookupActive = project?.takeIf { !project.isDisposed }
         ?.getServiceIfCreated(LookupManager::class.java)
         ?.let { event?.dataContext?.getData(CommonDataKeys.HOST_EDITOR) }
         ?.let { LookupManager.getActiveLookup(it) } != null
+
+      val toolWindowId = event?.dataContext?.getData(PlatformDataKeys.TOOL_WINDOW)?.id
+      val projectPairs = projectData(project)
 
       eventId.log(project) {
         val info = getPluginInfo(action.javaClass)
@@ -177,15 +190,11 @@ class ActionsCollectorImpl : ActionsCollector() {
             add(ActionsEventLogGroup.TOGGLE_ACTION.with(Toggleable.isSelected(event.presentation)))
           }
           addAll(actionEventData(event))
+          addAll(projectPairs)
           if (eventId == ActionsEventLogGroup.ACTION_FINISHED) {
             add(ActionsEventLogGroup.LOOKUP_ACTIVE.with(isLookupActive))
+            add(ToolwindowFusEventFields.TOOLWINDOW.with(toolWindowId))
           }
-        }
-        if (project != null && isDumb != null) {
-          add(ActionsEventLogGroup.DUMB.with(isDumb))
-        }
-        if (project != null && incompleteDependenciesMode != null) {
-          add(ActionsEventLogGroup.INCOMPLETE_DEPENDENCIES_MODE.with(incompleteDependenciesMode))
         }
         customDataProvider(this)
         addActionClass(this, action, info)
@@ -196,13 +205,34 @@ class ActionsCollectorImpl : ActionsCollector() {
       }
     }
 
+    private fun projectData(project: Project?): List<EventPair<*>> {
+      return ReadAction.compute<List<EventPair<*>>, Nothing> {
+        val isDumb = project
+          ?.takeIf { !project.isDisposed }
+          ?.let { DumbService.isDumb(project) }
+        val incompleteDependenciesMode = project
+          ?.takeIf { !project.isDisposed }
+          ?.getServiceIfCreated(IncompleteDependenciesService::class.java)
+          ?.getState()
+
+        return@compute buildList {
+          if (isDumb != null) {
+            add(EventFields.Dumb.with(isDumb))
+          }
+          if (incompleteDependenciesMode != null) {
+            add(ActionsEventLogGroup.INCOMPLETE_DEPENDENCIES_MODE.with(incompleteDependenciesMode))
+          }
+        }
+      }
+    }
+
     @JvmStatic
     fun actionEventData(event: AnActionEvent): List<EventPair<*>> {
       val data: MutableList<EventPair<*>> = ArrayList()
       data.add(EventFields.InputEvent.with(from(event)))
       val place = event.place
       data.add(EventFields.ActionPlace.with(place))
-      data.add(ActionsEventLogGroup.CONTEXT_MENU.with(ActionPlaces.isPopupPlace(place)))
+      data.add(ActionsEventLogGroup.CONTEXT_MENU.with(event.isFromContextMenu))
       return data
     }
 
@@ -270,7 +300,7 @@ class ActionsCollectorImpl : ActionsCollector() {
     @JvmStatic
     fun onBeforeActionInvoked(action: AnAction, event: AnActionEvent) {
       val project = event.project
-      val context = Utils.getCachedDataContext(event.dataContext)
+      val context = Utils.getCachedOnlyDataContext(event.dataContext)
       val stats = Stats(project, DataContextUtils.getFileLanguage(context), getInjectedOrFileLanguage(project, context))
       ourStats[event] = stats
     }
@@ -314,7 +344,7 @@ class ActionsCollectorImpl : ActionsCollector() {
                                          contextBefore: Language?,
                                          injectedContextBefore: Language?,
                                          data: MutableList<EventPair<*>>) {
-      val dataContext = Utils.getCachedDataContext(event.dataContext)
+      val dataContext = Utils.getCachedOnlyDataContext(event.dataContext)
       val language = DataContextUtils.getFileLanguage(dataContext)
       data.add(EventFields.CurrentFile.with(language ?: contextBefore))
       val injectedLanguage = getInjectedOrFileLanguage(project, dataContext)

@@ -4,8 +4,11 @@ package com.intellij.codeInsight.runner;
 import com.intellij.openapi.extensions.ExtensionPointName;
 import com.intellij.openapi.project.PossiblyDumbAware;
 import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiMethod;
+import com.intellij.psi.util.ClassUtil;
 import com.intellij.psi.util.PsiMethodUtil;
+import com.intellij.psi.util.PsiTreeUtil;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -46,4 +49,25 @@ public interface JavaMainMethodProvider extends PossiblyDumbAware {
    */
   @Contract(pure = true)
   @Nullable PsiMethod findMainInClass(@NotNull PsiClass clazz);
+
+  /**
+   * @param clazz class to check
+   * @return a pretty class name. e.x. for Kotlin it allows to return `MyClass` instead of `MyClass.Companion`
+   */
+  @Contract(pure = true)
+  default @Nullable String getMainClassName(@NotNull PsiClass clazz) {
+    return ClassUtil.getJVMClassName(clazz);
+  }
+
+  /**
+   * @param psiElement element to check
+   * @return true if the given element or its parent is the main method, false otherwise
+   */
+  @Contract(pure = true)
+  default boolean isMain(@NotNull PsiElement psiElement) {
+    PsiMethod psiMethod = PsiTreeUtil.getParentOfType(psiElement, PsiMethod.class);
+    if (psiMethod == null) return false;
+
+    return "main".equals(psiMethod.getName()) && PsiMethodUtil.isMainMethod(psiMethod);
+  }
 }

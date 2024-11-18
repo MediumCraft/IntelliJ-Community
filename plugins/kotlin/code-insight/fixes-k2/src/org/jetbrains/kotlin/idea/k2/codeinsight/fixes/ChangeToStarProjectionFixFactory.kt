@@ -2,13 +2,13 @@
 package org.jetbrains.kotlin.idea.k2.codeinsight.fixes
 
 import com.intellij.psi.PsiElement
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
-import org.jetbrains.kotlin.analysis.api.KtStarTypeProjection
-import org.jetbrains.kotlin.analysis.api.calls.successfulFunctionCallOrNull
-import org.jetbrains.kotlin.analysis.api.calls.symbol
+import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.fir.diagnostics.KaFirDiagnostic
-import org.jetbrains.kotlin.analysis.api.types.KtNonErrorClassType
-import org.jetbrains.kotlin.analysis.api.types.KtTypeParameterType
+import org.jetbrains.kotlin.analysis.api.resolution.successfulFunctionCallOrNull
+import org.jetbrains.kotlin.analysis.api.resolution.symbol
+import org.jetbrains.kotlin.analysis.api.types.KaClassType
+import org.jetbrains.kotlin.analysis.api.types.KaStarTypeProjection
+import org.jetbrains.kotlin.analysis.api.types.KaTypeParameterType
 import org.jetbrains.kotlin.idea.base.psi.typeArguments
 import org.jetbrains.kotlin.idea.codeinsight.api.applicators.fixes.KotlinQuickFixFactory
 import org.jetbrains.kotlin.idea.quickfix.ChangeToStarProjectionFix
@@ -30,7 +30,7 @@ internal object ChangeToStarProjectionFixFactory {
 
         // We don't suggest this quick-fix for array instance checks because there is ConvertToIsArrayOfCallFix
         if (element.parent is KtIsExpression
-            && diagnostic.type.isArrayOrPrimitiveArray()
+            && diagnostic.type.isArrayOrPrimitiveArray
             && element.isOnJvm()
         ) return@ModCommandBased emptyList()
 
@@ -38,8 +38,7 @@ internal object ChangeToStarProjectionFixFactory {
         listOf(quickFix)
     }
 
-    context(KtAnalysisSession)
-    private fun getQuickFix(element: PsiElement): ChangeToStarProjectionFix? {
+    private fun KaSession.getQuickFix(element: PsiElement): ChangeToStarProjectionFix? {
         val (binaryExpr, typeReference, typeElement) = StarProjectionUtils.getChangeToStarProjectionFixInfo(element) ?: return null
 
         if (binaryExpr?.operationReference?.isAsKeyword() == true) {
@@ -47,27 +46,27 @@ internal object ChangeToStarProjectionFixFactory {
             if (parent is KtCallableDeclaration
                 && parent.typeReference.typeArguments().any { it.projectionKind != KtProjectionKind.STAR }
                 && typeReference.typeArguments().isNotEmpty()
-                && binaryExpr.isUsedAsExpression()
+                && binaryExpr.isUsedAsExpression
             ) return null
 
             val type = when (parent) {
                 is KtValueArgument -> {
                     val callExpr = parent.getStrictParentOfType<KtCallExpression>()
-                    val functionCall = callExpr?.resolveCall()?.successfulFunctionCallOrNull()
+                    val functionCall = callExpr?.resolveToCall()?.successfulFunctionCallOrNull()
                     functionCall?.argumentMapping?.get(parent.getArgumentExpression())?.symbol?.returnType
                 }
 
                 is KtQualifiedExpression ->
                     if (KtPsiUtil.safeDeparenthesize(parent.receiverExpression) == binaryExpr)
-                        parent.resolveCall()?.successfulFunctionCallOrNull()?.partiallyAppliedSymbol?.symbol?.receiverParameter?.type
+                        parent.resolveToCall()?.successfulFunctionCallOrNull()?.partiallyAppliedSymbol?.symbol?.receiverParameter?.returnType
                     else
                         null
 
                 else ->
                     null
             }
-            val typeArguments = (type as? KtNonErrorClassType)?.ownTypeArguments
-            if (typeArguments?.any { it !is KtStarTypeProjection && it.type !is KtTypeParameterType } == true) return null
+            val typeArguments = (type as? KaClassType)?.typeArguments
+            if (typeArguments?.any { it !is KaStarTypeProjection && it.type !is KaTypeParameterType } == true) return null
         }
 
         return if (typeElement.typeArgumentsAsTypes.isEmpty()) null

@@ -38,25 +38,25 @@ class SearchEverywhereMlExperiment {
   private val tabExperiments = hashMapOf(
     SearchEverywhereTabWithMlRanking.ACTION to Experiment(
       1 to ExperimentType.ENABLE_SEMANTIC_SEARCH,
-      2 to ExperimentType.USE_EXPERIMENTAL_MODEL,
       3 to ExperimentType.ENABLE_TYPOS,
     ),
 
     SearchEverywhereTabWithMlRanking.FILES to Experiment(
       1 to ExperimentType.ENABLE_SEMANTIC_SEARCH,
-      2 to ExperimentType.EXACT_MATCH_PRIORITIZATION,
       3 to ExperimentType.NO_ML
     ),
 
     SearchEverywhereTabWithMlRanking.CLASSES to Experiment(
       1 to ExperimentType.ENABLE_SEMANTIC_SEARCH,
-      2 to ExperimentType.EXACT_MATCH_PRIORITIZATION,
       3 to ExperimentType.NO_ML
+    ),
+
+    SearchEverywhereTabWithMlRanking.SYMBOLS to Experiment(
+      1 to ExperimentType.ENABLE_SEMANTIC_SEARCH,
     ),
 
     SearchEverywhereTabWithMlRanking.ALL to Experiment(
       2 to ExperimentType.USE_EXPERIMENTAL_MODEL,
-      3 to ExperimentType.NO_RECENT_FILES_PRIORITIZATION
     )
   )
 
@@ -105,9 +105,7 @@ class SearchEverywhereMlExperiment {
   internal fun getTabExperiments(): Map<SearchEverywhereTabWithMlRanking, Experiment> = tabExperiments
 
   enum class ExperimentType {
-    NO_EXPERIMENT, NO_ML, USE_EXPERIMENTAL_MODEL, NO_ML_FEATURES, ENABLE_TYPOS,
-    NO_RECENT_FILES_PRIORITIZATION, ENABLE_SEMANTIC_SEARCH,
-    EXACT_MATCH_PRIORITIZATION
+    NO_EXPERIMENT, NO_ML, USE_EXPERIMENTAL_MODEL, NO_ML_FEATURES, ENABLE_TYPOS, ENABLE_SEMANTIC_SEARCH,
   }
 
   @VisibleForTesting

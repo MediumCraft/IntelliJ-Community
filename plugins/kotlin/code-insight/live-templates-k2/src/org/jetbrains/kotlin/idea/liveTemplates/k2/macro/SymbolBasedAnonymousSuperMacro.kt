@@ -1,4 +1,4 @@
-// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.kotlin.idea.liveTemplates.k2.macro
 
 import com.intellij.psi.PsiNamedElement
@@ -7,10 +7,10 @@ import org.jetbrains.kotlin.analysis.api.permissions.KaAllowAnalysisFromWriteAct
 import org.jetbrains.kotlin.analysis.api.permissions.KaAllowAnalysisOnEdt
 import org.jetbrains.kotlin.analysis.api.permissions.allowAnalysisFromWriteAction
 import org.jetbrains.kotlin.analysis.api.permissions.allowAnalysisOnEdt
-import org.jetbrains.kotlin.analysis.api.symbols.KtClassKind
-import org.jetbrains.kotlin.analysis.api.symbols.KtNamedClassOrObjectSymbol
-import org.jetbrains.kotlin.analysis.api.symbols.KtSymbolOrigin
-import org.jetbrains.kotlin.descriptors.Modality
+import org.jetbrains.kotlin.analysis.api.symbols.KaClassKind
+import org.jetbrains.kotlin.analysis.api.symbols.KaNamedClassSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaSymbolModality
+import org.jetbrains.kotlin.idea.base.analysis.api.utils.isJavaSourceOrLibrary
 import org.jetbrains.kotlin.idea.liveTemplates.macro.AbstractAnonymousSuperMacro
 import org.jetbrains.kotlin.psi.KtExpression
 import org.jetbrains.kotlin.psi.KtFile
@@ -21,15 +21,15 @@ internal class SymbolBasedAnonymousSuperMacro : AbstractAnonymousSuperMacro() {
         allowAnalysisOnEdt {
             allowAnalysisFromWriteAction {
                 analyze(expression) {
-                    val scope = file.getScopeContextForPosition(expression).getCompositeScope()
-                    return scope.getClassifierSymbols()
-                        .filterIsInstance<KtNamedClassOrObjectSymbol>()
+                    val scope = file.scopeContext(expression).compositeScope()
+                    return scope.classifiers
+                        .filterIsInstance<KaNamedClassSymbol>()
                         .filter { shouldSuggest(it) }
                         .filter { symbol ->
                             when (symbol.classKind) {
-                                KtClassKind.CLASS -> symbol.modality in listOf(Modality.OPEN, Modality.ABSTRACT)
-                                KtClassKind.INTERFACE -> true
-                                KtClassKind.ANNOTATION_CLASS -> symbol.origin != KtSymbolOrigin.JAVA
+                                KaClassKind.CLASS -> symbol.modality in listOf(KaSymbolModality.OPEN, KaSymbolModality.ABSTRACT)
+                                KaClassKind.INTERFACE -> true
+                                KaClassKind.ANNOTATION_CLASS -> !symbol.origin.isJavaSourceOrLibrary()
                                 else -> false
                             }
                         }
@@ -40,7 +40,7 @@ internal class SymbolBasedAnonymousSuperMacro : AbstractAnonymousSuperMacro() {
         }
     }
 
-    private fun shouldSuggest(declaration: KtNamedClassOrObjectSymbol): Boolean {
+    private fun shouldSuggest(declaration: KaNamedClassSymbol): Boolean {
         val classId = declaration.classId
         if (classId != null) {
             val packageName = classId.packageFqName.asString()

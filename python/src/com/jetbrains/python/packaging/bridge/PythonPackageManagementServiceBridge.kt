@@ -59,7 +59,7 @@ class PythonPackageManagementServiceBridge(project: Project,sdk: Sdk) : PyPackag
               .filter { it.isNotBlank() }
               .map {
                 val line = it.split("\t")
-                PythonPackage(line[0], line[1])
+                PythonPackage(line[0], line[1], isEditableMode = false)
               }
               .sortedWith(compareBy(PythonPackage::name))
               .toList()
@@ -124,7 +124,7 @@ class PythonPackageManagementServiceBridge(project: Project,sdk: Sdk) : PyPackag
         val specification = specForPackage(repoPackage.name, version, repository)
         runningUnderOldUI = true
         listener.operationStarted(specification.name)
-        val result = manager.installPackage(specification)
+        val result = manager.installPackage(specification, emptyList<String>())
         val exception = if (result.isFailure) mutableListOf(result.exceptionOrNull() as ExecutionException) else null
         listener.operationFinished(specification.name,
                                    toErrorDescription(exception, mySdk, specification.name))
@@ -143,7 +143,11 @@ class PythonPackageManagementServiceBridge(project: Project,sdk: Sdk) : PyPackag
         manager
           .installedPackages
           .filter { it.name.lowercase() in namesToDelete }
-          .forEach { manager.uninstallPackage(it) }
+          .forEach {
+            runPackagingOperationOrShowErrorDialog(sdk, PyBundle.message("python.packaging.operation.failed.title")) {
+              manager.uninstallPackage(it)
+            }
+          }
 
         listener.operationFinished(namesToDelete.first(), null)
       }

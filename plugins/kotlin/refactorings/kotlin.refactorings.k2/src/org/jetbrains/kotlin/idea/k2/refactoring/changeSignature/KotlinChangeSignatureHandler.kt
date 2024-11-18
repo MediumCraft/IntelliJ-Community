@@ -12,11 +12,16 @@ import com.intellij.refactoring.util.CommonRefactoringUtil
 import org.jetbrains.kotlin.analysis.api.analyze
 import org.jetbrains.kotlin.analysis.api.permissions.KaAllowAnalysisOnEdt
 import org.jetbrains.kotlin.analysis.api.permissions.allowAnalysisOnEdt
-import org.jetbrains.kotlin.analysis.api.symbols.KtConstructorSymbol
-import org.jetbrains.kotlin.analysis.api.symbols.KtFunctionSymbol
-import org.jetbrains.kotlin.analysis.api.symbols.KtSymbolOrigin
-import org.jetbrains.kotlin.analysis.api.symbols.KtValueParameterSymbol
-import org.jetbrains.kotlin.analysis.project.structure.ProjectStructureProvider
+import org.jetbrains.kotlin.analysis.api.projectStructure.KaModuleProvider
+import org.jetbrains.kotlin.analysis.api.symbols.KaConstructorSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaFunctionSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaLocalVariableSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaNamedFunctionSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaPropertySymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaSymbolOrigin
+import org.jetbrains.kotlin.analysis.api.symbols.KaValueParameterSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.isLocal
+import org.jetbrains.kotlin.idea.base.projectStructure.getKaModule
 import org.jetbrains.kotlin.idea.base.psi.KotlinPsiHeuristics
 import org.jetbrains.kotlin.idea.k2.refactoring.changeSignature.ui.KotlinChangePropertySignatureDialog
 import org.jetbrains.kotlin.idea.k2.refactoring.changeSignature.ui.KotlinChangeSignatureDialog
@@ -49,25 +54,25 @@ object KotlinChangeSignatureHandler : KotlinChangeSignatureHandlerBase() {
     @OptIn(KaAllowAnalysisOnEdt::class)
     fun findDeclaration(element: PsiElement, context: PsiElement, project: Project, editor: Editor?): PsiElement? {
         if (element !is KtElement) return element
-        val ktModule = ProjectStructureProvider.getInstance(project).getModule(context, null)
+        val module = context.getKaModule(project, useSiteModule = null)
         return allowAnalysisOnEdt {
-            analyze(ktModule) {
+            analyze(module) {
                 val ktSymbol = when (element) {
                     is KtParameter -> {
-                        if (element.hasValOrVar()) element.getSymbol() else null
+                        if (element.hasValOrVar()) element.symbol else null
                     }
                     is KtCallableDeclaration -> {
-                        element.getSymbol()
+                        element.symbol
                     }
                     is KtClass -> {
-                        element.primaryConstructor?.getSymbol()
-                            ?: if (element.allConstructors.isEmpty()) element.takeUnless { it.isInterface() }?.getSymbol() else null
+                        element.primaryConstructor?.symbol
+                            ?: if (element.allConstructors.isEmpty()) element.takeUnless { it.isInterface() }?.symbol else null
                     }
                     is KtReferenceExpression -> {
                         val symbol = element.mainReference.resolveToSymbol()
                         when {
-                          symbol is KtValueParameterSymbol && symbol.generatedPrimaryConstructorProperty == null -> null
-                          symbol is KtConstructorSymbol && symbol.origin == KtSymbolOrigin.SOURCE_MEMBER_GENERATED -> symbol.getContainingSymbol()
+                          symbol is KaValueParameterSymbol && symbol.generatedPrimaryConstructorProperty == null -> null
+                          symbol is KaConstructorSymbol && symbol.origin == KaSymbolOrigin.SOURCE_MEMBER_GENERATED -> symbol.containingDeclaration
                           else -> symbol
                         }
                     }
@@ -78,9 +83,10 @@ object KotlinChangeSignatureHandler : KotlinChangeSignatureHandlerBase() {
 
                 val elementKind = when {
                     ktSymbol == null -> InapplicabilityKind.Null
-                    ktSymbol is KtFunctionSymbol && ktSymbol.valueParameters.any { it.isVararg } -> InapplicabilityKind.Varargs
-                    ktSymbol.origin == KtSymbolOrigin.SOURCE_MEMBER_GENERATED -> InapplicabilityKind.Synthetic
-                    ktSymbol.origin == KtSymbolOrigin.LIBRARY -> InapplicabilityKind.Library
+                    ktSymbol is KaLocalVariableSymbol -> InapplicabilityKind.Null
+                    ktSymbol is KaNamedFunctionSymbol && ktSymbol.valueParameters.any { it.isVararg } -> InapplicabilityKind.Varargs
+                    ktSymbol.origin == KaSymbolOrigin.SOURCE_MEMBER_GENERATED -> InapplicabilityKind.Synthetic
+                    ktSymbol.origin == KaSymbolOrigin.LIBRARY -> InapplicabilityKind.Library
                     else -> null
                 }
 

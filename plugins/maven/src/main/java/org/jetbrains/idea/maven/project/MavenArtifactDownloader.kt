@@ -6,6 +6,7 @@ import com.intellij.openapi.progress.runBlockingMaybeCancellable
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.platform.util.progress.RawProgressReporter
+import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.idea.maven.buildtool.MavenEventHandler
 import org.jetbrains.idea.maven.buildtool.MavenLogEventHandler
 import org.jetbrains.idea.maven.importing.MavenExtraArtifactType
@@ -15,9 +16,10 @@ import org.jetbrains.idea.maven.server.MavenEmbedderWrapper
 import org.jetbrains.idea.maven.utils.MavenProcessCanceledException
 import org.jetbrains.idea.maven.utils.MavenProgressIndicator
 import org.jetbrains.idea.maven.utils.MavenUtil
-import java.io.File
+import java.nio.file.Path
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
+import kotlin.io.path.exists
 
 class MavenArtifactDownloader(private val myProject: Project,
                               private val myProjectsTree: MavenProjectsTree,
@@ -58,7 +60,7 @@ class MavenArtifactDownloader(private val myProject: Project,
                                embedder: MavenEmbedderWrapper,
                                downloadSources: Boolean,
                                downloadDocs: Boolean): DownloadResult {
-    val downloadedFiles: MutableCollection<File> = ConcurrentLinkedQueue()
+    val downloadedFiles: MutableCollection<Path> = ConcurrentLinkedQueue()
     return try {
       val types: MutableList<MavenExtraArtifactType> = ArrayList(2)
       if (downloadSources) types.add(MavenExtraArtifactType.SOURCES)
@@ -68,12 +70,12 @@ class MavenArtifactDownloader(private val myProject: Project,
     }
     finally {
       // We have to refresh parents of downloaded files, because some additional files may have been downloaded
-      val filesToRefresh: MutableSet<File> = HashSet()
+      val filesToRefresh: MutableSet<Path> = HashSet()
       for (file in downloadedFiles) {
         filesToRefresh.add(file)
-        filesToRefresh.add(file.parentFile)
+        filesToRefresh.add(file.parent)
       }
-      LocalFileSystem.getInstance().refreshIoFiles(filesToRefresh, true, false, null)
+      LocalFileSystem.getInstance().refreshNioFiles(filesToRefresh, true, false, null)
     }
   }
 
@@ -121,7 +123,7 @@ class MavenArtifactDownloader(private val myProject: Project,
   @Throws(MavenProcessCanceledException::class)
   private suspend fun download(embedder: MavenEmbedderWrapper,
                                toDownload: Map<MavenId, DownloadData>,
-                               downloadedFiles: MutableCollection<File>): DownloadResult {
+                               downloadedFiles: MutableCollection<Path>): DownloadResult {
     val result = DownloadResult()
     result.unresolvedSources.addAll(toDownload.keys)
     result.unresolvedDocs.addAll(toDownload.keys)
@@ -135,7 +137,7 @@ class MavenArtifactDownloader(private val myProject: Project,
     }
     val artifacts = embedder.resolveArtifacts(requests, progressReporter, eventHandler)
     for (artifact in artifacts) {
-      val file = artifact.file
+      val file = artifact.file.toPath()
       if (file.exists()) {
         downloadedFiles.add(file)
         val mavenId = MavenId(artifact.groupId, artifact.artifactId, artifact.version)
@@ -174,6 +176,7 @@ class MavenArtifactDownloader(private val myProject: Project,
   companion object {
     @Throws(MavenProcessCanceledException::class)
     @JvmStatic
+    @ApiStatus.ScheduledForRemoval
     @Deprecated("use downloadSourcesAndJavadocs()")
     fun download(project: Project,
                  projectsTree: MavenProjectsTree,

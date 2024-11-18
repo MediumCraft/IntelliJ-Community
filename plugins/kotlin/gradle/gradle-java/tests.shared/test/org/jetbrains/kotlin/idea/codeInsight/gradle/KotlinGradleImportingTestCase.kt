@@ -38,7 +38,6 @@ import org.jetbrains.kotlin.idea.test.setUpWithKotlinPlugin
 import org.jetbrains.kotlin.utils.addToStdlib.filterIsInstanceWithChecker
 import org.jetbrains.plugins.gradle.importing.GradleImportingTestCase
 import org.jetbrains.plugins.gradle.service.project.open.createLinkSettings
-import org.jetbrains.plugins.gradle.settings.GradleSystemSettings
 import org.jetbrains.plugins.gradle.util.GradleConstants
 import org.junit.Assume
 import org.junit.runners.Parameterized
@@ -73,21 +72,39 @@ abstract class KotlinGradleImportingTestCase : GradleImportingTestCase(),
     protected val importStatusCollector = ImportStatusCollector()
 
     override fun findJdkPath(): String {
-        return System.getenv("JDK_11") ?: System.getenv("JAVA11_HOME") ?: run {
-            val message = "Missing JDK_11 or JAVA11_HOME environment variable"
-            if (IS_UNDER_TEAMCITY) LOG.error(message) else LOG.warn(message)
-            super.findJdkPath()
+        /*
+        https://docs.gradle.org/current/userguide/compatibility.html
+         */
+        return if (currentGradleVersion >= GradleVersion.version("7.3")) {
+            /* Version 7.3 or higher supports JDK_17 */
+            System.getenv("JDK_17_0") ?: System.getenv("JDK_17") ?: System.getenv("JAVA17_HOME") ?: run {
+                val message = "Missing JDK_17_0 or JAVA17_HOME environment variable"
+                if (IS_UNDER_TEAMCITY) LOG.error(message) else LOG.warn(message)
+                super.findJdkPath()
+            }
+        } else {
+            /* Versions below 7.3 shall run with JDK 11 (supported since Gradle 5) */
+            System.getenv("JDK_11") ?: System.getenv("JAVA11_HOME") ?: run {
+                val message = "Missing JDK_11 or JAVA11_HOME environment variable"
+                if (IS_UNDER_TEAMCITY) LOG.error(message) else LOG.warn(message)
+                super.findJdkPath()
+            }
         }
     }
 
     override fun setUp() {
         Assume.assumeFalse(AndroidStudioTestUtils.skipIncompatibleTestAgainstAndroidStudio())
         setUpWithKotlinPlugin { super.setUp() }
-        GradleSystemSettings.getInstance().gradleVmOptions =
-            "-XX:MaxMetaspaceSize=512m -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=${System.getProperty("user.dir")}"
         GradleProcessOutputInterceptor.install(testRootDisposable)
 
         setUpImportStatusCollector()
+    }
+
+    override fun configureGradleVmOptions(options: MutableSet<String>) {
+        super.configureGradleVmOptions(options)
+        options.add("-XX:MaxMetaspaceSize=512m")
+        options.add("-XX:+HeapDumpOnOutOfMemoryError")
+        options.add("-XX:HeapDumpPath=${System.getProperty("user.dir")}")
     }
 
     override fun tearDown() {
@@ -172,9 +189,11 @@ abstract class KotlinGradleImportingTestCase : GradleImportingTestCase(),
         }
             .forEach {
                 if (it.name == GradleConstants.SETTINGS_FILE_NAME &&
-                    !File(testDataDirectory(), GradleConstants.SETTINGS_FILE_NAME + AFTER_SUFFIX).exists()) return@forEach
+                    !File(testDataDirectory(), GradleConstants.SETTINGS_FILE_NAME + AFTER_SUFFIX).exists()
+                ) return@forEach
                 if (it.name == GradleConstants.KOTLIN_DSL_SETTINGS_FILE_NAME &&
-                    !File(testDataDirectory(), GradleConstants.KOTLIN_DSL_SETTINGS_FILE_NAME + AFTER_SUFFIX).exists()) return@forEach
+                    !File(testDataDirectory(), GradleConstants.KOTLIN_DSL_SETTINGS_FILE_NAME + AFTER_SUFFIX).exists()
+                ) return@forEach
 
                 val actualText = configureKotlinVersionAndProperties(LoadTextUtil.loadText(it).toString(), properties)
                 val expectedFileName = if (File(testDataDirectory(), it.name + ".$gradleVersion" + AFTER_SUFFIX).exists()) {
@@ -190,7 +209,11 @@ abstract class KotlinGradleImportingTestCase : GradleImportingTestCase(),
     /**
      * Compares expected (with ".after" postfix) and actual files with directory traversal.
      */
-    protected fun checkFilesInMultimoduleProject(files: List<VirtualFile>, subModules: List<String>, properties: Map<String, String>? = null) {
+    protected fun checkFilesInMultimoduleProject(
+        files: List<VirtualFile>,
+        subModules: List<String>,
+        properties: Map<String, String>? = null
+    ) {
         FileDocumentManager.getInstance().saveAllDocuments()
 
         files.filter {
@@ -201,24 +224,31 @@ abstract class KotlinGradleImportingTestCase : GradleImportingTestCase(),
         }
             .forEach {
                 if (it.name == GradleConstants.SETTINGS_FILE_NAME &&
-                    !File(testDataDirectory(), GradleConstants.SETTINGS_FILE_NAME + AFTER_SUFFIX).exists()) return@forEach
+                    !File(testDataDirectory(), GradleConstants.SETTINGS_FILE_NAME + AFTER_SUFFIX).exists()
+                ) return@forEach
                 if (it.name == GradleConstants.KOTLIN_DSL_SETTINGS_FILE_NAME &&
-                    !File(testDataDirectory(), GradleConstants.KOTLIN_DSL_SETTINGS_FILE_NAME + AFTER_SUFFIX).exists()) return@forEach
+                    !File(testDataDirectory(), GradleConstants.KOTLIN_DSL_SETTINGS_FILE_NAME + AFTER_SUFFIX).exists()
+                ) return@forEach
 
                 val actualText = configureKotlinVersionAndProperties(LoadTextUtil.loadText(it).toString(), properties)
                 var moduleForBuildScript = ""
                 for (module in subModules) {
-                    if(it.path.substringBefore("/" + it.name).endsWith(module)) {
+                    if (it.path.substringBefore("/" + it.name).endsWith(module)) {
                         moduleForBuildScript = module
                         break
                     }
                 }
-                val expectedFileName = if (File(File(testDataDirectory(), moduleForBuildScript), it.name + ".$gradleVersion" + AFTER_SUFFIX).exists()) {
-                    it.name + ".$gradleVersion" + AFTER_SUFFIX
-                } else {
-                    it.name + AFTER_SUFFIX
-                }
-                val expectedFile = File(testDataDirectory(), if (moduleForBuildScript.isNotEmpty()) {"$moduleForBuildScript/$expectedFileName"} else expectedFileName)
+                val expectedFileName =
+                    if (File(File(testDataDirectory(), moduleForBuildScript), it.name + ".$gradleVersion" + AFTER_SUFFIX).exists()) {
+                        it.name + ".$gradleVersion" + AFTER_SUFFIX
+                    } else {
+                        it.name + AFTER_SUFFIX
+                    }
+                val expectedFile = File(
+                    testDataDirectory(), if (moduleForBuildScript.isNotEmpty()) {
+                        "$moduleForBuildScript/$expectedFileName"
+                    } else expectedFileName
+                )
                 KotlinTestUtils.assertEqualsToFile(expectedFile, actualText) { s -> configureKotlinVersionAndProperties(s, properties) }
             }
     }
@@ -241,7 +271,13 @@ abstract class KotlinGradleImportingTestCase : GradleImportingTestCase(),
         clazz: KClass<T>,
         debuggerOptions: BuildGradleModelDebuggerOptions? = null
     ): BuiltGradleModel<T> =
-        buildGradleModel(myProjectRoot.toNioPath().toFile(), GradleVersion.version(gradleVersion), findJdkPath(), clazz, debuggerOptions)
+        buildGradleModel(
+            myProjectRoot.toNioPath().toFile(),
+            GradleVersion.version(gradleVersion),
+            findJdkPath(),
+            clazz,
+            debuggerOptions
+        )
 
     protected fun buildKotlinMPPGradleModel(
         debuggerOptions: BuildGradleModelDebuggerOptions? = null
@@ -334,16 +370,17 @@ abstract class KotlinGradleImportingTestCase : GradleImportingTestCase(),
             settings.externalSystemIdString = GradleConstants.SYSTEM_ID.id
 
             val future = CompletableFuture<String>()
-            ExternalSystemUtil.runTask(settings, DefaultRunExecutor.EXECUTOR_ID, myProject, GradleConstants.SYSTEM_ID,
-                                       object : TaskCallback {
-                                           override fun onSuccess() {
-                                               future.complete(taskErrOutput.toString())
-                                           }
+            ExternalSystemUtil.runTask(
+                settings, DefaultRunExecutor.EXECUTOR_ID, myProject, GradleConstants.SYSTEM_ID,
+                object : TaskCallback {
+                    override fun onSuccess() {
+                        future.complete(taskErrOutput.toString())
+                    }
 
-                                           override fun onFailure() {
-                                               future.complete(taskErrOutput.toString())
-                                           }
-                                       }, ProgressExecutionMode.IN_BACKGROUND_ASYNC
+                    override fun onFailure() {
+                        future.complete(taskErrOutput.toString())
+                    }
+                }, ProgressExecutionMode.IN_BACKGROUND_ASYNC
             )
             return future.get(10, TimeUnit.SECONDS)
         } finally {
@@ -354,9 +391,9 @@ abstract class KotlinGradleImportingTestCase : GradleImportingTestCase(),
     companion object {
         const val AFTER_SUFFIX = ".after"
 
-        const val LATEST_STABLE_GRADLE_PLUGIN_VERSION = "1.3.70"
+        const val LATEST_STABLE_GRADLE_PLUGIN_VERSION = "2.0.0"
 
-        val SUPPORTED_GRADLE_VERSIONS = arrayOf("5.6.4", "6.0.1", "6.7.1", "7.6")
+        val SUPPORTED_GRADLE_VERSIONS = arrayOf("6.8.3", "7.6")
 
         // https://kotlinlang.org/docs/gradle-configure-project.html#targeting-the-jvm
         val GRADLE_TO_KGP_VERSION = mapOf(

@@ -59,20 +59,6 @@ class PluginBundlingRestrictions(
      */
     var supportedArch: List<JvmArchitecture> = JvmArchitecture.ALL
 
-    @Deprecated("Use an explicit distribution", ReplaceWith("includeInDistribution == PluginDistribution.NOT_FOR_RELEASE"))
-    var includeInEapOnly: Boolean
-      get() = includeInDistribution == PluginDistribution.NOT_FOR_RELEASE
-      set(_) {
-        includeInDistribution = PluginDistribution.NOT_FOR_PUBLIC_BUILDS
-      }
-
-    @Deprecated("Use an explicit distribution", ReplaceWith("includeInDistribution == PluginDistribution.NOT_FOR_PUBLIC_BUILDS"))
-    var includeInNightlyOnly: Boolean
-      get() = includeInDistribution == PluginDistribution.NOT_FOR_PUBLIC_BUILDS
-      set(_) {
-        includeInDistribution = PluginDistribution.NOT_FOR_PUBLIC_BUILDS
-      }
-
     /**
      * Set to required [PluginDistribution] value depending on the distribution zone
      *  - Use [PluginDistribution.NOT_FOR_PUBLIC_BUILDS] if the plugin should be included in distribution for nightly builds only (non EAP, non Release).
@@ -88,10 +74,6 @@ class PluginBundlingRestrictions(
         check(supportedOs == OsFamily.ALL)
         check(supportedArch == JvmArchitecture.ALL)
         check(includeInDistribution == PluginDistribution.ALL)
-        @Suppress("DEPRECATION")
-        check(!includeInEapOnly)
-        @Suppress("DEPRECATION")
-        check(!includeInNightlyOnly)
         return MARKETPLACE
       }
       return when (val restrictions = PluginBundlingRestrictions(supportedOs, supportedArch, includeInDistribution)) {

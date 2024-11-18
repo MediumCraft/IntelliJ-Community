@@ -2,6 +2,7 @@
 package org.jetbrains.plugins.gradle.service.syncAction
 
 import com.intellij.openapi.progress.runBlockingCancellable
+import com.intellij.util.application
 import org.jetbrains.plugins.gradle.service.project.ProjectResolverContext
 
 class GradleProjectResolverResultHandler(
@@ -9,6 +10,9 @@ class GradleProjectResolverResultHandler(
 ) {
 
   fun onResolveProjectInfoStarted() {
+    require(!application.isWriteAccessAllowed) {
+      "Must not execute inside write action"
+    }
     runBlockingCancellable {
       GradleSyncProjectConfigurator.performSyncContributors(context, "RESOLVE_PROJECT_INFO_STARTED") {
         onResolveProjectInfoStarted(context, it)

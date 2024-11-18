@@ -77,7 +77,7 @@ fun PythonExecution.buildTargetedCommandLine(targetEnvironment: TargetEnvironmen
   // TODO [Targets API] [major] `PythonSdkFlavor` should be taken into account to pass (at least) "IRONPYTHONPATH" or "JYTHONPATH"
   //  environment variables for corresponding interpreters
   if (isUsePty) {
-    commandLineBuilder.ptyOptions = LocalTargetPtyOptions(LocalPtyOptions.DEFAULT)
+    commandLineBuilder.ptyOptions = LocalTargetPtyOptions(LocalPtyOptions.defaults())
   }
 
   // This fix shouldn't be here, since flavor patches envs (see configureBuilderToRunPythonOnTarget), but envs
@@ -147,12 +147,7 @@ fun addHelperEntriesToPythonPath(envs: MutableMap<String, TargetEnvironmentFunct
                                  failOnError: Boolean = true): List<PathMapping> {
   val targetPlatform = helpersAwareTargetRequest.targetEnvironmentRequest.targetPlatform
   val pythonHelpersMappings = helpersAwareTargetRequest.preparePyCharmHelpers()
-  val pythonHelpersRoots =
-    listOfNotNull(
-      pythonHelpersMappings.communityHelpers,
-      pythonHelpersMappings.proHelpers
-    )
-      .map(PathMapping::localPath)
+  val pythonHelpersRoots = pythonHelpersMappings.helpers.map(PathMapping::localPath)
   val targetPathSeparator = targetPlatform.platform.pathSeparator
 
   fun <T> T?.onResolutionFailure(message: String): T? {

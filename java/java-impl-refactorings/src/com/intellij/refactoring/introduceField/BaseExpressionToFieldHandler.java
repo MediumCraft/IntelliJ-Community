@@ -47,10 +47,7 @@ import com.intellij.refactoring.util.occurrences.OccurrenceManager;
 import com.intellij.util.CommonJavaRefactoringUtil;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.VisibilityUtil;
-import org.jetbrains.annotations.Nls;
-import org.jetbrains.annotations.NonNls;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.*;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -688,11 +685,11 @@ public abstract class BaseExpressionToFieldHandler extends IntroduceHandlerBase 
       myOutOfCodeBlockExtraction = selectedExpr.getUserData(ElementToWorkOn.OUT_OF_CODE_BLOCK);
       myDeleteSelf = myOutOfCodeBlockExtraction != null;
       myElement = getPhysicalElement(selectedExpr);
-      if (myElement.getParent() instanceof PsiExpressionStatement && getNormalizedAnchor(myAnchorElement).equals(myAnchorElement) && selectedExpr.isPhysical()) {
-        PsiStatement statement = (PsiStatement)myElement.getParent();
-        if (statement.getParent() instanceof PsiCodeBlock) {
-          myDeleteSelf = true;
-        }
+      if (myElement.getParent() instanceof PsiExpressionStatement statement &&
+          getNormalizedAnchor(myAnchorElement).equals(myAnchorElement) &&
+          selectedExpr.isPhysical() &&
+          statement.getParent() instanceof PsiCodeBlock) {
+        myDeleteSelf = true;
       }
 
       myEditor = editor;
@@ -880,7 +877,7 @@ public abstract class BaseExpressionToFieldHandler extends IntroduceHandlerBase 
     /**
      * @deprecated use CommonJavaRefactoringUtil.appendField instead
      */
-    @Deprecated
+    @Deprecated(forRemoval = true)
     public static PsiField appendField(final PsiClass destClass,
                                        final PsiField psiField,
                                        final PsiElement anchorMember,

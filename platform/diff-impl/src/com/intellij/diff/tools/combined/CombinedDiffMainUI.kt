@@ -43,12 +43,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.Nls
-import org.jetbrains.annotations.NonNls
 import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.Container
 import java.awt.Dimension
-import java.lang.Runnable
 import javax.swing.JComponent
 import javax.swing.SwingUtilities
 import kotlin.math.max
@@ -84,17 +82,6 @@ class CombinedDiffMainUI(private val model: CombinedDiffModel, private val goToC
 
   private val combinedViewer get() = context.getUserData(COMBINED_DIFF_VIEWER_KEY)
 
-  //
-  // Global, shortcuts only navigation actions
-  //
-
-  private val openInEditorAction = object : OpenInEditorAction() {
-    override fun update(e: AnActionEvent) {
-      super.update(e)
-      e.presentation.isVisible = false
-    }
-  }
-
   private var searchController: CombinedDiffSearchController? = null
 
   init {
@@ -118,6 +105,8 @@ class CombinedDiffMainUI(private val model: CombinedDiffModel, private val goToC
     if (bottomPanel is Disposable) Disposer.register(ourDisposable, bottomPanel)
 
     contentPanel.setContent(DiffUtil.createMessagePanel(CommonBundle.getLoadingTreeNodeText()))
+
+    DiffUsageTriggerCollector.logShowCombinedDiffTool(model.project, diffToolChooser.getActiveTool(), model.context.getUserData(DiffUserDataKeys.PLACE))
   }
 
   @RequiresEdt
@@ -261,7 +250,7 @@ class CombinedDiffMainUI(private val model: CombinedDiffModel, private val goToC
     override fun getForcedDiffTool(): DiffTool? = null
   }
 
-  private inner class MyMainPanel : JBPanelWithEmptyText(BorderLayout()), DataProvider {
+  private inner class MyMainPanel : JBPanelWithEmptyText(BorderLayout()), UiDataProvider {
     init {
       background = CombinedDiffUI.MAIN_HEADER_BACKGROUND
     }
@@ -272,26 +261,17 @@ class CombinedDiffMainUI(private val model: CombinedDiffModel, private val goToC
       return Dimension(max(windowSize.width, size.width), max(windowSize.height, size.height))
     }
 
-    override fun getData(dataId: @NonNls String): Any? {
-      val data = DataManagerImpl.getDataProviderEx(contentPanel.targetComponent)?.getData(dataId)
-      if (data != null) return data
+    override fun uiDataSnapshot(sink: DataSink) {
+      sink[DiffDataKeys.DIFF_REQUEST] = getCurrentRequest()
+      sink[OpenInEditorAction.AFTER_NAVIGATE_CALLBACK] = Runnable { DiffUtil.minimizeDiffIfOpenedInWindow(this) }
+      sink[CommonDataKeys.PROJECT] = context.project
+      sink[PlatformCoreDataKeys.HELP_ID] = context.getUserData(DiffUserDataKeys.HELP_ID) ?: "reference.dialogs.diff.file"
+      sink[DiffDataKeys.DIFF_CONTEXT] = context
 
-      return when {
-        DiffDataKeys.DIFF_REQUEST.`is`(dataId) -> getCurrentRequest()
-        OpenInEditorAction.AFTER_NAVIGATE_CALLBACK.`is`(dataId) -> Runnable { DiffUtil.minimizeDiffIfOpenedInWindow(this) }
-        CommonDataKeys.PROJECT.`is`(dataId) -> context.project
-        PlatformCoreDataKeys.HELP_ID.`is`(dataId) -> {
-          if (context.getUserData(DiffUserDataKeys.HELP_ID) != null) {
-            context.getUserData(DiffUserDataKeys.HELP_ID)
-          }
-          else {
-            "reference.dialogs.diff.file"
-          }
-        }
-        DiffDataKeys.DIFF_CONTEXT.`is`(dataId) -> context
-        else -> getCurrentRequest()?.getUserData(DiffUserDataKeys.DATA_PROVIDER)?.getData(dataId)
-                ?: context.getUserData(DiffUserDataKeys.DATA_PROVIDER)?.getData(dataId)
-      }
+      DataSink.uiDataSnapshot(sink, context.getUserData(DiffUserDataKeys.DATA_PROVIDER))
+      DataSink.uiDataSnapshot(sink, getCurrentRequest()?.getUserData(DiffUserDataKeys.DATA_PROVIDER))
+      DataSink.uiDataSnapshot(sink, contentPanel.targetComponent as? UiDataProvider
+                                    ?: DataManagerImpl.getDataProviderEx(contentPanel.targetComponent))
     }
   }
 
@@ -338,6 +318,7 @@ private class ShowActionGroupPopupAction(
 /**
  * Various ui states which shared between the main ui and the combined diff viewer
  */
+@ApiStatus.Experimental
 class CombinedDiffUIState {
   private val searchMode: MutableStateFlow<Boolean> = MutableStateFlow(false)
   private val stickyHeaderUnderBorder: MutableStateFlow<Boolean> = MutableStateFlow(false)

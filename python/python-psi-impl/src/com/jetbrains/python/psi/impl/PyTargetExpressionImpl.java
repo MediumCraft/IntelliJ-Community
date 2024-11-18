@@ -34,10 +34,7 @@ import com.jetbrains.python.psi.resolve.PyResolveContext;
 import com.jetbrains.python.psi.resolve.PyResolveUtil;
 import com.jetbrains.python.psi.resolve.QualifiedNameFinder;
 import com.jetbrains.python.psi.resolve.RatedResolveResult;
-import com.jetbrains.python.psi.stubs.PyAnnotationOwnerStub;
-import com.jetbrains.python.psi.stubs.PyClassStub;
-import com.jetbrains.python.psi.stubs.PyFunctionStub;
-import com.jetbrains.python.psi.stubs.PyTargetExpressionStub;
+import com.jetbrains.python.psi.stubs.*;
 import com.jetbrains.python.psi.types.*;
 import one.util.streamex.StreamEx;
 import org.jetbrains.annotations.NotNull;
@@ -95,8 +92,8 @@ public class PyTargetExpressionImpl extends PyBaseElementImpl<PyTargetExpression
     return this;
   }
 
-  @Override
-  public PyType getType(@NotNull TypeEvalContext context, @NotNull TypeEvalContext.Key key) {
+  @Nullable
+  private PyType getTargetExpressionType(@NotNull TypeEvalContext context) {
     if (PyNames.ALL.equals(getName())) {
       // no type for __all__, to avoid unresolved reference errors for expressions where a qualifier is a name
       // imported via __all__
@@ -111,6 +108,11 @@ public class PyTargetExpressionImpl extends PyBaseElementImpl<PyTargetExpression
       return type;
     }
     if (!context.maySwitchToAST(this)) {
+      PyLiteralKind literalKind = getAssignedLiteralKind(this);
+      if (literalKind != null) {
+        return PyUtil.convertToType(literalKind, PyBuiltinCache.getInstance(this));
+      }
+
       final PyResolveContext resolveContext = PyResolveContext.defaultContext(context);
 
       final List<PyType> types = StreamEx
@@ -181,6 +183,15 @@ public class PyTargetExpressionImpl extends PyBaseElementImpl<PyTargetExpression
     PyType excType = getTypeFromExcept();
     if (excType != null) {
       return excType;
+    }
+    return null;
+  }
+
+  @Override
+  public PyType getType(@NotNull TypeEvalContext context, @NotNull TypeEvalContext.Key key) {
+    PyType type = getTargetExpressionType(context);
+    if (type != null) {
+      return type;
     }
     return null;
   }
@@ -408,14 +419,23 @@ public class PyTargetExpressionImpl extends PyBaseElementImpl<PyTargetExpression
   @Nullable
   private static PyFunction findMethodByName(@NotNull PyType type, @NotNull String name, @NotNull TypeEvalContext context) {
     final PyResolveContext resolveContext = PyResolveContext.defaultContext(context);
-    final List<? extends RatedResolveResult> results = type.resolveMember(name, null, AccessDirection.READ, resolveContext);
+    final PyType actualType;
+    if (type instanceof PyClassType classType && classType.isDefinition()) {
+      PyClassLikeType metaclassType = classType.getMetaClassType(resolveContext.getTypeEvalContext(), true);
+      if (metaclassType == null) return null;
+      actualType = metaclassType;
+    }
+    else {
+      actualType = type;
+    }
+    final List<? extends RatedResolveResult> results = actualType.resolveMember(name, null, AccessDirection.READ, resolveContext);
     if (results != null) {
       List<PyFunction> allMethods = StreamEx.of(results)
         .map(RatedResolveResult::getElement)
         .select(PyFunction.class)
         .toList();
       // TODO Migrate this ad-hoc logic to the normal process of resolving overloads in PyCallExpressionHelper
-      PyFunction matchingBySelf = ContainerUtil.find(allMethods, method -> selfParameterMatchesReceiver(method, type, context));
+      PyFunction matchingBySelf = ContainerUtil.find(allMethods, method -> selfParameterMatchesReceiver(method, actualType, context));
       return matchingBySelf != null ? matchingBySelf : ContainerUtil.getFirstItem(allMethods);
     }
     return null;
@@ -435,7 +455,7 @@ public class PyTargetExpressionImpl extends PyBaseElementImpl<PyTargetExpression
   @Nullable
   public static PyType getContextSensitiveType(@NotNull PyFunction function, @NotNull TypeEvalContext context,
                                                @Nullable PyExpression source) {
-    return function.getCallType(source, buildArgumentsToParametersMap(source, function, context), context);
+    return function.getCallType(source, null, buildArgumentsToParametersMap(source, function, context), context);
   }
 
   @NotNull
@@ -687,5 +707,18 @@ public class PyTargetExpressionImpl extends PyBaseElementImpl<PyTargetExpression
     }
     final PyExpression value = psi.findAssignedValue();
     return value instanceof PyCallExpression ? Ref.create(PyPsiUtils.asQualifiedName(((PyCallExpression)value).getCallee())) : null;
+  }
+
+  @Nullable
+  private static PyLiteralKind getAssignedLiteralKind(@NotNull PyTargetExpression psi) {
+    final PyTargetExpressionStub stub = psi.getStub();
+    if (stub != null) {
+      if (stub.getInitializerType() == PyTargetExpressionStub.InitializerType.Other) {
+        return stub.getAssignedLiteralKind();
+      }
+      return null;
+    }
+    final PyExpression value = psi.findAssignedValue();
+    return PyLiteralKind.fromExpression(value);
   }
 }

@@ -240,7 +240,7 @@ public class ColorAndFontOptions extends SearchableConfigurable.Parent.Abstract
       }
       if (defaultScheme != null && scheme instanceof AbstractColorsScheme) {
         return !((AbstractColorsScheme)scheme)
-          .settingsEqual(defaultScheme, colorKey -> !colorKey.getExternalName().startsWith(FileStatusFactory.FILESTATUS_COLOR_KEY_PREFIX));
+          .settingsEqual(defaultScheme, colorKey -> !colorKey.getExternalName().startsWith(FileStatusFactory.getFilestatusColorKeyPrefix()));
       }
     }
     return false;
@@ -341,7 +341,7 @@ public class ColorAndFontOptions extends SearchableConfigurable.Parent.Abstract
 
   private void selectDefaultScheme() {
     DefaultColorsScheme defaultScheme =
-      (DefaultColorsScheme)EditorColorsManager.getInstance().getScheme(EditorColorsManager.DEFAULT_SCHEME_NAME);
+      (DefaultColorsScheme)EditorColorsManager.getInstance().getScheme(EditorColorsManager.getDefaultSchemeName());
     selectScheme(defaultScheme.getEditableCopyName());
   }
 
@@ -1155,7 +1155,7 @@ public class ColorAndFontOptions extends SearchableConfigurable.Parent.Abstract
     private boolean myIsNew = false;
     private final RainbowColorsInSchemeState myRainbowState;
     private static final Predicate<ColorKey> FILE_STATUS_COLORS =
-      input -> input != null && input.getExternalName().startsWith(FileStatusFactory.FILESTATUS_COLOR_KEY_PREFIX);
+      input -> input != null && input.getExternalName().startsWith(FileStatusFactory.getFilestatusColorKeyPrefix());
 
 
     private MyColorScheme(@NotNull EditorColorsScheme parentScheme) {
@@ -1474,7 +1474,8 @@ public class ColorAndFontOptions extends SearchableConfigurable.Parent.Abstract
     return child == null ? null : child.createPanel();
   }
 
-  private final class InnerSearchableConfigurable implements SearchableConfigurable, OptionsContainingConfigurable, NoScroll, InnerWithModifiableParent {
+  private final class InnerSearchableConfigurable
+    implements SearchableConfigurable, OptionsContainingConfigurable, NoScroll, InnerWithModifiableParent {
     private NewColorAndFontPanel mySubPanel;
     private boolean mySubInitInvoked = false;
     private final @NotNull ColorAndFontPanelFactory myFactory;

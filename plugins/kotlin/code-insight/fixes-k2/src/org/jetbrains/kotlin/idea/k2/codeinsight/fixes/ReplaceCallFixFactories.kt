@@ -1,11 +1,11 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.kotlin.idea.k2.codeinsight.fixes
 
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
+import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.fir.diagnostics.KaFirDiagnostic
-import org.jetbrains.kotlin.analysis.api.types.KtNonErrorClassType
-import org.jetbrains.kotlin.analysis.api.types.KtType
-import org.jetbrains.kotlin.analysis.api.types.KtTypeNullability
+import org.jetbrains.kotlin.analysis.api.types.KaClassType
+import org.jetbrains.kotlin.analysis.api.types.KaType
+import org.jetbrains.kotlin.analysis.api.types.KaTypeNullability
 import org.jetbrains.kotlin.idea.codeinsight.api.applicators.fixes.KotlinQuickFixFactory
 import org.jetbrains.kotlin.idea.quickfix.ReplaceImplicitReceiverCallFix
 import org.jetbrains.kotlin.idea.quickfix.ReplaceInfixOrOperatorCallFix
@@ -40,6 +40,7 @@ object ReplaceCallFixFactories {
                     // in FE1.0 does so.
                     listOf(ReplaceImplicitReceiverCallFix(target, shouldHaveNotNullType))
                 }
+
                 is KtArrayAccessExpression -> listOf(ReplaceInfixOrOperatorCallFix(target, shouldHaveNotNullType))
                 else -> emptyList()
             }
@@ -69,9 +70,9 @@ object ReplaceCallFixFactories {
                 ?: return@IntentionBased emptyList()
             val left = target.left
             if (operationToken in KtTokens.AUGMENTED_ASSIGNMENTS && left is KtArrayAccessExpression) {
-                val type = left.arrayExpression?.getKtType()
+                val type = left.arrayExpression?.expressionType
                     ?: return@IntentionBased emptyList()
-                val argumentType = (type as? KtNonErrorClassType)?.ownTypeArguments?.firstOrNull()
+                val argumentType = (type as? KaClassType)?.typeArguments?.firstOrNull()
                 if (type.isMap() && argumentType?.type?.isMarkedNullable != true) {
                     return@IntentionBased emptyList()
                 }
@@ -101,19 +102,18 @@ object ReplaceCallFixFactories {
             } else emptyList()
         }
 
-    context(KtAnalysisSession)
-    private fun shouldHaveNotNullType(expression: KtExpression): Boolean {
+    private fun KaSession.shouldHaveNotNullType(expression: KtExpression): Boolean {
         // This function is used to determine if we may need to add an elvis operator after the safe call. For example, to replace
         // `s.length` in `val x: Int = s.length` with a safe call, it should be replaced with `s.length ?: <caret>`.
-        val expectedType = expression.getExpectedType() ?: return false
-        return expectedType.nullability == KtTypeNullability.NON_NULLABLE && !expectedType.isUnit
+        val expectedType = expression.expectedType ?: return false
+        return expectedType.nullability == KaTypeNullability.NON_NULLABLE && !expectedType.isUnitType
     }
 
-    context(KtAnalysisSession)
-    private fun KtType.isMap(): Boolean {
-        val symbol = this.expandedClassSymbol ?: return false
+    context(KaSession)
+    private fun KaType.isMap(): Boolean {
+        val symbol = this.expandedSymbol ?: return false
         if (symbol.name?.asString()?.endsWith("Map") != true) return false
-        val mapSymbol = getClassOrObjectSymbolByClassId(StandardClassIds.Map) ?: return false
+        val mapSymbol = findClass(StandardClassIds.Map) ?: return false
         return symbol.isSubClassOf(mapSymbol)
     }
 }

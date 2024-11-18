@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.zmlx.hg4idea.repo;
 
@@ -20,9 +20,12 @@ import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.vcs.log.Hash;
+import kotlin.coroutines.EmptyCoroutineContext;
+import kotlinx.coroutines.CoroutineScope;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.zmlx.hg4idea.HgDisposable;
 import org.zmlx.hg4idea.HgNameWithHashInfo;
 import org.zmlx.hg4idea.HgVcs;
 import org.zmlx.hg4idea.command.HgBranchesCommand;
@@ -31,6 +34,8 @@ import org.zmlx.hg4idea.provider.HgLocalIgnoredHolder;
 import org.zmlx.hg4idea.util.HgUtil;
 
 import java.util.*;
+
+import static com.intellij.platform.util.coroutines.CoroutineScopeKt.childScope;
 
 public final class HgRepositoryImpl extends RepositoryImpl implements HgRepository {
 
@@ -45,17 +50,23 @@ public final class HgRepositoryImpl extends RepositoryImpl implements HgReposito
   @NotNull private volatile HgConfig myConfig;
   private final HgLocalIgnoredHolder myLocalIgnoredHolder;
 
+  private final CoroutineScope coroutineScope;
 
   @SuppressWarnings("ConstantConditions")
   private HgRepositoryImpl(@NotNull VirtualFile rootDir, @NotNull HgVcs vcs) {
     super(vcs.getProject(), rootDir);
     myVcs = vcs;
+
+    coroutineScope = childScope(HgDisposable.getCoroutineScope(myVcs.getProject()), "HgRepositoryImpl",
+                                EmptyCoroutineContext.INSTANCE, true);
+
     myHgDir = rootDir.findChild(HgUtil.DOT_HG);
     assert myHgDir != null : ".hg directory wasn't found under " + rootDir.getPresentableUrl();
     myReader = new HgRepositoryReader(vcs, VfsUtilCore.virtualToIoFile(myHgDir));
     myConfig = HgConfig.getInstance(getProject(), rootDir);
     myLocalIgnoredHolder = new HgLocalIgnoredHolder(this, HgUtil.getRepositoryManager(getProject()));
-    myLocalIgnoredHolder.setupListeners();
+
+    myLocalIgnoredHolder.setupListeners(coroutineScope);
     Disposer.register(this, myLocalIgnoredHolder);
     myLocalIgnoredHolder.addUpdateStateListener(new MyIgnoredHolderAsyncListener(getProject()));
     update();

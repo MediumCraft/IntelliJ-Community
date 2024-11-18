@@ -13,7 +13,7 @@ import com.intellij.l10n.LocalizationUtil
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.PathManager
-import com.intellij.openapi.components.ComponentStoreOwner
+import com.intellij.openapi.components.impl.stores.ComponentStoreOwner
 import com.intellij.openapi.diagnostic.getOrLogException
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.extensions.PluginDescriptor
@@ -183,8 +183,9 @@ private fun loadDefaultTemplates(prefixes: List<String>): FileTemplateLoadResult
     if ((loader is PluginAwareClassLoader && loader.files.isEmpty()) || !processedLoaders.add(loader)) {
       // test or development mode, when IDEA_CORE's loader contains all the classpath
       continue
+    } else if (loader is PluginAwareClassLoader && LocalizationUtil.isLocalizationPluginDescriptor(loader.pluginDescriptor) && !LocalizationUtil.isCurrentLocalizationPluginDescriptor(loader.pluginDescriptor)) {
+      continue
     }
-
     if (module.moduleName != null && module.jarFiles.isNullOrEmpty()) {
       // not isolated module - skip, as resource will be loaded from plugin classpath
       continue
@@ -371,22 +372,25 @@ private class LoadedConfiguration(@JvmField val managers: Map<String, FTManager>
 }
 
 private fun loadLocalizedContent(classLoader: ClassLoader, root: Any, path: String): String? {
-  var result: String? = null
+  var result: String?
   val locale = LocalizationUtil.getLocaleOrNullForDefault()
   if (locale != null) {
-    //loading from localization plugin
-    val localizedPaths = LocalizationUtil.getLocalizedPaths(Path.of(path)).map { it.invariantSeparatorsPathString }
-    result = LocalizationUtil.getPluginClassLoader()?.let {
-      ResourceUtil.getResourceAsBytesSafely(path, it)?.toString(StandardCharsets.UTF_8)
-    }
-    //loading localized content from source files
-    if (!result.isNullOrEmpty()) return result
+    //loading from source files with localization folder/suffix
+    val localizedPaths = LocalizationUtil.getLocalizedPaths(path)
     for (localizedPath in localizedPaths) {
       result = loadFileContent(classLoader, root, localizedPath)
-      if (!result.isNullOrEmpty()) return result
+      if (!result.isNullOrEmpty()) {
+        return result
+      }
     }
+    //loading from localization plugin
+    result = LocalizationUtil.getPluginClassLoader()?.let {
+      ResourceUtil.getResourceAsBytesSafely(path, it)?.toString(StandardCharsets.UTF_8)
+    }  ?: loadFileContent(classLoader, root, path)
+    //loading localized content from source files
+    if (!result.isNullOrEmpty()) return result
   }
-  //default loading content in case of default locale
+  //default loading content
   result = loadFileContent(classLoader, root, path)
   return result
 }
@@ -395,7 +399,10 @@ private fun loadFileContent(classLoader: ClassLoader, root: Any, path: String): 
   var result: String? = null
   try {
     result = ResourceUtil.getResourceAsBytesSafely(path, classLoader)?.toString(StandardCharsets.UTF_8)
-    if (!result.isNullOrEmpty()) return result
+    if (!result.isNullOrEmpty()) {
+      return result
+    }
+
     when (root) {
       is URL -> {
         val url = URL(root.protocol, root.host, root.port, root.path.replace(DEFAULT_TEMPLATES_ROOT, path))

@@ -6,10 +6,11 @@ import com.intellij.openapi.util.NlsSafe
 import com.intellij.ui.components.JBComboBoxLabel
 import com.intellij.ui.components.editors.JBComboBoxTableCellEditorComponent
 import com.intellij.util.ui.AbstractTableCellEditor
+import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
 import org.jetbrains.kotlin.analysis.api.analyze
 import org.jetbrains.kotlin.analysis.api.permissions.KaAllowAnalysisOnEdt
 import org.jetbrains.kotlin.analysis.api.permissions.allowAnalysisOnEdt
-import org.jetbrains.kotlin.analysis.api.types.KtType
+import org.jetbrains.kotlin.analysis.api.types.KaType
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.k2.refactoring.extractFunction.Parameter
 import org.jetbrains.kotlin.idea.refactoring.introduce.ui.AbstractParameterTablePanel
@@ -37,7 +38,7 @@ abstract class FirExtractFunctionParameterTablePanel :
 
         override fun toParameter() = object : Parameter by originalParameter {
             override val name: String = this@ParameterInfo.name
-            override val parameterType: KtType = this@ParameterInfo.type
+            override val parameterType: KaType = this@ParameterInfo.type
         }
     }
 
@@ -45,7 +46,7 @@ abstract class FirExtractFunctionParameterTablePanel :
 
     override fun createTableModel(): TableModelBase = MyTableModel()
 
-    @OptIn(KaAllowAnalysisOnEdt::class)
+    @OptIn(KaAllowAnalysisOnEdt::class, KaExperimentalApi::class)
     override fun createAdditionalColumns() {
         with(table.columnModel.getColumn(PARAMETER_TYPE_COLUMN)) {
             headerValue = KotlinBundle.message("text.type")
@@ -56,7 +57,7 @@ abstract class FirExtractFunctionParameterTablePanel :
                     table: JTable, value: Any, isSelected: Boolean, hasFocus: Boolean, row: Int, column: Int
                 ): Component {
                     @NlsSafe val renderType =
-                        allowAnalysisOnEdt { analyze(context) { (value as KtType).render(position = Variance.IN_VARIANCE) } }
+                        allowAnalysisOnEdt { analyze(context) { (value as KaType).render(position = Variance.IN_VARIANCE) } }
                     myLabel.text = renderType
                     myLabel.background = if (isSelected) table.selectionBackground else table.background
                     myLabel.foreground = if (isSelected) table.selectionForeground else table.foreground
@@ -82,7 +83,7 @@ abstract class FirExtractFunctionParameterTablePanel :
                     myEditorComponent.setOptions(*info.originalParameter.getParameterTypeCandidates().toTypedArray())
                     myEditorComponent.setDefaultValue(info.type)
                     myEditorComponent.setToString {
-                        analyze(context) { (it as KtType).render(position = Variance.IN_VARIANCE) }
+                        analyze(context) { (it as KaType).render(position = Variance.IN_VARIANCE) }
                     }
 
                     return myEditorComponent
@@ -109,7 +110,7 @@ abstract class FirExtractFunctionParameterTablePanel :
 
         override fun setValueAt(aValue: Any?, rowIndex: Int, columnIndex: Int) {
             if (columnIndex == PARAMETER_TYPE_COLUMN) {
-                parameterInfos[rowIndex].type = aValue as KtType
+                parameterInfos[rowIndex].type = aValue as KaType
                 updateSignature()
                 return
             }

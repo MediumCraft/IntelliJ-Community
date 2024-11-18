@@ -12,6 +12,7 @@ import org.jetbrains.kotlin.analysis.api.permissions.KaAllowAnalysisFromWriteAct
 import org.jetbrains.kotlin.analysis.api.permissions.KaAllowAnalysisOnEdt
 import org.jetbrains.kotlin.analysis.api.permissions.allowAnalysisFromWriteAction
 import org.jetbrains.kotlin.analysis.api.permissions.allowAnalysisOnEdt
+import org.jetbrains.kotlin.idea.base.psi.safeDeparenthesize
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.codeinsights.impl.base.inspections.OperatorToFunctionConverter
 import org.jetbrains.kotlin.idea.k2.refactoring.inline.codeInliner.CodeInliner
@@ -80,16 +81,20 @@ class KotlinInlineAnonymousFunctionProcessor(
                         usageExpression = null,
                         call = invokeCallExpression,
                         inlineSetter = false,
-                        codeToInline = codeToInline,
+                        replacement = codeToInline,
                     ).doInline()
                 }
             }
         }
 
         private fun findFunction(qualifiedExpression: KtQualifiedExpression): KtFunction? =
-            when (val expression = KtPsiUtil.safeDeparenthesize(qualifiedExpression.receiverExpression)) {
+            when (val expression = qualifiedExpression.receiverExpression.safeDeparenthesize()) {
                 is KtLambdaExpression -> expression.functionLiteral
                 is KtNamedFunction -> expression
+                is KtDotQualifiedExpression -> expression.selectorExpression?.let { expr ->
+                    val deparenthesize = expr.safeDeparenthesize()
+                    (deparenthesize as? KtLambdaExpression)?.functionLiteral ?: deparenthesize as? KtNamedFunction
+                }
                 else -> null
             }
 

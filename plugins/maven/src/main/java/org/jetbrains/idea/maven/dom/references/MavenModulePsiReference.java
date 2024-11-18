@@ -18,6 +18,7 @@ import com.intellij.util.PathUtil;
 import com.intellij.util.xml.DomFileElement;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.idea.maven.dom.MavenAdditionalHightligher;
 import org.jetbrains.idea.maven.dom.MavenDomBundle;
 import org.jetbrains.idea.maven.dom.MavenDomUtil;
 import org.jetbrains.idea.maven.dom.model.MavenDomProjectModel;
@@ -26,8 +27,9 @@ import org.jetbrains.idea.maven.model.MavenId;
 import org.jetbrains.idea.maven.project.MavenProjectBundle;
 import org.jetbrains.idea.maven.utils.MavenUtil;
 
-import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -42,15 +44,22 @@ public class MavenModulePsiReference extends MavenPsiReference implements LocalQ
     if (baseDir == null) return null;
 
     String path = FileUtil.toSystemIndependentName(myText);
-    VirtualFile file =  baseDir.findFileByRelativePath(path);
+    VirtualFile file = baseDir.findFileByRelativePath(path);
 
     if (file == null || file.isDirectory()) {
       String relPath = FileUtil.toSystemIndependentName(path + "/" + MavenConstants.POM_XML);
       file = baseDir.findFileByRelativePath(relPath);
     }
 
-    if (file == null) return null;
+    if (file == null) {
+      PsiFile result =
+        MavenAdditionalHightligher.EP.getExtensionList().stream().map(e -> e.resolveModulePsi(myText, myPsiFile, myVirtualFile))
+          .filter(it -> it != null).findFirst().orElse(null);
+      if (result != null) return result;
+    }
 
+
+    if (file == null) return null;
     return getPsiFile(file);
   }
 
@@ -145,7 +154,7 @@ public class MavenModulePsiReference extends MavenPsiReference implements LocalQ
       String modulePath = FileUtil.toCanonicalPath(baseDir.getPath() + "/" + myModulePath);
       String pomFileName = MavenConstants.POM_XML;
 
-      if (!new File(FileUtil.toSystemDependentName(modulePath)).isDirectory()) {
+      if (!Files.isDirectory(Path.of(FileUtil.toSystemDependentName(modulePath)))) {
         String fileName = PathUtil.getFileName(modulePath);
         if (MavenUtil.isPomFileName(fileName) || MavenUtil.isPotentialPomFile(fileName)) {
           modulePath = PathUtil.getParentPath(modulePath);

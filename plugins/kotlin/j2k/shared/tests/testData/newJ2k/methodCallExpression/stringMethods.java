@@ -1,5 +1,3 @@
-// IGNORE_K2
-
 import java.nio.charset.Charset;
 import java.util.*;
 
@@ -119,6 +117,11 @@ class A {
         String.valueOf(1.11F);
         String.valueOf(3.14);
         String.valueOf(new Object());
+
+        int i = 0;
+        String.valueOf(++i);
+        String.valueOf(i++);
+        String.valueOf(1 + 1);
 
         String.format(
                 Locale.FRENCH,

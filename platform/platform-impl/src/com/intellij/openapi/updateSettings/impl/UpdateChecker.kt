@@ -7,7 +7,6 @@ import com.intellij.ide.externalComponents.ExternalComponentSource
 import com.intellij.ide.plugins.*
 import com.intellij.ide.plugins.marketplace.MarketplaceRequests
 import com.intellij.ide.util.PropertiesComponent
-import com.intellij.internal.statistic.eventLog.fus.MachineIdManager
 import com.intellij.notification.*
 import com.intellij.openapi.actionSystem.PlatformCoreDataKeys
 import com.intellij.openapi.application.*
@@ -23,11 +22,14 @@ import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
-import com.intellij.openapi.updateSettings.impl.UpdateChecker.MACHINE_ID_DISABLED_PROPERTY
-import com.intellij.openapi.util.*
+import com.intellij.openapi.util.ActionCallback
+import com.intellij.openapi.util.BuildNumber
+import com.intellij.openapi.util.JDOMUtil
+import com.intellij.openapi.util.NlsContexts
 import com.intellij.openapi.util.text.HtmlBuilder
 import com.intellij.openapi.wm.impl.welcomeScreen.WelcomeFrame
 import com.intellij.platform.ide.customization.ExternalProductResourceUrls
+import com.intellij.util.Url
 import com.intellij.util.concurrency.AppExecutorUtil
 import com.intellij.util.concurrency.annotations.RequiresBackgroundThread
 import com.intellij.util.concurrency.annotations.RequiresEdt
@@ -62,7 +64,6 @@ private const val DISABLED_UPDATE = "disabled_update.txt"
 private const val DISABLED_PLUGIN_UPDATE = "plugin_disabled_updates.txt"
 private const val PRODUCT_DATA_TTL_MIN = 5L
 
-private var machineIdInitialized = false
 private val shownNotifications = MultiMap<NotificationKind, Notification>()
 
 @Service
@@ -70,10 +71,7 @@ private class UpdateCheckerHelper(private val coroutineScope: CoroutineScope) {
   @OptIn(ExperimentalCoroutinesApi::class)
   private val limitedDispatcher = Dispatchers.IO.limitedParallelism(1)
 
-  /**
-   * For scheduled update checks.
-   */
-  fun updateAndShowResult(showResults: Boolean = false): ActionCallback {
+  fun updateAndShowResult(showResults: Boolean): ActionCallback {
     val callback = ActionCallback()
     coroutineScope.launch(limitedDispatcher) {
       doUpdateAndShowResult(
@@ -96,10 +94,11 @@ private class UpdateCheckerHelper(private val coroutineScope: CoroutineScope) {
  * See XML file by [ApplicationInfoEx.getUpdateUrls] for reference.
  */
 object UpdateChecker {
-  const val MACHINE_ID_DISABLED_PROPERTY: String = "machine.id.disabled"
-  const val MACHINE_ID_PARAMETER: String = "mid"
+  internal const val MACHINE_ID_DISABLED_PROPERTY: String = "machine.id.disabled"
+  internal const val MACHINE_ID_PARAMETER: String = "mid"
 
   private val productDataLock = ReentrantLock()
+  private var productDataUrl: Url? = null
   private var productDataCache: SoftReference<Result<Product?>>? = null
   private val ourUpdatedPlugins: MutableMap<PluginId, PluginDownloader> = HashMap()
 
@@ -108,19 +107,6 @@ object UpdateChecker {
    * Has no effect on non-bundled plugins.
    */
   val excludedFromUpdateCheckPlugins: HashSet<String> = hashSetOf()
-
-  init {
-    UpdateRequestParameters.addParameter("build", ApplicationInfo.getInstance().build.asString())
-    UpdateRequestParameters.addParameter("uid", PermanentInstallationID.get())
-    UpdateRequestParameters.addParameter("os", SystemInfo.OS_NAME + ' ' + SystemInfo.OS_VERSION)
-    if (ExternalUpdateManager.ACTUAL != null) {
-      val name = if (ExternalUpdateManager.ACTUAL == ExternalUpdateManager.TOOLBOX) "Toolbox" else ExternalUpdateManager.ACTUAL.toolName
-      UpdateRequestParameters.addParameter("manager", name)
-    }
-    if (ApplicationInfoEx.getInstanceEx().isEAP) {
-      UpdateRequestParameters.addParameter("eap", "")
-    }
-  }
 
   @JvmStatic
   fun getNotificationGroup(): NotificationGroup =
@@ -139,10 +125,11 @@ object UpdateChecker {
    */
   @JvmStatic
   fun updateAndShowResult(): ActionCallback =
-    service<UpdateCheckerHelper>().updateAndShowResult()
+    service<UpdateCheckerHelper>().updateAndShowResult(showResults = true)
 
+  @ApiStatus.Internal
   fun getUpdates(): ActionCallback =
-    service<UpdateCheckerHelper>().updateAndShowResult(false)
+    service<UpdateCheckerHelper>().updateAndShowResult(showResults = false)
 
   /**
    * For manual update checks (Help | Check for Updates, Settings | Updates | Check Now)
@@ -197,33 +184,37 @@ object UpdateChecker {
 
   @JvmStatic
   @Throws(IOException::class, JDOMException::class)
-  fun loadProductData(indicator: ProgressIndicator?): Product? =
-    productDataLock.withLock {
+  fun loadProductData(indicator: ProgressIndicator?): Product? {
+    val url = ExternalProductResourceUrls.getInstance().updateMetadataUrl ?: return null
+
+    return productDataLock.withLock {
       val cached = productDataCache?.get()
-      if (cached != null) return@withLock cached.getOrThrow()
-      val url = ExternalProductResourceUrls.getInstance().updateMetadataUrl ?: return@withLock null
+      if (cached != null && url == productDataUrl) return@withLock cached.getOrThrow()
 
       val result = runCatching {
         LOG.debug { "loading ${url}" }
         HttpRequests.request(url)
+          .productNameAsUserAgent()
           .connect { JDOMUtil.load(it.getReader(indicator)) }
           .let { parseUpdateData(it) }
           ?.also {
             if (it.disableMachineId) {
               PropertiesComponent.getInstance().setValue(MACHINE_ID_DISABLED_PROPERTY, true)
-              UpdateRequestParameters.removeParameter(MACHINE_ID_PARAMETER)
             }
           }
       }
 
       productDataCache = SoftReference(result)
+      productDataUrl = url
       AppExecutorUtil.getAppScheduledExecutorService().schedule(this::clearProductDataCache, PRODUCT_DATA_TTL_MIN, TimeUnit.MINUTES)
-      return@withLock result.getOrThrow()
+      result.getOrThrow()
     }
+  }
 
   private fun clearProductDataCache() {
     if (productDataLock.tryLock(1, TimeUnit.MILLISECONDS)) {  // a longer time means loading now, no much sense in clearing
       productDataCache = null
+      productDataUrl = null
       productDataLock.unlock()
     }
   }
@@ -291,11 +282,9 @@ object UpdateChecker {
             }
             // collect latest plugins from custom repos
             val storedDescriptor = customRepoPlugins[id]
-            if (storedDescriptor == null
-                || VersionComparatorUtil.compare(descriptor.version, storedDescriptor.version) > 0 &&
-                allowedUpgrade(storedDescriptor, descriptor)
-                || (VersionComparatorUtil.compare(descriptor.version, storedDescriptor.version) < 0 &&
-                    allowedDowngrade(storedDescriptor, descriptor))) {
+            if (storedDescriptor == null ||
+                (VersionComparatorUtil.compare(descriptor.version, storedDescriptor.version) > 0 && allowedUpgrade(storedDescriptor, descriptor)) ||
+                (VersionComparatorUtil.compare(descriptor.version, storedDescriptor.version) < 0 && allowedDowngrade(storedDescriptor, descriptor))) {
               customRepoPlugins[id] = descriptor
             }
           }
@@ -385,9 +374,8 @@ object UpdateChecker {
     val updates = MarketplaceRequests.getLastCompatiblePluginUpdate(idsToUpdate, buildNumber)
     for ((id, descriptor) in updateable) {
       val lastUpdate = updates.find { it.pluginId == id.idString }
-      if (lastUpdate != null && (descriptor == null || PluginDownloader.compareVersionsSkipBrokenAndIncompatible(lastUpdate.version,
-                                                                                                                 descriptor,
-                                                                                                                 buildNumber) > 0)) {
+      if (lastUpdate != null &&
+          (descriptor == null || PluginDownloader.compareVersionsSkipBrokenAndIncompatible(lastUpdate.version, descriptor, buildNumber) > 0)) {
         runCatching { MarketplaceRequests.loadPluginDescriptor(id.idString, lastUpdate, indicator) }
           .onFailure {
             if (!isNetworkError(it)) throw it
@@ -502,10 +490,7 @@ object UpdateChecker {
   @JvmStatic
   fun saveDisabledToUpdatePlugins() {
     runCatching {
-      PluginManagerCore.writePluginIdsToFile(
-        /* path = */ PathManager.getConfigDir().resolve(DISABLED_UPDATE),
-        /* pluginIds = */ disabledToUpdate,
-      )
+      PluginManagerCore.writePluginIdsToFile(PathManager.getConfigDir().resolve(DISABLED_UPDATE), disabledToUpdate.asSequence())
     }.onFailure {
       LOG.error(it)
     }
@@ -618,14 +603,6 @@ private fun doUpdateAndShowResult(
   indicator: ProgressIndicator? = null,
   callback: ActionCallback? = null,
 ): (() -> Unit)? {
-  if (!PropertiesComponent.getInstance().getBoolean(MACHINE_ID_DISABLED_PROPERTY, false) && !machineIdInitialized) {
-    machineIdInitialized = true
-    val machineId = MachineIdManager.getAnonymizedMachineId("JetBrainsUpdates", "")
-    if (machineId != null) {
-      UpdateRequestParameters.addParameter(UpdateChecker.MACHINE_ID_PARAMETER, machineId)
-    }
-  }
-
   val updateSettings = customSettings ?: UpdateSettings.getInstance()
 
   val platformUpdates = UpdateChecker.getPlatformUpdates(updateSettings, indicator)
@@ -677,8 +654,24 @@ private fun doUpdateAndShowResult(
   // disabled plugins are excluded from updates, see IDEA-273418, TODO refactor
   // probably it can lead to disabled plugins becoming incompatible without a notification in platform update dialog
   val updatesForPlugins = updatesForEnabledPlugins // + nonIgnored(pluginUpdates.allDisabled)
+
+  // TODO revise this
+  val pluginAutoUpdateService = service<PluginAutoUpdateService>()
+  if (platformUpdates !is PlatformUpdates.Loaded) {
+    pluginAutoUpdateService.onPluginUpdatesCheck(updatesForPlugins)
+  } else {
+    if (pluginAutoUpdateService.isAutoUpdateEnabled()) {
+      val (pluginUpdates, _) = UpdateChecker.getInternalPluginUpdates(indicator = indicator)
+      pluginAutoUpdateService.onPluginUpdatesCheck(nonIgnored(pluginUpdates.allEnabled))
+    }
+  }
+
   if (!showResults) {
-    UpdateSettingsEntryPointActionProvider.newPluginUpdates(updatesForPlugins, customRepoPlugins)
+    if (platformUpdates is PlatformUpdates.Loaded) {
+      UpdateSettingsEntryPointActionProvider.newPlatformUpdate(platformUpdates, updatesForPlugins, pluginUpdates.incompatible)
+    } else {
+      UpdateSettingsEntryPointActionProvider.newPluginUpdates(updatesForPlugins, customRepoPlugins)
+    }
     callback?.setDone()
     return null
   }

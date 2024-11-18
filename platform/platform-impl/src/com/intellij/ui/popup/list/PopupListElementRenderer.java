@@ -34,12 +34,13 @@ public class PopupListElementRenderer<E> extends GroupedItemsListRenderer<E> {
 
   protected final ListPopupImpl myPopup;
   private @Nullable JLabel myShortcutLabel;
-  protected @Nullable JLabel mySecondaryTextLabel;
+  private @Nullable JLabel mySecondaryIconLabel;
+  private @Nullable JLabel mySecondaryTextLabel;
   protected JLabel myMnemonicLabel;
   protected JLabel myIconLabel;
 
-  protected JPanel myButtonPane;
-  protected JComponent myMainPane;
+  private JPanel myButtonPane;
+  private JComponent myMainPane;
   protected JComponent myButtonSeparator;
   protected JComponent myIconBar;
 
@@ -82,7 +83,7 @@ public class PopupListElementRenderer<E> extends GroupedItemsListRenderer<E> {
       }
     });
     myPopup = aPopup;
-    myInlineActionsSupport = PopupInlineActionsSupport.Companion.create(myPopup);
+    myInlineActionsSupport = PopupInlineActionsSupportKt.createSupport(myPopup);
   }
 
   public ListPopupImpl getPopup() {
@@ -126,12 +127,22 @@ public class PopupListElementRenderer<E> extends GroupedItemsListRenderer<E> {
     };
     panel.add(myTextLabel, BorderLayout.WEST);
 
+    JPanel secondary = new JPanel(new BorderLayout());
+    JBEmptyBorder secondaryBorder = ExperimentalUI.isNewUI() ? JBUI.Borders.empty() : JBUI.Borders.empty(0, 8, 1, 0);
+    secondary.setBorder(secondaryBorder);
+
     mySecondaryTextLabel = new JLabel();
     mySecondaryTextLabel.setEnabled(false);
-    JBEmptyBorder valueBorder = ExperimentalUI.isNewUI() ? JBUI.Borders.empty() : JBUI.Borders.empty(0, 8, 1, 0);
-    mySecondaryTextLabel.setBorder(valueBorder);
     mySecondaryTextLabel.setForeground(UIManager.getColor("MenuItem.acceleratorForeground"));
-    panel.add(mySecondaryTextLabel, BorderLayout.CENTER);
+    secondary.add(mySecondaryTextLabel, BorderLayout.EAST);
+
+    mySecondaryIconLabel = new JLabel();
+    JBEmptyBorder secondaryIconBorder = JBUI.Borders.empty(0, JBUI.CurrentTheme.ActionsList.elementIconGap() + 1, 0, 1);
+    mySecondaryIconLabel.setBorder(secondaryIconBorder);
+    mySecondaryIconLabel.setVisible(false);
+    secondary.add(mySecondaryIconLabel, BorderLayout.WEST);
+
+    panel.add(secondary, BorderLayout.CENTER);
 
     myShortcutLabel = new JLabel();
     JBEmptyBorder shortcutBorder = ExperimentalUI.isNewUI() ? JBUI.Borders.empty() : JBUI.Borders.empty(0,0,1,3);
@@ -387,6 +398,21 @@ public class PopupListElementRenderer<E> extends GroupedItemsListRenderer<E> {
       setForegroundSelected(mySecondaryTextLabel, selected);
     }
 
+    if (mySecondaryIconLabel != null) {
+      Icon icon = isShowSecondaryIcon() && step instanceof ListPopupStepEx<Object> o ?
+                  o.getSecondaryIconFor(value) : null;
+
+      if (icon != null) {
+        mySecondaryIconLabel.setIcon(icon);
+        boolean selected = isSelected && isSelectable && !nextStepButtonSelected;
+        setForegroundSelected(mySecondaryIconLabel, selected);
+        mySecondaryIconLabel.setVisible(true);
+      }
+      else {
+        mySecondaryIconLabel.setVisible(false);
+      }
+    }
+
     if (ExperimentalUI.isNewUI() && getItemComponent() instanceof SelectablePanel selectablePanel) {
       selectablePanel.setSelectionColor(isSelected && isSelectable ? UIUtil.getListSelectionBackground(true) : null);
       setSelected(myMainPane, isSelected && isSelectable);
@@ -394,6 +420,10 @@ public class PopupListElementRenderer<E> extends GroupedItemsListRenderer<E> {
   }
 
   protected boolean isShowSecondaryText() {
+    return true;
+  }
+
+  protected boolean isShowSecondaryIcon() {
     return true;
   }
 
@@ -405,24 +435,29 @@ public class PopupListElementRenderer<E> extends GroupedItemsListRenderer<E> {
       .setDefaultWeightY(1.0);
 
     boolean isSelectable = step.isSelectable(value);
+    Integer activeButtonIndex;
     java.util.List<JComponent> extraButtons;
     if (!isSelectable) {
+      activeButtonIndex = null;
       extraButtons = Collections.emptyList();
-    } else {
-      extraButtons = myInlineActionsSupport.getExtraButtons(list, value, isSelected);
+    }
+    else {
+      activeButtonIndex = myInlineActionsSupport.getActiveButtonIndex(list);
+      extraButtons = myInlineActionsSupport.createExtraButtons(
+        value, isSelected, !isSelected || activeButtonIndex == null ? -1 : activeButtonIndex);
     }
 
     if (!extraButtons.isEmpty()) {
       myButtonSeparator.setVisible(true);
       extraButtons.forEach(comp -> myButtonPane.add(comp, gb.next()));
-      Integer activeButtonIndex = myInlineActionsSupport.getActiveButtonIndex(list);
       // We ONLY need to update the tooltip if there's an active inline action button.
       // Otherwise, it's set earlier from the main action.
       // If there is an active button without a tooltip, we still need to set the tooltip
       // to null, otherwise it'll look ugly, as if the inline action button has the same
       // tooltip as the main action.
-      if (activeButtonIndex != null) {
-        myRendererComponent.setToolTipText(myInlineActionsSupport.getActiveExtraButtonToolTipText(list, value));
+      if (activeButtonIndex != null && activeButtonIndex < extraButtons.size()) {
+        String text = myInlineActionsSupport.getToolTipText(value, activeButtonIndex);
+        myRendererComponent.setToolTipText(text);
       }
     }
     else if (!hasNextIcon && myInlineActionsSupport.hasExtraButtons(value)){

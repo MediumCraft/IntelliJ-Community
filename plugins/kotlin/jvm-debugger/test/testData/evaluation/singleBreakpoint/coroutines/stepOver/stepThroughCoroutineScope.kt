@@ -30,6 +30,7 @@ suspend fun endMethod(i: Int) {
 
 fun main() {
     runBlocking {
+        foo(-1)
         repeat(100) { i ->
             launch(Dispatchers.Default) {
                 foo(i)
@@ -39,5 +40,3 @@ fun main() {
 }
 
 // STEP_OVER: 3
-// REGISTRY: debugger.filter.breakpoints.by.coroutine.id=true
-// REGISTRY: debugger.always.suspend.thread.before.switch=true

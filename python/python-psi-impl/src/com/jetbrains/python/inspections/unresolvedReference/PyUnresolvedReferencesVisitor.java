@@ -3,6 +3,7 @@ package com.jetbrains.python.inspections.unresolvedReference;
 
 import com.google.common.collect.FluentIterable;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 import com.intellij.codeInsight.controlflow.ControlFlow;
 import com.intellij.codeInsight.controlflow.ControlFlowUtil;
@@ -69,6 +70,7 @@ public abstract class PyUnresolvedReferencesVisitor extends PyInspectionVisitor 
   private final ImmutableSet<String> myIgnoredIdentifiers;
   private final PyInspection myInspection;
   private volatile Boolean myIsEnabled = null;
+  protected final List<PyPackageInstallAllProblemInfo> myUnresolvedRefs = Collections.synchronizedList(new ArrayList<>());
 
   protected PyUnresolvedReferencesVisitor(@Nullable ProblemsHolder holder,
                                           List<String> ignoredIdentifiers,
@@ -295,7 +297,7 @@ public abstract class PyUnresolvedReferencesVisitor extends PyInspectionVisitor 
         return;
       }
       if (!expr.isQualified()) {
-        if (PyInspectionsUtil.hasAnyInterruptedControlFlowPaths(expr)) {
+        if (PyInspectionsUtil.hasAnyInterruptedControlFlowPaths(expr, myTypeEvalContext)) {
           return;
         }
         ContainerUtil.addIfNotNull(fixes, getTrueFalseQuickFix(refText));
@@ -386,14 +388,24 @@ public abstract class PyUnresolvedReferencesVisitor extends PyInspectionVisitor 
 
     ContainerUtil.addAll(fixes, getImportStatementQuickFixes(element));
     ContainerUtil.addAll(fixes, getAddIgnoredIdentifierQuickFixes(qualifiedNames));
-    ContainerUtil.addAll(fixes, getInstallPackageQuickFixes(node, reference, refName));
+    var installPackageQuickFixes = getInstallPackageQuickFixes(node, reference, refName);
+    var isAddedToInstallAllFix = false;
+    if (Iterables.size(installPackageQuickFixes) > 0) {
+      ContainerUtil.addAll(fixes, installPackageQuickFixes);
+      PyPackageInstallAllProblemInfo problemInfo =
+        new PyPackageInstallAllProblemInfo(node, description, hl_type, refName, fixes);
+      myUnresolvedRefs.add(problemInfo);
+      isAddedToInstallAllFix = true;
+    }
 
     if (reference instanceof PySubstitutionChunkReference) {
       return;
     }
 
     getPluginQuickFixes(fixes, reference);
-    registerProblem(node, description, hl_type, null, rangeInElement, fixes.toArray(LocalQuickFix.EMPTY_ARRAY));
+    if (!isAddedToInstallAllFix) {
+      registerProblem(node, description, hl_type, null, rangeInElement, fixes.toArray(LocalQuickFix.EMPTY_ARRAY));
+    }
   }
 
   private boolean isDeclaredInSlots(@NotNull PyType type, @NotNull String attrName) {
@@ -522,6 +534,21 @@ public abstract class PyUnresolvedReferencesVisitor extends PyInspectionVisitor 
       .filter(Objects::nonNull)
       .findFirst()
       .orElse(null);
+  }
+
+  public void addInstallAllImports() {
+    List<String> refNames = myUnresolvedRefs.stream().map(it -> it.getRefName()).distinct().toList();
+
+    for (PyPackageInstallAllProblemInfo unresolved : myUnresolvedRefs) {
+      var quickFixes = unresolved.getFixes();
+
+      if (refNames.size() > 1) {
+        var installAllPackageQuickFixes = getInstallAllPackagesQuickFixes();
+        ContainerUtil.addAll(quickFixes, installAllPackageQuickFixes);
+      }
+      registerProblem(unresolved.getPsiElement(), unresolved.getDescriptionTemplate(), unresolved.getHighlightType(), null,
+                      quickFixes.toArray(LocalQuickFix.EMPTY_ARRAY));
+    }
   }
 
   public void highlightUnusedImports() {
@@ -890,6 +917,10 @@ public abstract class PyUnresolvedReferencesVisitor extends PyInspectionVisitor 
   protected Iterable<LocalQuickFix> getInstallPackageQuickFixes(@NotNull PyElement node,
                                                                 @NotNull PsiReference reference,
                                                                 String refName) {
+    return Collections.emptyList();
+  }
+
+  protected Iterable<LocalQuickFix> getInstallAllPackagesQuickFixes() {
     return Collections.emptyList();
   }
 

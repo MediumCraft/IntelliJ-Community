@@ -56,13 +56,29 @@ def find_gui_and_backend():
 def is_interactive_backend(backend):
     """ Check if backend is interactive """
     matplotlib = sys.modules['matplotlib']
-    from matplotlib.rcsetup import interactive_bk, non_interactive_bk  # @UnresolvedImport
-    if backend in interactive_bk:
-        return True
-    elif backend in non_interactive_bk:
-        return False
+    required_version = (3, 9)
+    installed_version = (
+        _get_major_version(matplotlib),
+        _get_minor_version(matplotlib)
+    )
+
+    if installed_version >= required_version:
+        interactive_bk = matplotlib.backends.backend_registry.list_builtin(matplotlib.backends.BackendFilter.INTERACTIVE)
+        non_interactive_bk = matplotlib.backends.backend_registry.list_builtin(matplotlib.backends.BackendFilter.NON_INTERACTIVE)
+        if backend in interactive_bk:
+            return True
+        elif backend in non_interactive_bk:
+            return False
+        else:
+            return matplotlib.is_interactive()
     else:
-        return matplotlib.is_interactive()
+        from matplotlib.rcsetup import interactive_bk, non_interactive_bk  # @UnresolvedImport
+        if backend in interactive_bk:
+            return True
+        elif backend in non_interactive_bk:
+            return False
+        else:
+            return matplotlib.is_interactive()
 
 
 def patch_use(enable_gui_function):
@@ -89,6 +105,10 @@ def patch_is_interactive():
 
 def _get_major_version(module):
     return int(module.__version__.split('.')[0])
+
+
+def _get_minor_version(module):
+    return int(module.__version__.split('.')[1])
 
 
 def activate_matplotlib(enable_gui_function):

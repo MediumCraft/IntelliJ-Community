@@ -1,6 +1,8 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.editor.impl.stickyLines;
 
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.RangeMarker;
@@ -143,9 +145,9 @@ public final class StickyLinesModelImpl implements StickyLinesModel {
   }
 
   @Override
-  public void notifyListeners() {
+  public void notifyLinesUpdate() {
     for (Listener listener : myListeners) {
-      listener.modelChanged();
+      listener.linesUpdated();
     }
   }
 
@@ -156,6 +158,9 @@ public final class StickyLinesModelImpl implements StickyLinesModel {
     }
     for (StickyLine line : getAllStickyLines()) {
       removeStickyLine(line);
+    }
+    for (Listener listener : myListeners) {
+      listener.linesRemoved();
     }
     if (project != null) {
       restartStickyLinesPass(project);
@@ -196,7 +201,14 @@ public final class StickyLinesModelImpl implements StickyLinesModel {
   }
 
   private void restartStickyLinesPass(@NotNull Project project) {
-    new StickyLinesCollector(project, myMarkupModel.getDocument()).invalidateCachedValue();
+    ApplicationManager.getApplication().executeOnPooledThread(() -> {
+      ReadAction.run(() -> {
+        if (!project.isDisposed()) {
+          var collector = new StickyLinesCollector(project, myMarkupModel.getDocument());
+          collector.forceCollectPass();
+        }
+      });
+    });
   }
 
   private record StickyLineImpl(

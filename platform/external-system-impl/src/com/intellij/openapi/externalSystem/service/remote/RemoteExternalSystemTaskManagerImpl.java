@@ -19,11 +19,10 @@ import com.intellij.openapi.externalSystem.model.ExternalSystemException;
 import com.intellij.openapi.externalSystem.model.settings.ExternalSystemExecutionSettings;
 import com.intellij.openapi.externalSystem.model.task.ExternalSystemTaskId;
 import com.intellij.openapi.externalSystem.task.ExternalSystemTaskManager;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
-import java.util.List;
-
+@ApiStatus.Internal
 public class RemoteExternalSystemTaskManagerImpl<S extends ExternalSystemExecutionSettings>
   extends AbstractRemoteExternalSystemService<S> implements RemoteExternalSystemTaskManager<S> {
 
@@ -34,20 +33,21 @@ public class RemoteExternalSystemTaskManagerImpl<S extends ExternalSystemExecuti
   }
 
   @Override
-  public void executeTasks(@NotNull final ExternalSystemTaskId id,
-                           @NotNull final List<String> taskNames,
-                           @NotNull final String projectPath,
-                           @Nullable final S settings,
-                           @Nullable final String jvmParametersSetup) throws ExternalSystemException {
+  public void executeTasks(
+    @NotNull String projectPath,
+    @NotNull ExternalSystemTaskId id,
+    @NotNull S settings
+  ) throws ExternalSystemException {
     execute(id, () -> {
-      myDelegate.executeTasks(
-        id, taskNames, projectPath, settings, jvmParametersSetup, getNotificationListener());
+      myDelegate.executeTasks(projectPath, id, settings, getNotificationListener());
       return null;
     });
   }
 
   @Override
-  public boolean cancelTask(@NotNull final ExternalSystemTaskId id) throws ExternalSystemException {
+  public boolean cancelTask(
+    @NotNull ExternalSystemTaskId id
+  ) throws ExternalSystemException {
     return myDelegate.cancelTask(id, getNotificationListener());
   }
 }

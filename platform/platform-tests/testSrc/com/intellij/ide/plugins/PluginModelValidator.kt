@@ -35,7 +35,7 @@ private val moduleSkipList = java.util.Set.of(
   "intellij.javaFX.community",
   "intellij.lightEdit",
   "intellij.webstorm",
-  "intellij.cwm.plugin", /* remote-dev/cwm-plugin/resources/META-INF/plugin.xml doesn't have `id` - ignore for now */
+  "intellij.cwm", /* remote-dev/cwm-plugin/resources/META-INF/plugin.xml doesn't have `id` - ignore for now */
   "intellij.osgi", /* no particular package prefix to choose */
   "intellij.hunspell", /* MP-3656 Marketplace doesn't allow uploading plugins without dependencies */
   "intellij.android.device-explorer", /* android plugin doesn't follow new plugin model yet, $modulename$.xml is not a module descriptor */
@@ -401,9 +401,19 @@ class PluginModelValidator(sourceModules: List<Module>) {
         ))
         continue
       }
-      if (child.attributes.size > 1) {
+
+      val moduleLoadingRule = child.getAttributeValue("loading")
+      if (moduleLoadingRule != null && moduleLoadingRule !in arrayOf("required", "optional", "on-demand")) {
         _errors.add(PluginValidationError(
-          "Unknown attributes: ${child.attributes.entries.filter { it.key != "name" }}",
+          "Unknown value for 'loading' attribute: $moduleLoadingRule. Supported values are 'required', 'optional' and 'on-demand'.",
+          getErrorInfo(),
+        ))
+        continue
+      }
+
+      if (child.attributes.size > 2) {
+        _errors.add(PluginValidationError(
+          "Unknown attributes: ${child.attributes.entries.filter { it.key != "name" || it.key != "loading" }}",
           getErrorInfo(),
         ))
         continue
@@ -548,7 +558,7 @@ class PluginModelValidator(sourceModules: List<Module>) {
     }
 
     val pluginFileName = when (moduleName) {
-      "intellij.cwm.host" -> "pluginBase.xml"
+      "intellij.platform.backend.split" -> "pluginBase.xml"
       "intellij.idea.community.customization" -> "IdeaPlugin.xml"
       else -> "plugin.xml"
     }

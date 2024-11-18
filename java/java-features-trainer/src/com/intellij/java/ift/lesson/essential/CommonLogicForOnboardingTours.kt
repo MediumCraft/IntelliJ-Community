@@ -40,6 +40,7 @@ import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.put
+import org.jetbrains.annotations.Nls
 import training.dsl.*
 import training.dsl.LessonUtil.adjustSearchEverywherePosition
 import training.dsl.LessonUtil.checkEditorModification
@@ -48,7 +49,6 @@ import training.dsl.LessonUtil.restoreIfModifiedOrMoved
 import training.dsl.LessonUtil.restorePopupPosition
 import training.learn.LessonsBundle
 import training.learn.course.KLesson
-import training.learn.course.LessonProperties
 import training.learn.lesson.general.run.clearBreakpoints
 import training.learn.lesson.general.run.toggleBreakpointTask
 import training.ui.LearningUiHighlightingManager
@@ -62,7 +62,7 @@ import java.awt.event.KeyEvent
 import java.util.concurrent.CompletableFuture
 import javax.swing.JWindow
 
-abstract class CommonLogicForOnboardingTours(id: String, lessonName: String) : KLesson(id, lessonName) {
+abstract class CommonLogicForOnboardingTours(id: String, @Nls lessonName: String) : KLesson(id, lessonName) {
   abstract val sample: LessonSample
 
   private var backupPopupLocation: Point? = null
@@ -74,11 +74,6 @@ abstract class CommonLogicForOnboardingTours(id: String, lessonName: String) : K
 
   @NlsSafe
   private var jdkAtStart: String = "undefined"
-
-  override val properties: LessonProperties = LessonProperties(
-    canStartInDumbMode = true,
-    openFileAtStart = false
-  )
 
   override val testScriptProperties: TaskTestContext.TestScriptProperties = TaskTestContext.TestScriptProperties(skipTesting = true)
 
@@ -361,7 +356,7 @@ abstract class CommonLogicForOnboardingTours(id: String, lessonName: String) : K
     val jdkVersionsFuture = CompletableFuture<List<String>>()
     runBackgroundableTask(ProjectBundle.message("progress.title.detecting.sdks"), project, false) { indicator ->
       val jdkVersions = mutableListOf<String>()
-      SdkDetector.getInstance().detectSdks(JavaSdk.getInstance(), indicator, object : SdkDetector.DetectedSdkListener {
+      SdkDetector.getInstance().detectSdks(project, JavaSdk.getInstance(), indicator, object : SdkDetector.DetectedSdkListener {
         override fun onSdkDetected(type: SdkType, version: String, home: String) {
           jdkVersions.add(version)
         }

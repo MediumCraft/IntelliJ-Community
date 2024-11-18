@@ -10,6 +10,7 @@ import com.jetbrains.jsonSchema.extension.JsonLikePsiWalker;
 import com.jetbrains.jsonSchema.impl.JsonSchemaObject;
 import com.jetbrains.jsonSchema.impl.JsonSchemaResolver;
 import com.jetbrains.jsonSchema.impl.MatchResult;
+import com.jetbrains.jsonSchema.impl.light.nodes.RootJsonSchemaObjectBackedByJackson;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.yaml.YAMLBundle;
 import org.jetbrains.yaml.psi.YAMLKeyValue;
@@ -24,9 +25,13 @@ public class YamlJsonSchemaDeprecationInspection extends YamlJsonSchemaInspectio
                                              @NotNull LocalInspectionToolSession session,
                                              Collection<PsiElement> roots,
                                              JsonSchemaObject schema) {
+    if (schema == null || (schema instanceof RootJsonSchemaObjectBackedByJackson rootSchema && !rootSchema.checkHasDeprecations())) {
+      return PsiElementVisitor.EMPTY_VISITOR;
+    }
+
     PsiElement sampleElement = roots.iterator().next();
     final JsonLikePsiWalker walker = JsonLikePsiWalker.getWalker(sampleElement, schema);
-    if (walker == null || schema == null) {
+    if (walker == null) {
       return PsiElementVisitor.EMPTY_VISITOR;
     }
     Project project = sampleElement.getProject();
@@ -47,7 +52,7 @@ public class YamlJsonSchemaDeprecationInspection extends YamlJsonSchemaInspectio
           return;
         }
 
-        final MatchResult result = new JsonSchemaResolver(project, schema, position).detailedResolve();
+        final MatchResult result = new JsonSchemaResolver(project, schema, position, walker.createValueAdapter(key)).detailedResolve();
         for (JsonSchemaObject object : result.mySchemas) {
           String message = object.getDeprecationMessage();
           if (message != null) {

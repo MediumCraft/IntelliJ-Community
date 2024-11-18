@@ -26,6 +26,14 @@ class FE1UastApiFixtureTest : KotlinLightCodeInsightFixtureTestCase(), UastApiFi
         checkArgumentForParameter_smartcast(myFixture)
     }
 
+    fun testCallableReferenceWithGeneric() {
+        checkCallableReferenceWithGeneric(myFixture)
+    }
+
+    fun testCallableReferenceWithGeneric_convertedToSAM() {
+        checkCallableReferenceWithGeneric_convertedToSAM(myFixture, isK2 = false)
+    }
+
     fun testDivByZero() {
         checkDivByZero(myFixture)
     }
@@ -58,6 +66,10 @@ class FE1UastApiFixtureTest : KotlinLightCodeInsightFixtureTestCase(), UastApiFi
         checkTypesOfDeprecatedHiddenProperty_accessors(myFixture)
     }
 
+    fun testTypeOfUnresolvedErrorInThrowExpression() {
+        checkTypeOfUnresolvedErrorInThrowExpression(myFixture)
+    }
+
     fun testReifiedTypeNullability() {
         checkReifiedTypeNullability(myFixture)
     }
@@ -78,12 +90,20 @@ class FE1UastApiFixtureTest : KotlinLightCodeInsightFixtureTestCase(), UastApiFi
         checkGenericTypeNullability_reified(myFixture)
     }
 
+    fun testGenericParameterSubtype() {
+        checkGenericParameterSubtype(myFixture)
+    }
+
     fun testImplicitReceiverType() {
         checkImplicitReceiverType(myFixture)
     }
 
     fun testSubstitutedReceiverType() {
         checkSubstitutedReceiverType(myFixture)
+    }
+
+    fun testJavaStaticMethodReceiverType() {
+        checkJavaStaticMethodReceiverType(myFixture)
     }
 
     fun testUnderscoreOperatorForTypeArguments() {
@@ -104,6 +124,10 @@ class FE1UastApiFixtureTest : KotlinLightCodeInsightFixtureTestCase(), UastApiFi
 
     fun testExpressionTypeForCallToInternalOperator() {
         checkExpressionTypeForCallToInternalOperator(myFixture)
+    }
+
+    fun testExpressionTypeForConstructorDelegationCall() {
+        checkExpressionTypeForConstructorDelegationCall(myFixture)
     }
 
     fun testFlexibleFunctionalInterfaceType() {
@@ -130,6 +154,10 @@ class FE1UastApiFixtureTest : KotlinLightCodeInsightFixtureTestCase(), UastApiFi
         checkReceiverTypeOfExtensionFunction(myFixture)
     }
 
+    fun testSourcePsiOfLazyPropertyAccessor() {
+        checkSourcePsiOfLazyPropertyAccessor(myFixture)
+    }
+
     fun testTextRangeOfLocalVariable() {
         checkTextRangeOfLocalVariable(myFixture)
     }
@@ -138,7 +166,31 @@ class FE1UastApiFixtureTest : KotlinLightCodeInsightFixtureTestCase(), UastApiFi
         checkNameReferenceVisitInConstructorCall(myFixture)
     }
 
+    fun testNoArgConstructorSourcePsi() {
+        checkNoArgConstructorSourcePsi(myFixture)
+    }
+
     fun testNullLiteral() {
         checkNullLiteral(myFixture)
+    }
+
+    fun testStringConcatInAnnotationValue() {
+        checkStringConcatInAnnotationValue(myFixture)
+    }
+
+    fun testLocalPropertyInitializerEvaluate_String() {
+        checkLocalPropertyInitializerEvaluation_String(myFixture)
+    }
+
+    fun testLocalPropertyInitializerEvaluate_Numeric() {
+        checkLocalPropertyInitializerEvaluation_Numeric(myFixture)
+    }
+
+    fun testEnumAsAnnotationAttributeValueEvaluation() {
+        checkEnumAsAnnotationAttributeValueEvaluation(myFixture)
+    }
+
+    fun testJavaConstantEvaluation() {
+        checkJavaConstantEvaluation(myFixture)
     }
 }

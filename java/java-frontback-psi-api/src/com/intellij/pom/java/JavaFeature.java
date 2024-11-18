@@ -51,6 +51,7 @@ public enum JavaFeature {
   MODULES(LanguageLevel.JDK_1_9, "feature.modules"),
   COLLECTION_FACTORIES(LanguageLevel.JDK_1_9, "feature.collection.factories"),
   PRIVATE_INTERFACE_METHODS(LanguageLevel.JDK_1_9, "feature.private.interface.methods"),
+  UTF8_PROPERTY_FILES(LanguageLevel.JDK_1_9, "feature.utf8.property.files"),
   LVTI(LanguageLevel.JDK_10, "feature.lvti"),
   VAR_LAMBDA_PARAMETER(LanguageLevel.JDK_11, "feature.var.lambda.parameter"),
   NESTMATES(LanguageLevel.JDK_11, "feature.nestmates"),
@@ -78,14 +79,27 @@ public enum JavaFeature {
                     LanguageLevel.JDK_19_PREVIEW, LanguageLevel.JDK_20_PREVIEW),
   ENUM_QUALIFIED_NAME_IN_SWITCH(LanguageLevel.JDK_21, "feature.enum.qualified.name.in.switch"),
   SEQUENCED_COLLECTIONS(LanguageLevel.JDK_21, "feature.sequenced.collections"),
-  STRING_TEMPLATES(LanguageLevel.JDK_21_PREVIEW, "feature.string.templates"),
+  STRING_TEMPLATES(LanguageLevel.JDK_21_PREVIEW, "feature.string.templates") {
+    @Override
+    public boolean isSufficient(@NotNull LanguageLevel useSiteLevel) {
+      return super.isSufficient(useSiteLevel) && !useSiteLevel.isAtLeast(LanguageLevel.JDK_23);
+    }
+
+    @Override
+    public boolean isLimited() {
+      return true;
+    }
+  },
   UNNAMED_PATTERNS_AND_VARIABLES(LanguageLevel.JDK_22, "feature.unnamed.vars") {
     @Override
     public boolean isSufficient(@NotNull LanguageLevel useSiteLevel) {
       return super.isSufficient(useSiteLevel) || LanguageLevel.JDK_21_PREVIEW == useSiteLevel;
     }
   },
+  //jep 463,477
   IMPLICIT_CLASSES(LanguageLevel.JDK_21_PREVIEW, "feature.implicit.classes"),
+  INSTANCE_MAIN_METHOD(LanguageLevel.JDK_21_PREVIEW, "feature.instance.main.method"),
+
   SCOPED_VALUES(LanguageLevel.JDK_21_PREVIEW, "feature.scoped.values"),
   STRUCTURED_CONCURRENCY(LanguageLevel.JDK_21_PREVIEW, "feature.structured.concurrency"),
   CLASSFILE_API(LanguageLevel.JDK_22_PREVIEW, "feature.classfile.api"),
@@ -97,10 +111,13 @@ public enum JavaFeature {
    */
   RECORD_PATTERNS_IN_FOR_EACH(LanguageLevel.JDK_X, "feature.record.patterns.in.for.each",
                               LanguageLevel.JDK_20_PREVIEW),
-  /**
-   * Implementation for java 23
-   */
-  PRIMITIVE_TYPES_IN_PATTERNS(LanguageLevel.JDK_X, "feature.primitive.types.in.patterns"),
+
+  //jep 463,477
+  INHERITED_STATIC_MAIN_METHOD(LanguageLevel.JDK_22_PREVIEW, "feature.inherited.static.main.method"),
+  IMPLICIT_IMPORT_IN_IMPLICIT_CLASSES(LanguageLevel.JDK_23_PREVIEW, "feature.implicit.import.in.implicit.classes"),
+  PRIMITIVE_TYPES_IN_PATTERNS(LanguageLevel.JDK_23_PREVIEW, "feature.primitive.types.in.patterns"),
+
+  MODULE_IMPORT_DECLARATIONS(LanguageLevel.JDK_23_PREVIEW, "feature.module.import.declarations"),
   ;
 
   private final @NotNull LanguageLevel myLevel;

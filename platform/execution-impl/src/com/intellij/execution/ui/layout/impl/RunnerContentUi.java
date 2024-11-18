@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.execution.ui.layout.impl;
 
 import com.intellij.execution.ExecutionBundle;
@@ -18,7 +18,6 @@ import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.actionSystem.ex.ActionUtil;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.project.DumbAware;
-import com.intellij.openapi.project.DumbAwareToggleAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.AbstractPainter;
 import com.intellij.openapi.ui.ShadowAction;
@@ -60,6 +59,7 @@ import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.accessibility.ScreenReader;
 import com.intellij.util.ui.update.Activatable;
 import one.util.streamex.StreamEx;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -101,7 +101,7 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
   private final Wrapper myToolbar = new Wrapper();
   final MyDragOutDelegate myDragOutDelegate = new MyDragOutDelegate();
 
-  JBRunnerTabs myTabs;
+  JBRunnerTabs tabs;
   private final Comparator<TabInfo> myTabsComparator = (o1, o2) -> {
     TabImpl tab1 = getTabFor(o1);
     TabImpl tab2 = getTabFor(o2);
@@ -145,7 +145,7 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
   private ActionGroup myLeftToolbarActions;
 
   private boolean myContentToolbarBefore = true;
-  private boolean myTopLeftActionsVisible = true;
+  private boolean topLeftActionsVisible = true;
   private boolean myTopLeftActionsBefore = false;
 
   private JBTabs myCurrentOver;
@@ -226,7 +226,7 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
 
   void setLeftToolbarVisible(boolean value) {
     myToolbar.setVisible(value);
-    Border border = myTabs.getComponent().getBorder();
+    Border border = tabs.getComponent().getBorder();
     if (border instanceof JBRunnerTabs.JBRunnerTabsBorder) {
       ((JBRunnerTabs.JBRunnerTabsBorder)border).setSideMask(value ? SideBorder.LEFT : SideBorder.NONE);
     }
@@ -247,54 +247,53 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
 
     rebuildToolbar();
     Set<String> usedNames = new HashSet<>();
-    for (TabInfo each : myTabs.getTabs()) {
+    for (TabInfo each : tabs.getTabs()) {
       updateTabUI(each, usedNames);
     }
-    myTabs.updateTabActions(false);
+    tabs.updateTabActions(false);
   }
 
   void setTopLeftActionsVisible(boolean visible) {
-    myTopLeftActionsVisible = visible;
+    topLeftActionsVisible = visible;
     rebuildCommonActions();
   }
 
   private void initUi() {
-    if (myTabs != null) return;
+    if (tabs != null) {
+      return;
+    }
 
-    myTabs = new JBRunnerTabs(myProject, this);
-    myTabs.getComponent().setOpaque(false);
-    myTabs.setDataProvider(dataId -> {
-      if (CONTENT_KEY.is(dataId)) {
-        TabInfo info = myTabs.getTargetInfo();
-        if (info != null) {
-          return getGridFor(info).getData(dataId);
-        }
+    tabs = new JBRunnerTabs(myProject, this) {
+      @Override
+      public void uiDataSnapshot(@NotNull DataSink sink) {
+        super.uiDataSnapshot(sink);
+        TabInfo info = tabs.getTargetInfo();
+        sink.set(CONTENT_KEY, info == null ? null : getGridFor(info).getContents().toArray(new Content[0]));
+        sink.set(CONTEXT_KEY, RunnerContentUi.this);
       }
-      else if (CONTEXT_KEY.is(dataId)) {
-        return this;
-      }
-      return null;
-    });
-    myTabs.getPresentation()
+    };
+    tabs.getComponent().setOpaque(false);
+    tabs.getPresentation()
       .setTabLabelActionsAutoHide(false).setInnerInsets(JBInsets.emptyInsets())
       .setToDrawBorderIfTabsHidden(false).setTabDraggingEnabled(isMoveToGridActionEnabled()).setUiDecorator(null);
     rebuildTabPopup();
 
-    myTabs.getPresentation().setPaintFocus(false).setRequestFocusOnLastFocusedComponent(true);
+    tabs.setPaintFocus(false);
+    tabs.setRequestFocusOnLastFocusedComponent(true);
 
     NonOpaquePanel wrapper = new MyComponent();
     wrapper.add(myToolbar, BorderLayout.WEST);
-    wrapper.add(myTabs.getComponent(), BorderLayout.CENTER);
+    wrapper.add(tabs.getComponent(), BorderLayout.CENTER);
 
     myComponent = wrapper;
 
-    myTabs.addListener(new TabsListener() {
+    tabs.addListener(new TabsListener() {
 
       @Override
       public void beforeSelectionChanged(TabInfo oldSelection, TabInfo newSelection) {
         if (oldSelection != null && !isStateBeingRestored()) {
-          final GridImpl grid = getGridFor(oldSelection);
-          if (grid != null && getTabFor(grid) != null) {
+          GridImpl grid = getGridFor(oldSelection);
+          if (getTabFor(grid) != null) {
             grid.saveUiState();
           }
         }
@@ -307,7 +306,7 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
 
       @Override
       public void selectionChanged(final TabInfo oldSelection, final TabInfo newSelection) {
-        if (!myTabs.getComponent().isShowing()) return;
+        if (!tabs.getComponent().isShowing()) return;
 
         if (newSelection != null) {
           newSelection.stopAlerting();
@@ -319,21 +318,21 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
         }
       }
     });
-    myTabs.addTabMouseListener(new MouseAdapter() {
+    tabs.addTabMouseListener(new MouseAdapter() {
       @Override
       public void mousePressed(@NotNull MouseEvent e) {
-        if (UIUtil.isCloseClick(e)) {
-          final TabInfo tabInfo = myTabs.findInfo(e);
-          final GridImpl grid = tabInfo == null ? null : getGridFor(tabInfo);
-          final Content[] contents = grid != null ? CONTENT_KEY.getData(grid) : null;
-          if (contents == null) return;
-          // see GridCellImpl.closeOrMinimize as well
-          if (CloseViewAction.isEnabled(contents)) {
-            CloseViewAction.perform(RunnerContentUi.this, contents[0]);
-          }
-          else if (MinimizeViewAction.isEnabled(RunnerContentUi.this, contents, TAB_TOOLBAR_PLACE)) {
-            grid.getCellFor(contents[0]).minimize(contents[0]);
-          }
+        if (e.isConsumed()) return;
+        if (!UIUtil.isCloseClick(e)) return;
+        TabInfo tabInfo = tabs.findInfo(e);
+        GridImpl grid = tabInfo == null ? null : getGridFor(tabInfo);
+        Content[] contents = grid != null ? grid.getContents().toArray(new Content[0]) : null;
+        if (contents == null) return;
+        // see GridCellImpl.closeOrMinimize as well
+        if (CloseViewAction.isEnabled(contents)) {
+          CloseViewAction.perform(RunnerContentUi.this, contents[0]);
+        }
+        else if (MinimizeViewAction.isEnabled(RunnerContentUi.this, contents, TAB_TOOLBAR_PLACE)) {
+          grid.getCellFor(contents[0]).minimize(contents[0]);
         }
       }
     });
@@ -416,9 +415,9 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
         }
       };
       wrapper.addMouseListener(adapter);
-      myTabs.getComponent().addMouseListener(adapter);
+      tabs.getComponent().addMouseListener(adapter);
       wrapper.addMouseMotionListener(adapter);
-      myTabs.getComponent().addMouseMotionListener(adapter);
+      tabs.getComponent().addMouseMotionListener(adapter);
     }
     updateRestoreLayoutActionVisibility();
   }
@@ -426,7 +425,7 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
   private void rebuildTabPopup() {
     initUi();
 
-    myTabs.setPopupGroup(getCellPopupGroup(TAB_POPUP_PLACE), TAB_POPUP_PLACE, true);
+    tabs.setPopupGroup(getCellPopupGroup(TAB_POPUP_PLACE), TAB_POPUP_PLACE, true);
 
     getGrids().forEach(GridImpl::rebuildTabPopup);
   }
@@ -439,7 +438,7 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
     DefaultActionGroup group = new DefaultActionGroup(VIEW_POPUP, original.isPopup());
 
     if (myShowDebugContentAction == null && "Debug".equals(myRunnerId)) {
-      myShowDebugContentAction = new ShowDebugContentAction(this, myTabs.getComponent(), this);
+      myShowDebugContentAction = new ShowDebugContentAction(this, tabs.getComponent(), this);
     }
     if (myShowDebugContentAction != null) {
       group.add(myShowDebugContentAction);
@@ -483,7 +482,7 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
     return myWindow;
   }
 
-  public @NotNull JBTabs getTabs() { return myTabs; }
+  public @NotNull JBTabs getTabs() { return tabs; }
 
   public AnAction @NotNull[] getViewActions() {
     return myViewActions.getChildren(ActionManager.getInstance());
@@ -583,7 +582,7 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
 
   @Override
   public @NotNull RelativeRectangle getAcceptArea() {
-    return new RelativeRectangle(myTabs.getComponent());
+    return new RelativeRectangle(tabs.getComponent());
   }
 
   @Override
@@ -619,7 +618,7 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
     setStateIsBeingRestored(true, this);
     try {
       final Point point = dropTarget != null ? dropTarget.getPoint(myComponent) : null;
-      boolean hadGrid = !myTabs.shouldAddToGlobal(point);
+      boolean hadGrid = !tabs.shouldAddToGlobal(point);
 
       for (Content content : contents) {
         final View view = getStateFor(content);
@@ -672,7 +671,7 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
 
   @Override
   public boolean isEmpty() {
-    return myTabs.isEmptyVisible() || myDisposing;
+    return tabs.isEmptyVisible() || myDisposing;
   }
 
   @Override
@@ -907,13 +906,13 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
   }
 
   private @Nullable GridImpl getSelectedGrid() {
-    TabInfo selection = myTabs.getSelectedInfo();
+    TabInfo selection = tabs.getSelectedInfo();
     return selection != null ? getGridFor(selection) : null;
   }
 
   private void removeGridIfNeeded(GridImpl grid) {
     if (grid.isEmpty()) {
-      myTabs.removeTab(myTabs.findInfo(grid));
+      tabs.removeTab(tabs.findInfo(grid));
       myMinimizedButtonsPlaceholder.remove(grid);
       myCommonActionsPlaceholder.remove(grid);
       myContextActions.remove(grid);
@@ -932,7 +931,7 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
 
     if (myCurrentOver != null || myOriginal != null) {
       Integer forcedDropIndex = content.getUserData(RunnerLayout.DROP_INDEX);
-      final int index = myTabs.getDropInfoIndex() + (myOriginal != null ? myOriginal.getTabOffsetFor(this) : 0);
+      final int index = tabs.getDropInfoIndex() + (myOriginal != null ? myOriginal.getTabOffsetFor(this) : 0);
       final int dropIndex = forcedDropIndex != null ? forcedDropIndex : index;
       if (forcedDropIndex == null) {
         moveFollowingTabs(dropIndex);
@@ -964,7 +963,7 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
       public Dimension getPreferredSize() {
         Dimension size = super.getPreferredSize();
         if (size.height > 0) {
-          size.height = JBRunnerTabs.getTabLabelPreferredHeight() - myTabs.getBorderThickness();
+          size.height = JBRunnerTabs.getTabLabelPreferredHeight() - tabs.getBorderThickness();
         }
         return size;
       }
@@ -977,15 +976,15 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
 
 
     NonOpaquePanel sideComponent = new TwoSideComponent(leftWrapper, new TwoSideComponent(middleWrapper, new TwoSideComponent(right, rightWrapper)));
-    sideComponent.setVisible(!myTabs.isHideTopPanel());
+    sideComponent.setVisible(!tabs.isHideTopPanel());
     tab.setSideComponent(sideComponent);
-    foreWrapper.setVisible(!myTabs.isHideTopPanel());
+    foreWrapper.setVisible(!tabs.isHideTopPanel());
     tab.setForeSideComponent(foreWrapper);
 
     tab.setTabLabelActions((ActionGroup)myActionManager.getAction(VIEW_TOOLBAR), TAB_TOOLBAR_PLACE);
 
-    myTabs.addTab(tab);
-    myTabs.sortTabs(myTabsComparator);
+    tabs.addTab(tab);
+    tabs.sortTabs(myTabsComparator);
 
     return grid;
   }
@@ -995,9 +994,9 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
       myOriginal.moveFollowingTabs(index);
       return;
     }
-    moveFollowingTabs(index, myTabs);
+    moveFollowingTabs(index, tabs);
     for (RunnerContentUi child : myChildren) {
-      moveFollowingTabs(index, child.myTabs);
+      moveFollowingTabs(index, child.tabs);
     }
   }
 
@@ -1034,10 +1033,10 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
   }
 
   private int getTabOffsetFor(RunnerContentUi ui) {
-    int offset = myTabs.getTabCount();
+    int offset = tabs.getTabCount();
     for (RunnerContentUi child : myChildren) {
       if (child == ui) break;
-      offset += child.myTabs.getTabCount();
+      offset += child.tabs.getTabCount();
     }
     return offset;
   }
@@ -1065,7 +1064,7 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
       TopToolbarContextActions topToolbarContextActions = myContextActions.get(entry.getKey());
 
       DefaultActionGroup leftGroupToBuild = new DefaultActionGroupWithDelegate(myTopLeftActions);
-      if (myTopLeftActionsVisible) {
+      if (topLeftActionsVisible) {
         leftGroupToBuild.addAll(myTopLeftActions);
       }
       final AnAction[] leftActions = leftGroupToBuild.getChildren(ActionManager.getInstance());
@@ -1132,7 +1131,7 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
       left = insets.left;
       right = insets.right;
     }
-    UiDecorator.UiDecoration decoration = myTabs.getDecoration();
+    UiDecorator.UiDecoration decoration = tabs.getDecoration();
     Insets labelInsets = decoration.getLabelInsets();
     Function<TabLabel.ActionsPosition, Insets> supplier = decoration.getContentInsetsSupplier();
     if (labelInsets != null && supplier != null) {
@@ -1158,8 +1157,8 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
       eachPlaceholder.setContent(minimized);
     }
 
-    myTabs.getComponent().revalidate();
-    myTabs.getComponent().repaint();
+    tabs.getComponent().revalidate();
+    tabs.getComponent().repaint();
 
     return myViewActions.getChildrenCount() > 0;
   }
@@ -1168,17 +1167,17 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
     boolean hasToolbarContent = rebuildToolbar();
 
     Set<String> usedNames = new HashSet<>();
-    List<TabInfo> tabs = myTabs.getTabs();
+    List<TabInfo> tabs = this.tabs.getTabs();
     for (TabInfo each : tabs) {
       hasToolbarContent |= updateTabUI(each, usedNames);
     }
-    int tabsCount = tabs.size() + myChildren.stream().mapToInt(child -> child.myTabs.getTabCount()).sum();
+    int tabsCount = tabs.size() + myChildren.stream().mapToInt(child -> child.tabs.getTabCount()).sum();
     boolean hideTabs = !hasToolbarContent && tabsCount <= 1 && myOriginal == null;
-    myTabs.getPresentation().setHideTabs(hideTabs);
-    myTabs.updateTabActions(validateNow);
+    this.tabs.getPresentation().setHideTabs(hideTabs);
+    this.tabs.updateTabActions(validateNow);
 
     if (validateNow) {
-      myTabs.sortTabs(myTabsComparator);
+      this.tabs.sortTabs(myTabsComparator);
     }
   }
 
@@ -1220,10 +1219,15 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
       icon = contents.get(0).getIcon();
     }
 
-    tab.setDragOutDelegate(myTabs.getTabs().size() > 1 || !isOriginal() ? myDragOutDelegate : null);
+    tab.setDragOutDelegate(tabs.getTabs().size() > 1 || !isOriginal() ? myDragOutDelegate : null);
+
+    String tooltip = contents.size() == 1 ? contents.get(0).getDescription() : null;
 
     Tab gridTab = grid.getTab();
-    tab.setText(title).setIcon(gridTab != null && gridTab.isDefault() && contents.size() > 1 ? null : icon);
+    tab
+      .setText(title)
+      .setIcon(gridTab != null && gridTab.isDefault() && contents.size() > 1 ? null : icon)
+      .setTooltipText(tooltip);
 
     return hasToolbarContent;
   }
@@ -1234,7 +1238,7 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
     try {
       setStateIsBeingRestored(true, this);
 
-      List<TabInfo> tabs = new ArrayList<>(myTabs.getTabs());
+      List<TabInfo> tabs = new ArrayList<>(this.tabs.getTabs());
 
       final ActionCallback result = new ActionCallback(tabs.size());
 
@@ -1259,9 +1263,9 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
     }
     if (!myUiLastStateWasRestored) return;
 
-    int offset = updateTabsIndices(myTabs, 0);
+    int offset = updateTabsIndices(tabs, 0);
     for (RunnerContentUi child : myChildren) {
-      offset = updateTabsIndices(child.myTabs, offset);
+      offset = updateTabsIndices(child.tabs, offset);
     }
 
     doSaveUiState();
@@ -1279,7 +1283,7 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
   private void doSaveUiState() {
     if (isStateBeingRestored()) return;
 
-    for (TabInfo each : myTabs.getTabs()) {
+    for (TabInfo each : tabs.getTabs()) {
       GridImpl eachGrid = getGridFor(each);
       eachGrid.saveUiState();
     }
@@ -1291,7 +1295,7 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
 
   @Override
   public @Nullable Tab getTabFor(final Grid grid) {
-    TabInfo info = myTabs.findInfo((Component)grid);
+    TabInfo info = tabs.findInfo((Component)grid);
     return getTabFor(info);
   }
 
@@ -1310,7 +1314,7 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
     return (TabImpl)tab.getObject();
   }
 
-  private static GridImpl getGridFor(TabInfo tab) {
+  private static @NotNull GridImpl getGridFor(TabInfo tab) {
     return (GridImpl)tab.getComponent();
   }
 
@@ -1322,7 +1326,7 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
 
   private @Nullable TabInfo findTabInfoFor(@NotNull Content content) {
     TabImpl tab = (TabImpl)getStateFor(content).getTab();
-    for (TabInfo each : myTabs.getTabs()) {
+    for (TabInfo each : tabs.getTabs()) {
       TabImpl t = getTabFor(each);
       if (t != null && t.equals(tab)) return each;
     }
@@ -1330,7 +1334,7 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
   }
 
   private @NotNull Stream<GridImpl> getGrids() {
-    return myTabs.getTabs().stream().map(RunnerContentUi::getGridFor);
+    return tabs.getTabs().stream().map(RunnerContentUi::getGridFor);
   }
 
   @Override
@@ -1480,19 +1484,20 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
 
   private void updateRestoreLayoutActionVisibility() {
     List<AnAction> specialActions = new ArrayList<>();
-    for (AnAction action : myViewActions.getChildren(ActionManager.getInstance())) {
+    ActionManager actionManager = ActionManager.getInstance();
+    for (AnAction action : myViewActions.getChildren(actionManager)) {
       if (!(action instanceof ViewLayoutModificationAction)) specialActions.add(action);
     }
     if (myMinimizeActionEnabled) {
       if (specialActions.isEmpty()) {
-        var separateWatchesInVariables = ActionManager.getInstance().getAction("XDebugger.SwitchWatchesInVariables");
-        if (separateWatchesInVariables instanceof ToggleAction) {
-          myViewActions.addAction(new Separator()).setAsSecondary(true);
-          myViewActions.addAction(new ToggleSeparateWatches((ToggleAction)separateWatchesInVariables, true)).setAsSecondary(true);
-        }
         myViewActions.addAction(new Separator()).setAsSecondary(true);
-        myViewActions.addAction(ActionManager.getInstance().getAction("Runner.ToggleTabLabels")).setAsSecondary(true);
-        myViewActions.addAction(ActionManager.getInstance().getAction("Runner.RestoreLayout")).setAsSecondary(true);
+        AnAction separateWatches = actionManager.getAction("XDebugger.SeparateWatches");
+        if (separateWatches != null) {
+          myViewActions.addAction(separateWatches).setAsSecondary(true);
+          myViewActions.addAction(new Separator()).setAsSecondary(true);
+        }
+        myViewActions.addAction(actionManager.getAction("Runner.ToggleTabLabels")).setAsSecondary(true);
+        myViewActions.addAction(actionManager.getAction("Runner.RestoreLayout")).setAsSecondary(true);
       }
     }
     else {
@@ -1504,8 +1509,8 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
 
   void setMovetoGridActionEnabled(final boolean enabled) {
     myMoveToGridActionEnabled = enabled;
-    if (myTabs != null) {
-      myTabs.getPresentation().setTabDraggingEnabled(enabled);
+    if (tabs != null) {
+      tabs.getPresentation().setTabDraggingEnabled(enabled);
     }
   }
 
@@ -1573,6 +1578,17 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
     return content;
   }
 
+  @ApiStatus.Internal
+  public void hideContent(@NotNull String key) {
+    Content content = findContent(key);
+    if (content == null) {
+      content = findMinimizedContent(key);
+    }
+    if (content != null) {
+      minimize(content, null);
+    }
+  }
+
   void setToDisposeRemovedContent(final boolean toDispose) {
     myToDisposeRemovedContent = toDispose;
   }
@@ -1608,7 +1624,7 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
       Point point = dropTarget != null ? dropTarget.getPoint(component) : null;
 
       // do not paint anything if adding to the top
-      if (ui.myTabs.shouldAddToGlobal(point)) return;
+      if (ui.tabs.shouldAddToGlobal(point)) return;
 
       // calc target place-in-grid
       PlaceInGrid targetPlaceInGrid = null;
@@ -1654,7 +1670,7 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
     }
   }
 
-  private final class MyComponent extends NonOpaquePanel implements DataProvider, QuickActionProvider {
+  private final class MyComponent extends NonOpaquePanel implements UiDataProvider, QuickActionProvider {
     private boolean myWasEverAdded;
 
     MyComponent() {
@@ -1669,33 +1685,27 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
       super.paintComponent(g);
       if (!UIExperiment.isNewDebuggerUIEnabled()) return;
       InternalDecoratorImpl decorator = ComponentUtil.getParentOfType(InternalDecoratorImpl.class, myComponent);
-      if (decorator != null && myTabs.getTabCount() > 0 && !decorator.isHeaderVisible()) {
+      if (decorator != null && tabs.getTabCount() > 0 && !decorator.isHeaderVisible()) {
         UIUtil.drawHeader(g, 0, getWidth(), decorator.getHeaderHeight(), decorator.isActive(), true, false, false);
       }
     }
 
     @Override
-    public @Nullable Object getData(@NotNull @NonNls String dataId) {
-      if (KEY.is(dataId)) {
-        return RunnerContentUi.this;
-      }
+    public void uiDataSnapshot(@NotNull DataSink sink) {
+      sink.set(KEY, RunnerContentUi.this);
 
-      if (CloseAction.CloseTarget.KEY.is(dataId)) {
-        Content content = getContentManager().getSelectedContent();
-        if (content != null && content.isCloseable()) {
-          ContentManager contentManager = Objects.requireNonNull(content.getManager());
-          if (contentManager.canCloseContents()) {
-            return (CloseAction.CloseTarget)() -> contentManager.removeContent(content, true, true, true);
-          }
+      Content content = getContentManager().getSelectedContent();
+      if (content != null && content.isCloseable()) {
+        ContentManager contentManager = Objects.requireNonNull(content.getManager());
+        if (contentManager.canCloseContents()) {
+          sink.set(CloseAction.CloseTarget.KEY,
+                   () -> contentManager.removeContent(content, true, true, true));
         }
       }
 
       ContentManager originalContentManager = myOriginal == null ? null : myOriginal.getContentManager();
       JComponent originalContentComponent = originalContentManager == null ? null : originalContentManager.getComponent();
-      if (originalContentComponent instanceof DataProvider) {
-        return ((DataProvider)originalContentComponent).getData(dataId);
-      }
-      return null;
+      DataSink.uiDataSnapshot(sink, originalContentComponent);
     }
 
     @Override
@@ -1893,22 +1903,22 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
     final GridImpl grid = getGridFor(info);
 
     final ActionCallback result = new ActionCallback();
-    myTabs.select(info, false).doWhenDone(() -> grid.select(content, requestFocus).notifyWhenDone(result));
+    tabs.select(info, false).doWhenDone(() -> grid.select(content, requestFocus).notifyWhenDone(result));
 
     return result;
   }
 
   @Override
   public void validate(Content content, final ActiveRunnable toRestore) {
-    final TabInfo current = myTabs.getSelectedInfo();
-    myTabs.getPresentation().setPaintBlocked(true, true);
+    final TabInfo current = tabs.getSelectedInfo();
+    tabs.getPresentation().setPaintBlocked(true, true);
 
     select(content, false).doWhenDone(() -> {
-      myTabs.getComponent().validate();
+      tabs.getComponent().validate();
       toRestore.run().doWhenDone(() -> {
         assert current != null;
-        myTabs.select(current, true);
-        myTabs.getPresentation().setPaintBlocked(false, true);
+        tabs.select(current, true);
+        tabs.getPresentation().setPaintBlocked(false, true);
       });
     });
   }
@@ -1931,13 +1941,9 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
   @Override
   public @NotNull List<AnAction> getActions(boolean originalProvider) {
     ArrayList<AnAction> result = new ArrayList<>();
-    if (myLeftToolbarActions != null) {
-      AnAction[] kids = myLeftToolbarActions.getChildren(null);
-      ContainerUtil.addAll(result, kids);
-    }
-    if (myTopLeftActions != null && UIExperiment.isNewDebuggerUIEnabled()) {
-      AnAction[] kids = myTopLeftActions.getChildren(null);
-      ContainerUtil.addAll(result, kids);
+    ContainerUtil.addIfNotNull(result, myLeftToolbarActions);
+    if (UIExperiment.isNewDebuggerUIEnabled()) {
+      ContainerUtil.addIfNotNull(result, myTopLeftActions);
     }
     return result;
   }
@@ -1966,7 +1972,8 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
     @Override
     public void dragOutStarted(@NotNull MouseEvent mouseEvent, @NotNull TabInfo info) {
       JComponent component = info.getComponent();
-      Content[] data = CONTENT_KEY.getData((DataProvider)component);
+      DataContext dataContext = DataManager.getInstance().getDataContext(component);
+      Content[] data = CONTENT_KEY.getData(dataContext);
       assert data != null;
       storeDefaultIndices(data);
 
@@ -2092,34 +2099,6 @@ public final class RunnerContentUi implements ContentUI, Disposable, CellTransfo
     @Override
     public void actionPerformed(@NotNull AnActionEvent e) {
       myContentUi.toggleContentPopup(e.getData(JBTabsEx.NAVIGATION_ACTIONS_KEY));
-    }
-  }
-
-  private static final class ToggleSeparateWatches extends DumbAwareToggleAction {
-
-    private final @NotNull ToggleAction delegate;
-    private final boolean myInverted;
-
-    private ToggleSeparateWatches(@NotNull ToggleAction delegate, boolean inverted) {
-      super(ExecutionBundle.messagePointer("show.separate.watches.action.name"));
-      this.delegate = delegate;
-      myInverted = inverted;
-    }
-
-    @Override
-    public boolean isSelected(@NotNull AnActionEvent e) {
-      boolean isSelected = delegate.isSelected(e);
-      return myInverted != isSelected;
-    }
-
-    @Override
-    public @NotNull ActionUpdateThread getActionUpdateThread() {
-      return delegate.getActionUpdateThread();
-    }
-
-    @Override
-    public void setSelected(@NotNull AnActionEvent e, boolean state) {
-      delegate.setSelected(e, myInverted != state);
     }
   }
 

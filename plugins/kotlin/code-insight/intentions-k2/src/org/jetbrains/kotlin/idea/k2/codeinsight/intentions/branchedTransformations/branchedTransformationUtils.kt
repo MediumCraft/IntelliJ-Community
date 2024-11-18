@@ -1,16 +1,24 @@
 // Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.kotlin.idea.k2.codeinsight.intentions.branchedTransformations
 
+import com.intellij.openapi.application.runWriteAction
+import com.intellij.openapi.editor.Editor
 import com.intellij.psi.PsiElement
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
+import org.jetbrains.kotlin.analysis.api.KaSession
+import org.jetbrains.kotlin.config.LanguageFeature
+import org.jetbrains.kotlin.idea.base.projectStructure.languageVersionSettings
+import org.jetbrains.kotlin.idea.base.psi.replaced
 import org.jetbrains.kotlin.idea.base.psi.safeDeparenthesize
 import org.jetbrains.kotlin.idea.codeinsight.utils.isFalseConstant
 import org.jetbrains.kotlin.idea.codeinsight.utils.isTrueConstant
 import org.jetbrains.kotlin.idea.codeinsight.utils.negate
 import org.jetbrains.kotlin.idea.k2.refactoring.introduce.K2SemanticMatcher.isSemanticMatch
+import org.jetbrains.kotlin.idea.k2.refactoring.introduce.introduceVariable.K2IntroduceVariableHandler
 import org.jetbrains.kotlin.idea.references.mainReference
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.psiUtil.isPropertyParameter
+import org.jetbrains.kotlin.utils.KotlinExceptionWithAttachments
 
 /**
  * A function to generate a new [KtExpression] for the new condition with [subject].
@@ -96,7 +104,7 @@ fun KtPsiFactory.combineWhenConditions(conditions: Array<KtWhenCondition>, subje
  *  }
  * ```
  */
-context(KtAnalysisSession)
+context(KaSession)
 fun KtWhenExpression.introduceSubjectIfPossible(subject: KtExpression?, context: PsiElement = this): KtWhenExpression {
     subject ?: return this
 
@@ -116,7 +124,8 @@ fun KtWhenExpression.introduceSubjectIfPossible(subject: KtExpression?, context:
 
                     val conditionExpression = (condition as KtWhenConditionWithExpression).expression
                     if (conditionExpression != null) {
-                        val codeFragment = psiFactory.createExpressionCodeFragment(conditionExpression.text, context).getContentElement() as KtExpression
+                        val codeFragment =
+                            psiFactory.createExpressionCodeFragment(conditionExpression.text, context).getContentElement() as KtExpression
                         appendConditionWithSubjectRemoved(codeFragment, subject)
                     }
                 }
@@ -134,7 +143,7 @@ fun KtWhenExpression.introduceSubjectIfPossible(subject: KtExpression?, context:
 /**
  * Returns [KtExpression] as potential subject for [KtWhenExpression].
  */
-context(KtAnalysisSession)
+context(KaSession)
 fun KtWhenExpression.getSubjectToIntroduce(checkConstants: Boolean = true): KtExpression? {
     if (subjectExpression != null) return null
 
@@ -157,7 +166,7 @@ fun KtWhenExpression.getSubjectToIntroduce(checkConstants: Boolean = true): KtEx
     return lastCandidate
 }
 
-context(KtAnalysisSession)
+context(KaSession)
 private fun BuilderByPattern<KtExpression>.appendConditionWithSubjectRemoved(conditionExpression: KtExpression?, subject: KtExpression) {
     when (conditionExpression) {
         is KtIsExpression -> {
@@ -181,6 +190,16 @@ private fun BuilderByPattern<KtExpression>.appendConditionWithSubjectRemoved(con
                     appendConditionWithSubjectRemoved(rhs, subject)
                 }
 
+                KtTokens.ANDAND -> {
+                    appendConditionWithSubjectRemoved(lhs, subject)
+                    if (lhs is KtBinaryExpression && lhs.operationToken == KtTokens.ANDAND) {
+                        appendFixedText(" && ")
+                    } else {
+                        appendFixedText(" if ")
+                    }
+                    appendExpression(rhs)
+                }
+
                 else -> error("Unexpected operation token=${conditionExpression.operationToken}")
             }
         }
@@ -189,33 +208,71 @@ private fun BuilderByPattern<KtExpression>.appendConditionWithSubjectRemoved(con
     }
 }
 
+private enum class SearchState {
+    UNCONSTRAINED, AND_ONLY, AND_FORBIDDEN, INCOMPATIBLE, GUARDS_NOT_SUPPORTED;
 
-context(KtAnalysisSession)
-fun KtExpression?.getWhenConditionSubjectCandidate(checkConstants: Boolean): KtExpression? {
-    fun KtExpression?.getCandidate(): KtExpression? = when (this) {
-        is KtIsExpression -> leftHandSide
-        is KtBinaryExpression -> {
-            val lhs = left
-            val rhs = right
-            when (operationToken) {
-                KtTokens.IN_KEYWORD, KtTokens.NOT_IN -> lhs
-                KtTokens.EQEQ ->
-                    lhs?.takeIf { it.hasCandidateNameReferenceExpression(checkConstants) }
-                        ?: rhs?.takeIf { it.hasCandidateNameReferenceExpression(checkConstants) }
-                KtTokens.OROR -> {
-                    val leftCandidate = lhs?.safeDeparenthesize().getCandidate()
-                    val rightCandidate = rhs?.safeDeparenthesize().getCandidate()
-                    if (leftCandidate.matches(rightCandidate)) leftCandidate else null
-                }
-
-                else -> null
-            }
-        }
-
-        else -> null
+    operator fun plus(other: SearchState): SearchState = when {
+        this == GUARDS_NOT_SUPPORTED || other == GUARDS_NOT_SUPPORTED -> GUARDS_NOT_SUPPORTED
+        this == INCOMPATIBLE || other == INCOMPATIBLE -> INCOMPATIBLE
+        this == UNCONSTRAINED -> other
+        other == UNCONSTRAINED -> this
+        this == other -> this
+        else -> INCOMPATIBLE
     }
-    return getCandidate()?.takeIf {
-        it is KtNameReferenceExpression || (it as? KtQualifiedExpression)?.selectorExpression is KtNameReferenceExpression || it is KtThisExpression
+}
+
+context(KaSession)
+fun KtExpression?.getWhenConditionSubjectCandidate(checkConstants: Boolean): KtExpression? {
+    if (this == null) return null
+    fun KtExpression?.getCandidate(state: SearchState): KtExpression? {
+        if (state == SearchState.INCOMPATIBLE) return null
+        return when (this) {
+            is KtIsExpression -> leftHandSide
+            is KtBinaryExpression -> {
+                val lhs = left
+                val rhs = right
+                when (operationToken) {
+                    KtTokens.IN_KEYWORD, KtTokens.NOT_IN -> lhs
+                    KtTokens.EQEQ ->
+                        lhs?.takeIf { it.hasCandidateNameReferenceExpression(checkConstants) }
+                            ?: rhs?.takeIf { it.hasCandidateNameReferenceExpression(checkConstants) }
+
+                    KtTokens.OROR -> {
+                        val nextStepState = state + SearchState.AND_FORBIDDEN
+                        val leftCandidate = lhs?.safeDeparenthesize().getCandidate(nextStepState)
+                        val rightCandidate = rhs?.safeDeparenthesize().getCandidate(nextStepState)
+                        if (leftCandidate.matches(rightCandidate)) leftCandidate else null
+                    }
+
+                    KtTokens.ANDAND -> {
+                        if (state == SearchState.GUARDS_NOT_SUPPORTED) null
+                        else deepestLhsOfAndAndChain()?.getCandidate(state + SearchState.AND_ONLY)
+                    }
+
+                    else -> null
+                }
+            }
+
+            else -> null
+        }
+    }
+
+    val initialSearchState: SearchState =
+        if (languageVersionSettings.supportsFeature(LanguageFeature.WhenGuards)) SearchState.UNCONSTRAINED
+        else SearchState.GUARDS_NOT_SUPPORTED
+    return getCandidate(initialSearchState)?.takeIf {
+        it is KtNameReferenceExpression
+                || (it as? KtQualifiedExpression)?.selectorExpression is KtNameReferenceExpression
+                || it is KtThisExpression
+    }
+}
+
+private fun KtBinaryExpression.deepestLhsOfAndAndChain(): KtExpression? {
+    val lhs = left?.safeDeparenthesize() ?: return null
+    return if (lhs is KtBinaryExpression && lhs.operationToken == KtTokens.ANDAND) {
+        lhs.deepestLhsOfAndAndChain()
+    } else {
+        lhs
     }
 }
 
@@ -230,7 +287,7 @@ fun KtExpression.hasCandidateNameReferenceExpression(checkConstants: Boolean): B
     return !(resolved is KtObjectDeclaration || (resolved as? KtProperty)?.hasModifier(KtTokens.CONST_KEYWORD) == true)
 }
 
-context(KtAnalysisSession)
+context(KaSession)
 fun KtExpression?.matches(right: KtExpression?): Boolean {
     if (this == null && right == null) return true
 
@@ -239,4 +296,61 @@ fun KtExpression?.matches(right: KtExpression?): Boolean {
     }
 
     return false
+}
+
+fun KtIfExpression.introduceValueForCondition(occurrenceInThenClause: KtExpression, editor: Editor?) {
+    val occurrenceInConditional = when (val condition = condition) {
+        is KtBinaryExpression -> condition.left
+        is KtIsExpression -> condition.leftHandSide
+        else -> throw KotlinExceptionWithAttachments("Only binary / is expressions are supported here: ${condition?.let { it::class.java }}")
+            .withPsiAttachment("condition", condition)
+    }!!
+    K2IntroduceVariableHandler.collectCandidateTargetContainersAndDoRefactoring(
+        project = project,
+        editor = editor,
+        expressionToExtract = occurrenceInConditional,
+        isVar = false,
+        occurrencesToReplace = listOf(occurrenceInConditional, occurrenceInThenClause),
+        onNonInteractiveFinish = null,
+    )
+}
+
+fun KtExpression.isPure(): Boolean {
+    val expr = safeDeparenthesize()
+    if (expr is KtSimpleNameExpression) {
+        val target = expr.mainReference.resolve()
+        return when {
+            target is KtProperty && (target.isLocal || target.initializer != null && !target.isVar) -> {
+                true
+            }
+
+            target is KtParameter && !target.isPropertyParameter() -> {
+                true
+            }
+
+            else -> false
+        }
+    }
+    return false
+}
+
+fun KtExpression.convertToIfNotNullExpression(
+    conditionLhs: KtExpression,
+    thenClause: KtExpression,
+    elseClause: KtExpression?
+): KtIfExpression {
+    val condition = KtPsiFactory(project).createExpressionByPattern("$0 != null", conditionLhs)
+    return convertToIfStatement(condition, thenClause, elseClause)
+}
+
+fun KtExpression.convertToIfStatement(
+    condition: KtExpression,
+    thenClause: KtExpression,
+    elseClause: KtExpression? = null
+): KtIfExpression =
+    runWriteAction { replaced(KtPsiFactory(project).createIf(condition, thenClause, elseClause)) }
+
+fun KtExpression.convertToIfNullExpression(conditionLhs: KtExpression, thenClause: KtExpression): KtIfExpression {
+    val condition = KtPsiFactory(project).createExpressionByPattern("$0 == null", conditionLhs)
+    return this.convertToIfStatement(condition, thenClause)
 }

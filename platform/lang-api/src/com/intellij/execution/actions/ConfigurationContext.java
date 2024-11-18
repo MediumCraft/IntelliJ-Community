@@ -52,7 +52,7 @@ public class ConfigurationContext {
   private boolean myInitialized;
   private boolean myMultipleSelection;
   private volatile Ref<RunnerAndConfigurationSettings> myExistingConfiguration;
-  private final Module myModule;
+  private final @Nullable Module myModule;
   private final RunConfiguration myRuntimeConfiguration;
   private final DataContext myDataContext;
   private final String myPlace;
@@ -172,17 +172,17 @@ public class ConfigurationContext {
     myPlace = null;
   }
 
-  private @Nullable Object getDefaultData(@NotNull String dataId) {
-    if (CommonDataKeys.PROJECT.is(dataId)) return myLocation == null ? null : myLocation.getProject();
-    if (PlatformCoreDataKeys.MODULE.is(dataId)) return myModule;
-    if (Location.DATA_KEY.is(dataId)) return myLocation;
-    if (CommonDataKeys.EDITOR.is(dataId)) return myEditor;
-    if (CommonDataKeys.PSI_ELEMENT.is(dataId)) return myLocation == null ? null : myLocation.getPsiElement();
-    return null;
+  private void defaultSnapshot(@NotNull DataSink sink) {
+    sink.set(CommonDataKeys.PROJECT, myLocation == null ? null : myLocation.getProject());
+    sink.set(PlatformCoreDataKeys.MODULE, myModule);
+    sink.set(Location.DATA_KEY, myLocation);
+    sink.set(CommonDataKeys.EDITOR, myEditor);
+    sink.set(CommonDataKeys.PSI_ELEMENT, myLocation == null ? null : myLocation.getPsiElement());
   }
 
   public @NotNull DataContext getDefaultDataContext() {
-    return IdeUiService.getInstance().createCustomizedDataContext(DataContext.EMPTY_CONTEXT, this::getDefaultData);
+    return IdeUiService.getInstance().createCustomizedDataContext(
+      DataContext.EMPTY_CONTEXT, (EdtNoGetDataProvider)this::defaultSnapshot);
   }
   
   public boolean containsMultipleSelection() {
@@ -368,7 +368,7 @@ public class ConfigurationContext {
     return myConfiguration == null ? myLocation.getProject() : myConfiguration.getConfiguration().getProject();
   }
 
-  public Module getModule() {
+  public @Nullable Module getModule() {
     return myModule;
   }
 

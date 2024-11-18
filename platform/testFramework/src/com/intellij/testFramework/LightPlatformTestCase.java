@@ -333,7 +333,7 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
       if (manager instanceof FileDocumentManagerImpl) {
         Document[] unsavedDocuments = manager.getUnsavedDocuments();
         manager.saveAllDocuments();
-        app.runWriteAction(((FileDocumentManagerImpl)manager)::dropAllUnsavedDocuments);
+        app.runWriteAction(() -> ((FileDocumentManagerImpl)manager).dropAllUnsavedDocuments());
 
         assertEmpty("There are unsaved documents", Arrays.asList(unsavedDocuments));
       }
@@ -404,6 +404,7 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
       },
       () -> {
         if (myThreadTracker != null) {
+          VfsTestUtil.waitForFileWatcher();
           myThreadTracker.checkLeak();
         }
       },
@@ -467,8 +468,15 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
 
     ProjectManagerEx projectManager = ProjectManagerEx.getInstanceEx();
     if (projectManager.isDefaultProjectInitialized()) {
-      Project defaultProject = projectManager.getDefaultProject();
-      ((PsiDocumentManagerImpl)PsiDocumentManager.getInstance(defaultProject)).clearUncommittedDocuments();
+      try {
+        Project defaultProject = projectManager.getDefaultProject();
+        PsiDocumentManager psiDocumentManager = defaultProject.getServiceIfCreated(PsiDocumentManager.class);
+        if (psiDocumentManager instanceof PsiDocumentManagerImpl impl) {
+          impl.clearUncommittedDocuments();
+        }
+      }
+      catch (Throwable ignored) {
+      }
     }
   }
 
@@ -636,7 +644,7 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
     private @Nullable Sdk mySdk;
     private @NotNull Map<OrderRootType, List<String>> mySdkRoots;
 
-    SimpleLightProjectDescriptor(@NotNull String moduleTypeId, @Nullable Sdk sdk) {
+    protected SimpleLightProjectDescriptor(@NotNull String moduleTypeId, @Nullable Sdk sdk) {
       myModuleTypeId = moduleTypeId;
       mySdk = sdk;
       mySdkRoots = new HashMap<>();

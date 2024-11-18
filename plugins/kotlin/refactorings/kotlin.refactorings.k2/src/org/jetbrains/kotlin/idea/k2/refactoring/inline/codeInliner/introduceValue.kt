@@ -1,8 +1,8 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.kotlin.idea.k2.refactoring.inline.codeInliner
 
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
-import org.jetbrains.kotlin.analysis.api.types.KtType
+import org.jetbrains.kotlin.analysis.api.KaSession
+import org.jetbrains.kotlin.analysis.api.types.KaType
 import org.jetbrains.kotlin.builtins.StandardNames
 import org.jetbrains.kotlin.idea.base.codeInsight.KotlinDeclarationNameValidator
 import org.jetbrains.kotlin.idea.base.codeInsight.KotlinNameSuggester
@@ -26,10 +26,10 @@ import org.jetbrains.kotlin.renderer.render
  * @param nameSuggestion Name suggestion for the variable.
  * @param safeCall If true, then the whole code must not be executed if the [value] evaluates to null.
  */
-context(KtAnalysisSession)
+context(KaSession)
 internal fun MutableCodeToInline.introduceValue(
     value: KtExpression,
-    valueType: KtType?,
+    valueType: KaType?,
     usages: Collection<KtExpression>,
     expressionToBeReplaced: KtExpression,
     nameSuggestion: String? = null,
@@ -102,7 +102,7 @@ internal fun MutableCodeToInline.introduceValue(
     }
 }
 
-context(KtAnalysisSession)
+context(KaSession)
 fun String.nameHasConflictsInScope(expressionToBeReplaced: KtExpression): Boolean {
     val nameValidator =
         KotlinDeclarationNameValidator(expressionToBeReplaced, true, KotlinNameSuggestionProvider.ValidatorTarget.VARIABLE)

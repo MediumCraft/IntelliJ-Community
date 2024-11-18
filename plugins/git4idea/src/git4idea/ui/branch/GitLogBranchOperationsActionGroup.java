@@ -17,12 +17,13 @@ import git4idea.i18n.GitBundle;
 import git4idea.log.GitRefManager;
 import git4idea.repo.GitRepository;
 import git4idea.repo.GitRepositoryManager;
-import git4idea.ui.branch.GitBranchPopupActions.LocalBranchActions;
-import git4idea.ui.branch.GitBranchPopupActions.RemoteBranchActions;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
+
+import static git4idea.ui.branch.GitBranchPopupActions.LocalBranchActions;
+import static git4idea.ui.branch.GitBranchPopupActions.RemoteBranchActions;
 
 public final class GitLogBranchOperationsActionGroup extends GitSingleCommitActionGroup {
   private static final int MAX_BRANCH_GROUPS = 2;
@@ -40,7 +41,7 @@ public final class GitLogBranchOperationsActionGroup extends GitSingleCommitActi
     VcsLogUi logUI = e.getData(VcsLogDataKeys.VCS_LOG_UI);
     List<VcsRef> refs = e.getData(VcsLogDataKeys.VCS_LOG_REFS);
     if (logUI == null || refs == null) {
-      return AnAction.EMPTY_ARRAY;
+      return EMPTY_ARRAY;
     }
 
     List<VcsRef> branchRefs = ContainerUtil.filter(refs, ref -> {
@@ -63,12 +64,12 @@ public final class GitLogBranchOperationsActionGroup extends GitSingleCommitActi
 
     List<AnAction> groups = new ArrayList<>();
 
+    GitRepositoryManager repositoryManager = GitRepositoryManager.getInstance(project);
+    List<GitRepository> allRepositories = repositoryManager.getRepositories();
+
     if (!branchRefs.isEmpty()) {
       GitVcsSettings settings = GitVcsSettings.getInstance(project);
       boolean showBranchesPopup = branchRefs.size() > MAX_BRANCH_GROUPS;
-
-      GitRepositoryManager repositoryManager = GitRepositoryManager.getInstance(project);
-      List<GitRepository> allRepositories = repositoryManager.getRepositories();
 
       Set<GitBranch> commonBranches = new HashSet<>();
       commonBranches.addAll(GitBranchUtil.getCommonLocalBranches(allRepositories));
@@ -84,6 +85,10 @@ public final class GitLogBranchOperationsActionGroup extends GitSingleCommitActi
       branchesGroup.setPopup(showBranchesPopup);
       groups.add(branchesGroup);
     }
+    else {
+      GitRebaseOntoCommitAction rebaseOntoCommitAction = new GitRebaseOntoCommitAction(project, root, commit);
+      groups.add(rebaseOntoCommitAction);
+    }
 
     if (!tagRefs.isEmpty()) {
       boolean showTagsPopup = tagRefs.size() > MAX_TAG_GROUPS;
@@ -98,7 +103,7 @@ public final class GitLogBranchOperationsActionGroup extends GitSingleCommitActi
       groups.add(tagsGroup);
     }
 
-    return groups.toArray(AnAction.EMPTY_ARRAY);
+    return groups.toArray(EMPTY_ARRAY);
   }
 
   private static @Nullable AnAction createBranchGroup(@NotNull Project project,

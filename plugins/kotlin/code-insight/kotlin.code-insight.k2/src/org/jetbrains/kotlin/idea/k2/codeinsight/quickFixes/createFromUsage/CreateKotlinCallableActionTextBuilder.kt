@@ -1,23 +1,29 @@
 // Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.kotlin.idea.k2.codeinsight.quickFixes.createFromUsage
 
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
+import com.intellij.lang.jvm.actions.CreateMethodRequest
+import com.intellij.lang.jvm.actions.ExpectedParameter
+import com.intellij.lang.jvm.actions.ExpectedType
+import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
+import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.analyze
-import org.jetbrains.kotlin.analysis.api.renderer.declarations.impl.KtDeclarationRendererForSource
-import org.jetbrains.kotlin.analysis.api.renderer.types.KtTypeRenderer
-import org.jetbrains.kotlin.analysis.api.renderer.types.impl.KtTypeRendererForSource
-import org.jetbrains.kotlin.analysis.api.renderer.types.renderers.KtClassTypeQualifierRenderer
+import org.jetbrains.kotlin.analysis.api.renderer.declarations.impl.KaDeclarationRendererForSource
+import org.jetbrains.kotlin.analysis.api.renderer.types.KaTypeRenderer
+import org.jetbrains.kotlin.analysis.api.renderer.types.impl.KaTypeRendererForSource
+import org.jetbrains.kotlin.analysis.api.renderer.types.renderers.KaClassTypeQualifierRenderer
 import org.jetbrains.kotlin.analysis.api.symbols.*
-import org.jetbrains.kotlin.analysis.api.types.KtClassType
-import org.jetbrains.kotlin.analysis.api.types.KtFunctionalType
-import org.jetbrains.kotlin.analysis.api.types.KtNonErrorClassType
-import org.jetbrains.kotlin.analysis.api.types.KtType
+import org.jetbrains.kotlin.analysis.api.types.KaClassType
+import org.jetbrains.kotlin.analysis.api.types.KaClassTypeQualifier
+import org.jetbrains.kotlin.analysis.api.types.KaFunctionType
+import org.jetbrains.kotlin.analysis.api.types.KaType
 import org.jetbrains.kotlin.analysis.utils.printer.PrettyPrinter
 import org.jetbrains.kotlin.idea.base.psi.classIdIfNonLocal
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
-import org.jetbrains.kotlin.idea.k2.codeinsight.quickFixes.createFromUsage.K2CreateFromUsageUtil.convertToClass
-import org.jetbrains.kotlin.idea.k2.codeinsight.quickFixes.createFromUsage.K2CreateFromUsageUtil.hasAbstractDeclaration
-import org.jetbrains.kotlin.idea.k2.codeinsight.quickFixes.createFromUsage.K2CreateFromUsageUtil.resolveExpression
+import org.jetbrains.kotlin.idea.k2.codeinsight.quickFixes.createFromUsage.CreateKotlinCallableAction.ParamCandidate
+import org.jetbrains.kotlin.idea.k2.codeinsight.quickFixes.createFromUsage.K2CreateFunctionFromUsageUtil.convertToClass
+import org.jetbrains.kotlin.idea.k2.codeinsight.quickFixes.createFromUsage.K2CreateFunctionFromUsageUtil.hasAbstractDeclaration
+import org.jetbrains.kotlin.idea.k2.codeinsight.quickFixes.createFromUsage.K2CreateFunctionFromUsageUtil.resolveExpression
+import org.jetbrains.kotlin.idea.k2.codeinsight.quickFixes.createFromUsage.K2CreateFunctionFromUsageUtil.toKtTypeWithNullability
 import org.jetbrains.kotlin.psi.KtElement
 import org.jetbrains.kotlin.types.Variance
 
@@ -51,9 +57,10 @@ object CreateKotlinCallableActionTextBuilder {
     }
 
     // text, receiverTypeText
-    fun renderReceiver(request: CreateMethodFromKotlinUsageRequest, container: KtElement): Pair<String,String> {
+    @OptIn(KaExperimentalApi::class)
+    fun renderReceiver(request: CreateMethodFromKotlinUsageRequest, container: KtElement): Pair<String, String> {
         analyze(request.call) {
-            val receiverSymbol: KtSymbol?
+            val receiverSymbol: KaSymbol?
             val receiverTypeText: String
             if (request.receiverExpression == null) {
                 if (request.receiverType == null) return "" to ""
@@ -61,8 +68,8 @@ object CreateKotlinCallableActionTextBuilder {
                 receiverTypeText = request.receiverType.render(RENDERER_OPTION_FOR_CREATE_FROM_USAGE_TEXT, Variance.INVARIANT)
             } else {
                 receiverSymbol = request.receiverExpression.resolveExpression()
-                val receiverType = request.receiverType ?: request.receiverExpression.getKtType()
-                val recPackageFqName = request.receiverExpression.getKtType()?.convertToClass()?.classIdIfNonLocal?.packageFqName
+                val receiverType = request.receiverType ?: request.receiverExpression.expressionType
+                val recPackageFqName = request.receiverExpression.expressionType?.convertToClass()?.classIdIfNonLocal?.packageFqName
                 val addedPackage = if (recPackageFqName == container.containingKtFile.packageFqName || recPackageFqName == null || recPackageFqName.asString().startsWith("kotlin")) "" else recPackageFqName.asString()+"."
                 // Since receiverExpression.getKtType() returns `kotlin/Unit` for a companion object, we first try the symbol resolution and its type rendering.
                 val renderedReceiver = receiverSymbol?.renderAsReceiver(request.isAbstractClassOrInterface, receiverType)
@@ -70,43 +77,72 @@ object CreateKotlinCallableActionTextBuilder {
                     ?: request.receiverExpression.text
                 receiverTypeText = addedPackage + renderedReceiver
             }
-            return if (request.isExtension && receiverSymbol is KtCallableSymbol) {
+            return if (request.isExtension && receiverSymbol is KaCallableSymbol) {
                 val receiverType = receiverSymbol.returnType
-                (if (receiverType is KtFunctionalType) "($receiverTypeText)." else "$receiverTypeText.") to receiverTypeText
+                (if (receiverType is KaFunctionType) "($receiverTypeText)." else "$receiverTypeText.") to receiverTypeText
             } else {
-                (receiverTypeText + if (receiverSymbol is KtClassLikeSymbol && !(receiverSymbol is KtClassOrObjectSymbol && receiverSymbol.classKind == KtClassKind.OBJECT)) ".Companion." else ".") to receiverTypeText
+                (receiverTypeText + if (request.isForCompanion) ".Companion." else ".") to receiverTypeText
             }
         }
     }
 
-    context (KtAnalysisSession)
-    private fun KtSymbol.renderAsReceiver(isAbstract: Boolean, ktType: KtType?): String? {
+    context (KaSession)
+    @OptIn(KaExperimentalApi::class)
+    private fun KaSymbol.renderAsReceiver(isAbstract: Boolean, ktType: KaType?): String? {
         return when (this) {
-            is KtCallableSymbol -> ktType?.selfOrSuperTypeWithAbstractMatch(isAbstract)
+            is KaCallableSymbol -> ktType?.selfOrSuperTypeWithAbstractMatch(isAbstract)
                 ?.render(RENDERER_OPTION_FOR_CREATE_FROM_USAGE_TEXT, Variance.INVARIANT)
 
-            is KtClassLikeSymbol -> classId?.shortClassName?.asString() ?: render(KtDeclarationRendererForSource.WITH_SHORT_NAMES)
+            is KaClassLikeSymbol -> classId?.shortClassName?.asString() ?: render(KaDeclarationRendererForSource.WITH_SHORT_NAMES)
             else -> null
         }
     }
 
-    context (KtAnalysisSession)
-    private fun KtType.selfOrSuperTypeWithAbstractMatch(isAbstract: Boolean): KtType? {
-        if (this.hasAbstractDeclaration() == isAbstract || this is KtNonErrorClassType && (classSymbol as? KtClassOrObjectSymbol)?.classKind == KtClassKind.INTERFACE) return this
-        return getDirectSuperTypes().firstNotNullOfOrNull { it.selfOrSuperTypeWithAbstractMatch(isAbstract) }
+    context (KaSession)
+    private fun KaType.selfOrSuperTypeWithAbstractMatch(isAbstract: Boolean): KaType? {
+        if (this.hasAbstractDeclaration() == isAbstract || this is KaClassType && (symbol as? KaClassSymbol)?.classKind == KaClassKind.INTERFACE) return this
+        return directSupertypes.firstNotNullOfOrNull { it.selfOrSuperTypeWithAbstractMatch(isAbstract) }
     }
 
     // We must use short names of types for create-from-usage quick-fix (or IntentionAction) text.
-    private val RENDERER_OPTION_FOR_CREATE_FROM_USAGE_TEXT: KtTypeRenderer = KtTypeRendererForSource.WITH_SHORT_NAMES.with {
-        classIdRenderer = object : KtClassTypeQualifierRenderer {
+    @KaExperimentalApi
+    private val RENDERER_OPTION_FOR_CREATE_FROM_USAGE_TEXT: KaTypeRenderer = KaTypeRendererForSource.WITH_SHORT_NAMES.with {
+        classIdRenderer = object : KaClassTypeQualifierRenderer {
             override fun renderClassTypeQualifier(
-                analysisSession: KtAnalysisSession,
-                type: KtClassType,
-                typeRenderer: KtTypeRenderer,
+                analysisSession: KaSession,
+                type: KaType,
+                qualifiers: List<KaClassTypeQualifier>,
+                typeRenderer: KaTypeRenderer,
                 printer: PrettyPrinter
             ) {
-                printer.append(type.qualifiers.joinToString(separator = ".") { it.name.asString() })
+                printer.append(qualifiers.joinToString(separator = ".") { it.name.asString() })
             }
+        }
+    }
+
+    context (KaSession)
+    fun renderCandidatesOfReturnType(request: CreateMethodRequest, container: KtElement): List<String> {
+        return request.returnType.mapNotNull { returnType ->
+            renderTypeName(returnType, container)
+        }
+    }
+
+    context (KaSession)
+    @OptIn(KaExperimentalApi::class)
+    fun renderTypeName(expectedType: ExpectedType, container: KtElement): String? {
+        val ktType = if (expectedType is ExpectedKotlinType) expectedType.ktType else expectedType.toKtTypeWithNullability(container)
+        if (ktType == null || ktType == builtinTypes.unit) return null
+        return ktType.render(renderer = K2CreateFunctionFromUsageUtil.WITH_TYPE_NAMES_FOR_CREATE_ELEMENTS, position = Variance.INVARIANT)
+    }
+
+    context (KaSession)
+    fun renderCandidatesOfParameterTypes(expectedParameters: List<ExpectedParameter>, container: KtElement?): List<ParamCandidate> {
+        return expectedParameters.map { expectedParameter ->
+            val types = if (container == null) listOf("Any")
+            else expectedParameter.expectedTypes.map {
+                renderTypeName(it, container) ?: "Any"
+            }
+            ParamCandidate(expectedParameter.semanticNames, types)
         }
     }
 }

@@ -9,13 +9,13 @@ import com.intellij.psi.util.PsiUtilCore
 import com.intellij.psi.util.endOffset
 import com.intellij.util.Function
 import org.jetbrains.kotlin.KtNodeTypes
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
+import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.analyze
 import org.jetbrains.kotlin.analysis.api.permissions.KaAllowAnalysisFromWriteAction
 import org.jetbrains.kotlin.analysis.api.permissions.KaAllowAnalysisOnEdt
 import org.jetbrains.kotlin.analysis.api.permissions.allowAnalysisFromWriteAction
 import org.jetbrains.kotlin.analysis.api.permissions.allowAnalysisOnEdt
-import org.jetbrains.kotlin.analysis.api.types.KtType
+import org.jetbrains.kotlin.analysis.api.types.KaType
 import org.jetbrains.kotlin.idea.util.application.isUnitTestMode
 import org.jetbrains.kotlin.psi.*
 import org.jetbrains.kotlin.psi.psiUtil.getParentOfType
@@ -62,14 +62,14 @@ internal object StatementFilter : (KtExpression) -> Boolean {
     }
 }
 
-internal class ExpressionTypeFilter(val predicate: KtAnalysisSession.(KtType) -> Boolean) : (KtExpression) -> Boolean {
+internal class ExpressionTypeFilter(val predicate: KaSession.(KaType) -> Boolean) : (KtExpression) -> Boolean {
     @OptIn(KaAllowAnalysisOnEdt::class)
     override fun invoke(expression: KtExpression): Boolean {
         allowAnalysisOnEdt {
             @OptIn(KaAllowAnalysisFromWriteAction::class)
             allowAnalysisFromWriteAction {
                 analyze(expression) {
-                    val type = expression.getKtType()
+                    val type = expression.expressionType
                     return type != null && predicate(type)
                 }
             }

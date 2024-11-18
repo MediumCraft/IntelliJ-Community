@@ -1,9 +1,9 @@
 // Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.inline.completion.listeners
 
-import com.intellij.codeInsight.completion.CompletionUtil
 import com.intellij.codeInsight.editorActions.TypedHandlerDelegate
 import com.intellij.codeInsight.inline.completion.InlineCompletion
+import com.intellij.codeInsight.inline.completion.InlineCompletionEvent
 import com.intellij.codeInsight.inline.completion.TypingEvent
 import com.intellij.codeInsight.inline.completion.logs.InlineCompletionUsageTracker.ShownEvents.FinishType
 import com.intellij.codeInsight.inline.completion.session.InlineCompletionContext
@@ -24,9 +24,9 @@ import com.intellij.openapi.editor.event.*
 import com.intellij.openapi.editor.ex.FocusChangeListener
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Key
-import com.intellij.openapi.util.TextRange
 import com.intellij.openapi.util.removeUserData
 import com.intellij.psi.PsiFile
+import com.intellij.util.application
 import com.intellij.util.concurrency.annotations.RequiresEdt
 import org.jetbrains.annotations.ApiStatus
 import java.awt.event.FocusEvent
@@ -39,23 +39,8 @@ internal class InlineCompletionDocumentListener(private val editor: Editor) : Bu
       hideInlineCompletion(editor, FinishType.DOCUMENT_CHANGED)
       return
     }
-
     val handler = InlineCompletion.getHandlerOrNull(editor)
-    if (handler != null) {
-      if (event.isBlankAppended() && InlineCompletionNewLineTracker.isNewLineInsertion(editor)) {
-        val range = TextRange.from(event.offset, event.newLength)
-        handler.allowTyping(TypingEvent.NewLine(event.newFragment.toString(), range))
-      }
-      handler.onDocumentEvent(event, editor)
-    }
-  }
-
-  private fun DocumentEvent.isBlankAppended(): Boolean {
-    return oldLength == 0 && newLength > 0 && newFragment.isBlank()
-  }
-
-  fun isEnabled(event: DocumentEvent): Boolean {
-    return event.newFragment != CompletionUtil.DUMMY_IDENTIFIER && event.newLength >= 1
+    handler?.onDocumentEvent(event, editor)
   }
 }
 
@@ -131,30 +116,57 @@ internal class InlineCompletionFocusListener : FocusChangeListener {
 }
 
 /**
- * Cancels inline completion (via [cancel]) as soon as one of the following happens:
- * * A caret added/removed.
- * * A new caret offset doesn't correspond to [expectedOffset].
+ * The listener has two mods:
+ * * **Movement is prohibited**: cancels inline completion (via [cancel]) as soon as a caret moves to unexpected position
+ * (defined by [completionOffset])
+ * * **Adaptive**: [completionOffset] is updated each time a caret offset is changed.
+ *
+ * In any mode, the inline completion will be canceled if any of the following happens:
+ * * Any caret is added/removed
+ * * A caret leans to the right, as only left lean is permitted. Otherwise, inlays will be to the left of the caret.
  */
-internal class InlineSessionWiseCaretListener(
-  @RequiresEdt private val expectedOffset: () -> Int,
-  @RequiresEdt private val cancel: () -> Unit
-) : CaretListener {
+internal abstract class InlineSessionWiseCaretListener : CaretListener {
+
+  protected abstract var completionOffset: Int
+    @RequiresEdt
+    get
+    @RequiresEdt
+    set
+
+  protected abstract val mode: Mode
+    @RequiresEdt
+    get
+
+  @RequiresEdt
+  protected abstract fun cancel()
 
   override fun caretAdded(event: CaretEvent) = cancel()
 
   override fun caretRemoved(event: CaretEvent) = cancel()
 
   override fun caretPositionChanged(event: CaretEvent) {
-    if (event.oldPosition == event.newPosition) {
-      // ML-1341
-      // It means that we moved caret from the state 'before inline completion' to `after inline completion`
-      // In such a case, the actual caret position does not change
-      return cancel()
-    }
     val newOffset = event.editor.logicalPositionToOffset(event.newPosition)
-    if (newOffset != expectedOffset()) {
-      return cancel()
+    when (mode) {
+      Mode.ADAPTIVE -> {
+        completionOffset = newOffset
+      }
+      Mode.PROHIBIT_MOVEMENT -> {
+        if (event.oldPosition == event.newPosition) {
+          // ML-1341
+          // It means that we moved caret from the state 'before inline completion' to `after inline completion`
+          // In such a case, the actual caret position does not change, only 'leansForward'
+          cancel()
+        }
+        else if (newOffset != completionOffset) {
+          cancel()
+        }
+      }
     }
+  }
+
+  protected enum class Mode {
+    ADAPTIVE,
+    PROHIBIT_MOVEMENT
   }
 }
 
@@ -198,7 +210,7 @@ private class InlineCompletionTemplateListener : TemplateManagerListener {
   override fun templateStarted(state: TemplateState) {
     state.editor?.let { editor ->
       start(editor)
-      state.addTemplateStateListener(TemplateStateListener { finish(editor) })
+      state.addTemplateStateListener(TemplateStateListener(editor, ::finish))
     }
   }
 
@@ -210,13 +222,33 @@ private class InlineCompletionTemplateListener : TemplateManagerListener {
     editor.removeUserData(TEMPLATE_IN_PROGRESS_KEY)
   }
 
-  private class TemplateStateListener(private val finish: () -> Unit) : TemplateEditingListener {
-    override fun templateFinished(template: Template, brokenOff: Boolean) = finish()
-    override fun templateCancelled(template: Template?) = finish()
+  private class TemplateStateListener(private val editor: Editor, private val finish: (Editor) -> Unit) : TemplateEditingListener {
+
+    override fun templateFinished(template: Template, brokenOff: Boolean) {
+      finish(editor)
+      if (!brokenOff && template.isSuitableToInvokeEvent()) {
+        application.invokeLater {
+          if (!editor.isDisposed) {
+            InlineCompletion.getHandlerOrNull(editor)?.invokeEvent(InlineCompletionEvent.TemplateInserted(editor))
+          }
+        }
+      }
+    }
+
+    override fun templateCancelled(template: Template?) {
+      finish(editor)
+    }
 
     override fun currentVariableChanged(templateState: TemplateState, template: Template?, oldIndex: Int, newIndex: Int) = Unit
+
     override fun waitingForInput(template: Template?) = Unit
+
     override fun beforeTemplateFinished(state: TemplateState, template: Template?) = Unit
+
+    private fun Template.isSuitableToInvokeEvent(): Boolean {
+      // Usually, 'key' is responsible for the name of the live template
+      return key != ""
+    }
   }
 
   companion object {

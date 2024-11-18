@@ -8,6 +8,9 @@
     <applicationService
         serviceInterface="com.intellij.openapi.externalSystem.service.notification.ExternalSystemProgressNotificationManager"
         serviceImplementation="com.intellij.openapi.externalSystem.service.remote.ExternalSystemProgressNotificationManagerImpl"/>
+    <applicationService
+      serviceInterface="com.intellij.openapi.externalSystem.service.internal.ExternalSystemProcessingManager"
+      serviceImplementation="com.intellij.openapi.externalSystem.service.internal.ExternalSystemProcessingManagerImpl"/>
     <applicationService serviceInterface="com.intellij.openapi.externalSystem.service.project.ExternalLibraryPathTypeMapper"
                         serviceImplementation="com.intellij.openapi.externalSystem.service.project.ExternalLibraryPathTypeMapperImpl"/>
     <externalSystemNotificationExtension
@@ -18,7 +21,7 @@
     <applicationService serviceInterface="com.intellij.openapi.externalSystem.util.environment.Environment"
                         serviceImplementation="com.intellij.openapi.externalSystem.util.environment.SystemEnvironment"/>
 
-    <projectConfigurable groupId="build" id="build.tools" groupWeight="1000"
+    <projectConfigurable groupId="build" id="build.tools"
                          instance="com.intellij.openapi.externalSystem.service.settings.ExternalSystemGroupConfigurable"
                          key="settings.build.tools.display.name" bundle="messages.ExternalSystemBundle"/>
     <search.optionContributor
@@ -58,6 +61,8 @@
     <applicationService serviceInterface="com.intellij.openapi.externalSystem.service.project.ProjectDataManager"
                         serviceImplementation="com.intellij.openapi.externalSystem.service.project.manage.ProjectDataManagerImpl"/>
 
+    <projectTaskManagerListener implementation="com.intellij.openapi.externalSystem.service.project.manage.ExternalProjectTaskManagerListener" />
+
     <projectService serviceInterface="com.intellij.openapi.externalSystem.service.project.manage.ExternalProjectsManager"
                     serviceImplementation="com.intellij.openapi.externalSystem.service.project.manage.ExternalProjectsManagerImpl"/>
     <externalSystemSettingsListener
@@ -74,6 +79,11 @@
                  description="Provide assignment of groupId/artifactId/version for JPS modules"/>
     <registryKey key="external.system.pause.indexing.during.sync" defaultValue="false"
                  description="Suspend indexing and scanning during sync with external build system"/>
+    <registryKey key="external.system.incomplete.dependencies.state.during.sync" defaultValue="true"
+                 description="Indicates project state as incomplete during sync with external build system"/>
+
+    <registryKey key="external.system.substitute.library.dependencies" defaultValue="false"
+                 description="Replace library dependencies with module dependencies imported from external build systems like Maven/Gradle"/>
 
     <externalProjectDataService implementation="com.intellij.openapi.externalSystem.service.project.manage.ProjectDataServiceImpl"/>
     <externalProjectDataService implementation="com.intellij.openapi.externalSystem.service.project.manage.LibraryDataService"/>
@@ -115,7 +125,7 @@
                    serviceImplementation="com.intellij.openapi.externalSystem.service.project.ExternalSystemModulePropertyManagerBridge"/>
 
     <applicationService serviceInterface="com.intellij.openapi.roots.ExternalProjectSystemRegistry"
-                        serviceImplementation="com.intellij.openapi.externalSystem.ExternalProjectSystemRegistryImpl" overrides="true"/>
+                        serviceImplementation="com.intellij.openapi.externalSystem.service.ExternalProjectSystemRegistryImpl" overrides="true"/>
 
     <applicationService serviceInterface="com.intellij.openapi.externalSystem.service.execution.ExternalSystemJdkProvider"
                         serviceImplementation="com.intellij.openapi.externalSystem.service.execution.DefaultExternalSystemJdkProvider"/>
@@ -140,7 +150,9 @@
 
     <trustedProjectsLocator implementation="com.intellij.openapi.externalSystem.service.project.trusted.ExternalSystemTrustedProjectsLocator"/>
 
-    <recoveryAction implementation="com.intellij.openapi.externalSystem.service.project.manage.ExternalProjectsDataRecoveryAction"/>
+    <recoveryAction implementation="com.intellij.openapi.externalSystem.service.project.manage.ExternalSystemRecoveryAction"/>
+
+    <externalSystemRecoveryContributor implementation="com.intellij.openapi.externalSystem.service.project.manage.ExternalProjectDataRecoveryContributor$Factory"/>
   </extensions>
   <applicationListeners>
     <listener class="com.intellij.openapi.externalSystem.autoimport.ProjectRefreshFloatingProvider$Listener"
@@ -149,7 +161,7 @@
     <listener class="com.intellij.openapi.externalSystem.service.project.trusted.ExternalSystemTrustedListener"
               topic="com.intellij.ide.trustedProjects.TrustedProjectsListener"
               activeInHeadlessMode="false" activeInTestMode="false"/>
-    <listener class="com.intellij.openapi.externalSystem.service.project.manage.SourceFolderManagerImpl$BulkFileListenerImpl"
+    <listener class="com.intellij.openapi.externalSystem.service.project.manage.SourceFolderManagerImplBulkFileListener"
               topic="com.intellij.openapi.vfs.newvfs.BulkFileListener"
               activeInHeadlessMode="true" activeInTestMode="true"/>
     <listener class="com.intellij.openapi.externalSystem.service.project.manage.SourceFolderManagerImpl$ModuleListenerImpl"

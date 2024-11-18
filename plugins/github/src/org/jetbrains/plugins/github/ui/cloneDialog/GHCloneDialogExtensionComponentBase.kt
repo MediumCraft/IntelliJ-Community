@@ -1,7 +1,6 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.plugins.github.ui.cloneDialog
 
-import com.intellij.collaboration.async.disposingMainScope
 import com.intellij.collaboration.auth.ui.CompactAccountsPanelFactory
 import com.intellij.collaboration.messages.CollaborationToolsBundle
 import com.intellij.collaboration.ui.CollaborationToolsUIUtil
@@ -11,10 +10,8 @@ import com.intellij.dvcs.repo.ClonePathProvider
 import com.intellij.dvcs.ui.CloneDvcsValidationUtils
 import com.intellij.dvcs.ui.DvcsBundle.message
 import com.intellij.dvcs.ui.FilePathDocumentChildPathHandle
-import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.IdeActions
-import com.intellij.openapi.application.ModalityState
-import com.intellij.openapi.application.asContextElement
+import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
 import com.intellij.openapi.keymap.KeymapUtil
 import com.intellij.openapi.project.DumbAwareAction
@@ -22,12 +19,13 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogPanel
 import com.intellij.openapi.ui.TextFieldWithBrowseButton
 import com.intellij.openapi.ui.ValidationInfo
-import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.util.registry.Registry
 import com.intellij.openapi.util.text.StringUtil
 import com.intellij.openapi.vcs.CheckoutProvider
 import com.intellij.openapi.vcs.ui.cloneDialog.VcsCloneDialogExtensionComponent
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.wm.IdeFocusManager
+import com.intellij.platform.util.coroutines.childScope
 import com.intellij.ui.CollectionListModel
 import com.intellij.ui.DocumentAdapter
 import com.intellij.ui.SearchTextField
@@ -45,9 +43,14 @@ import git4idea.GitUtil
 import git4idea.checkout.GitCheckoutProvider
 import git4idea.commands.Git
 import git4idea.remote.GitRememberedInputs
-import kotlinx.coroutines.*
+import git4idea.ui.GitShallowCloneComponentFactory
+import git4idea.ui.GitShallowCloneViewModel
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import org.jetbrains.annotations.Nls
 import org.jetbrains.plugins.github.api.GHRepositoryCoordinates
 import org.jetbrains.plugins.github.api.GithubServerPath
@@ -57,7 +60,10 @@ import org.jetbrains.plugins.github.authentication.ui.GHAccountsDetailsProvider
 import org.jetbrains.plugins.github.exceptions.GithubAuthenticationException
 import org.jetbrains.plugins.github.exceptions.GithubMissingTokenException
 import org.jetbrains.plugins.github.i18n.GithubBundle
-import org.jetbrains.plugins.github.util.*
+import org.jetbrains.plugins.github.util.GithubGitHelper
+import org.jetbrains.plugins.github.util.GithubNotificationIdsHolder
+import org.jetbrains.plugins.github.util.GithubNotifications
+import org.jetbrains.plugins.github.util.GithubUrlUtil
 import java.awt.event.ActionEvent
 import java.nio.file.Paths
 import javax.swing.AbstractAction
@@ -69,17 +75,17 @@ import javax.swing.event.ListDataEvent
 import javax.swing.event.ListDataListener
 import kotlin.properties.Delegates
 
+private val LOG = logger<GHCloneDialogExtensionComponentBase>()
+
 internal abstract class GHCloneDialogExtensionComponentBase(
   private val project: Project,
-  private val modalityState: ModalityState,
+  parentCs: CoroutineScope,
   private val accountManager: GHAccountManager
 ) : VcsCloneDialogExtensionComponent() {
 
-  private val LOG = GithubUtil.LOG
-
   private val githubGitHelper: GithubGitHelper = GithubGitHelper.getInstance()
 
-  private val cs = disposingMainScope() + modalityState.asContextElement()
+  private val cs = parentCs.childScope(javaClass.name, Dispatchers.Main)
 
   // UI
   private val wrapper: Wrapper = Wrapper()
@@ -88,25 +94,25 @@ internal abstract class GHCloneDialogExtensionComponentBase(
 
   private val searchField: SearchTextField
   private val directoryField = TextFieldWithBrowseButton().apply {
-    val fcd = FileChooserDescriptorFactory.createSingleFolderDescriptor()
-    fcd.isShowFileSystemRoots = true
-    fcd.isHideIgnored = false
-    addBrowseFolderListener(message("clone.destination.directory.browser.title"),
-                            message("clone.destination.directory.browser.description"),
-                            project,
-                            fcd)
+    addBrowseFolderListener(project, FileChooserDescriptorFactory.createSingleFolderDescriptor()
+      .withShowFileSystemRoots(true)
+      .withHideIgnored(false)
+      .withTitle(message("clone.destination.directory.browser.title"))
+      .withDescription(message("clone.destination.directory.browser.description")))
   }
   private val cloneDirectoryChildHandle = FilePathDocumentChildPathHandle
     .install(directoryField.textField.document, ClonePathProvider.defaultParentDirectoryPath(project, GitRememberedInputs.getInstance()))
 
   // state
-  private val loader = GHCloneDialogRepositoryListLoaderImpl()
+  private val loader = GHCloneDialogRepositoryListLoaderImpl(cs)
   private var inLoginState = false
   private var selectedUrl by Delegates.observable<String?>(null) { _, _, _ -> onSelectedUrlChanged() }
 
   protected val content: JComponent get() = wrapper.targetComponent
 
   private val accountListModel: ListModel<GithubAccount> = createAccountsModel()
+
+  private val shallowCloneModel = GitShallowCloneViewModel()
 
   init {
     repositoryList = JBList(loader.listModel).apply {
@@ -141,10 +147,6 @@ internal abstract class GHCloneDialogExtensionComponentBase(
       }
     }
 
-    @Suppress("LeakingThis")
-    val parentDisposable: Disposable = this
-    Disposer.register(parentDisposable, loader)
-
     val accountDetailsProvider = GHAccountsDetailsProvider(cs, accountManager)
 
     val accountsPanel = CompactAccountsPanelFactory(accountListModel)
@@ -172,6 +174,7 @@ internal abstract class GHCloneDialogExtensionComponentBase(
             CloneDvcsValidationUtils.checkDirectory(it.text, it.textField)
           }
       }
+      GitShallowCloneComponentFactory.appendShallowCloneRow(this, shallowCloneModel)
     }
     repositoriesPanel.border = JBEmptyBorder(UIUtil.getRegularPanelInsets())
     setupAccountsListeners()
@@ -303,7 +306,16 @@ internal abstract class GHCloneDialogExtensionComponentBase(
     val directoryName = Paths.get(directoryField.text).fileName.toString()
     val parentDirectory = parent.toAbsolutePath().toString()
 
-    GitCheckoutProvider.clone(project, Git.getInstance(), checkoutListener, destinationParent, selectedUrl, directoryName, parentDirectory)
+    GitCheckoutProvider.clone(
+      project,
+      Git.getInstance(),
+      checkoutListener,
+      destinationParent,
+      selectedUrl,
+      directoryName,
+      parentDirectory,
+      shallowCloneModel.getShallowCloneOptions(),
+    )
   }
 
   override fun onComponentSelected() {

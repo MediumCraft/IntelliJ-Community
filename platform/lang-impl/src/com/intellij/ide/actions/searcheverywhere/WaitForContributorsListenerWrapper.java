@@ -6,6 +6,7 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.options.advanced.AdvancedSettings;
 import com.intellij.util.concurrency.EdtExecutorService;
 import com.intellij.util.containers.ContainerUtil;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.*;
@@ -16,6 +17,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+@ApiStatus.Internal
 public final class WaitForContributorsListenerWrapper implements SearchListener, Disposable {
 
   private static final Logger LOG = Logger.getInstance(WaitForContributorsListenerWrapper.class);
@@ -92,6 +94,12 @@ public final class WaitForContributorsListenerWrapper implements SearchListener,
     buffer.contributorWaits(contributor);
     markContributorArrived(contributor);
     scheduleThrottlingFlush();
+  }
+
+  @ApiStatus.Experimental
+  @Override
+  public void standardSearchFoundNoResults(@NotNull SearchEverywhereContributor<?> contributor) {
+    delegateListener.standardSearchFoundNoResults(contributor);
   }
 
   /**

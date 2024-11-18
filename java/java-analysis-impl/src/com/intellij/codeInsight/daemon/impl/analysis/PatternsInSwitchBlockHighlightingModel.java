@@ -10,6 +10,7 @@ import com.intellij.openapi.util.Comparing;
 import com.intellij.pom.java.JavaFeature;
 import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.*;
+import com.intellij.psi.impl.IncompleteModelUtil;
 import com.intellij.psi.util.*;
 import com.intellij.util.ObjectUtils;
 import com.intellij.util.SmartList;
@@ -38,6 +39,13 @@ import static com.intellij.codeInsight.daemon.impl.analysis.PatternsInSwitchBloc
 import static com.intellij.psi.PsiModifier.ABSTRACT;
 import static com.intellij.psi.PsiModifier.SEALED;
 
+/**
+ * This class represents the model for highlighting patterns in a switch block.
+ * It provides methods for checking the type of switch selector, the values of switch labels,
+ * compatibility between labels and selectors, and dominance and completeness rules for switch blocks.
+ *
+ * @see SwitchBlockHighlightingModel
+ */
 public class PatternsInSwitchBlockHighlightingModel extends SwitchBlockHighlightingModel {
   private final Object myUnconditionalPattern = new Object();
   @Nullable
@@ -174,6 +182,14 @@ public class PatternsInSwitchBlockHighlightingModel extends SwitchBlockHighlight
         String expectedTypes = JavaErrorBundle.message("switch.class.or.array.type.expected");
         String message = JavaErrorBundle.message("unexpected.type", expectedTypes, JavaHighlightUtil.formatType(patternType));
         HighlightInfo.Builder info = createError(elementToReport, message);
+        if (patternType instanceof PsiPrimitiveType) {
+          HighlightInfo.Builder infoFeature =
+            HighlightUtil.checkFeature(elementToReport, JavaFeature.PRIMITIVE_TYPES_IN_PATTERNS,
+                                       PsiUtil.getLanguageLevel(elementToReport), elementToReport.getContainingFile());
+          if (infoFeature != null) {
+            info = infoFeature;
+          }
+        }
         PsiPrimitiveType primitiveType = ObjectUtils.tryCast(patternType, PsiPrimitiveType.class);
         if (primitiveType != null) {
           IntentionAction fix = getFixFactory().createReplacePrimitiveWithBoxedTypeAction(mySelectorType, typeElement);
@@ -198,6 +214,14 @@ public class PatternsInSwitchBlockHighlightingModel extends SwitchBlockHighlight
             (!IncompleteModelUtil.isPotentiallyConvertible(mySelectorType, patternType, label))) {
           HighlightInfo.Builder error =
             HighlightUtil.createIncompatibleTypeHighlightInfo(mySelectorType, patternType, elementToReport.getTextRange(), 0);
+          if (mySelectorType instanceof PsiPrimitiveType) {
+            HighlightInfo.Builder infoFeature =
+              HighlightUtil.checkFeature(elementToReport, JavaFeature.PRIMITIVE_TYPES_IN_PATTERNS,
+                                         PsiUtil.getLanguageLevel(elementToReport), elementToReport.getContainingFile());
+            if (infoFeature != null) {
+              error = infoFeature;
+            }
+          }
           errorSink.accept(error);
           return true;
         }
@@ -343,6 +367,14 @@ public class PatternsInSwitchBlockHighlightingModel extends SwitchBlockHighlight
     return result;
   }
 
+  /**
+   * Determines if the given case label element is dominated by another case label element according to JEP 440-441
+   *
+   * @param overWhom The case label element that may dominate.
+   * @param who The case label element that may be dominated.
+   * @param selectorType The type used to select the case label element.
+   * @return {@code true} if the 'overWhom' case label element dominates the 'who' case label element, {@code false} otherwise.
+   */
   public static boolean isDominated(@NotNull PsiCaseLabelElement overWhom,
                                     @NotNull PsiElement who,
                                     @NotNull PsiType selectorType) {
@@ -716,7 +748,18 @@ public class PatternsInSwitchBlockHighlightingModel extends SwitchBlockHighlight
       }
     }
     else {
-      errorSink.accept(createCompletenessInfoForSwitch(!elements.isEmpty()));
+      HighlightInfo.Builder completenessInfoForSwitch = createCompletenessInfoForSwitch(!elements.isEmpty());
+      if (mySelectorKind == SelectorKind.BOOLEAN) {
+        IntentionAction fix = getFixFactory().createAddMissingBooleanPrimitiveBranchesFix(myBlock);
+        if (fix != null) {
+          completenessInfoForSwitch.registerFix(fix, null, null, null, null);
+          IntentionAction fixWithNull = getFixFactory().createAddMissingBooleanPrimitiveBranchesFixWithNull(myBlock);
+          if (fixWithNull != null) {
+            completenessInfoForSwitch.registerFix(fixWithNull, null, null, null, null);
+          }
+        }
+      }
+      errorSink.accept(completenessInfoForSwitch);
     }
   }
 
@@ -839,6 +882,10 @@ public class PatternsInSwitchBlockHighlightingModel extends SwitchBlockHighlight
     Set<String> missingCases = ContainerUtil.map2LinkedSet(missedClasses, PsiClass::getQualifiedName);
     IntentionAction fix = getFixFactory().createAddMissingSealedClassBranchesFix(myBlock, missingCases, allNames);
     info.registerFix(fix, null, null, null, null);
+    IntentionAction fixWithNull = getFixFactory().createAddMissingSealedClassBranchesFixWithNull(myBlock, missingCases, allNames);
+    if (fixWithNull != null) {
+      info.registerFix(fixWithNull, null, null, null, null);
+    }
     return info;
   }
 
@@ -922,6 +969,7 @@ public class PatternsInSwitchBlockHighlightingModel extends SwitchBlockHighlight
     AtomicBoolean reported = new AtomicBoolean();
     if (switchModel instanceof PatternsInSwitchBlockHighlightingModel patternsInSwitchModel) {
       if (findUnconditionalPatternForType(labelElements, switchModel.mySelectorType) != null) return COMPLETE_WITH_UNCONDITIONAL;
+      if (switchModel.getSwitchSelectorKind() == SelectorKind.BOOLEAN && hasTrueAndFalse(labelElements))  return COMPLETE_WITH_UNCONDITIONAL;
       if (!needToCheckCompleteness && !isEnumSelector) return INCOMPLETE;
       //it is necessary,
       // because deconstruction patterns don't cover cases when some of their components are null and deconstructionPattern too

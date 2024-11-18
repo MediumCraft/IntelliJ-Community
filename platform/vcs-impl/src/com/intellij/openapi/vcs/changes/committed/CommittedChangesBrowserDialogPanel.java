@@ -17,6 +17,7 @@ import com.intellij.ui.table.TableView;
 import com.intellij.util.ui.JBDimension;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nls;
 
 import javax.swing.*;
@@ -29,6 +30,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+@ApiStatus.Internal
 public class CommittedChangesBrowserDialogPanel extends JPanel {
   private final Project myProject;
   // left view
@@ -173,10 +175,6 @@ public class CommittedChangesBrowserDialogPanel extends JPanel {
     myTableModel = tableModel;
     myChangeListsView.setModelAndUpdateColumns(tableModel);
     tableModel.fireTableStructureChanged();
-  }
-
-  public void setItems(List<CommittedChangeList> items) {
-    myTableModel.setItems(items);
   }
 
   private void updateBySelectionChange() {

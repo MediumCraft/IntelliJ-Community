@@ -5,12 +5,14 @@ import com.intellij.openapi.components.ExpandMacroToPathMap;
 import com.intellij.openapi.util.io.FileUtilRt;
 import com.intellij.openapi.util.text.StringUtilRt;
 import org.jdom.Element;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
 import java.util.Map;
 
+@ApiStatus.Internal
 public final class JpsMacroExpander {
   private final ExpandMacroToPathMap myExpandMacroMap;
 
@@ -19,6 +21,10 @@ public final class JpsMacroExpander {
     for (Map.Entry<String, String> entry : pathVariables.entrySet()) {
       addMacro(entry.getKey(), entry.getValue());
     }
+  }
+
+  public JpsMacroExpander(ExpandMacroToPathMap expandMacroMap) {
+    myExpandMacroMap = expandMacroMap;
   }
 
   public void addFileHierarchyReplacements(String macroName, File file) {

@@ -1,8 +1,9 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
-@file:Suppress("DuplicatedCode")
-
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.trustedProjects
 
+import com.intellij.diagnostic.WindowsDefenderChecker
+import com.intellij.diagnostic.WindowsDefenderCheckerActivity
+import com.intellij.diagnostic.WindowsDefenderStatisticsCollector
 import com.intellij.ide.IdeBundle
 import com.intellij.ide.impl.OpenUntrustedProjectChoice
 import com.intellij.ide.impl.TRUSTED_PROJECTS_HELP_TOPIC
@@ -11,14 +12,14 @@ import com.intellij.ide.impl.TrustedProjectsStatistics
 import com.intellij.openapi.application.ApplicationInfo
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.application.invokeAndWaitIfNeeded
+import com.intellij.openapi.application.writeIntentReadAction
 import com.intellij.openapi.components.service
+import com.intellij.openapi.components.serviceAsync
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.ui.DoNotAskOption
 import com.intellij.openapi.ui.MessageDialogBuilder
-import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.util.NlsContexts
-import com.intellij.openapi.util.io.FileUtil
+import com.intellij.openapi.util.SystemInfo
 import com.intellij.util.ThreeState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -26,59 +27,51 @@ import org.jetbrains.annotations.ApiStatus
 import java.nio.file.Path
 
 object TrustedProjectsDialog {
-
-  private val LOG = logger<TrustedProjects>()
-
   /**
    * Shows the "Trust project?" dialog, if the user wasn't asked yet if they trust this project,
    * and sets the project trusted state according to the user choice.
    *
-   * @return false if the user chose not to open (link) the project at all;
-   *   true otherwise, i.e. if the user chose to open (link) the project either in trust or in the safe mode,
+   * @return `false` if the user chose not to open (link) the project at all;
+   *   `true` otherwise, i.e., if the user chose to open (link) the project either in trust or in the safe mode,
    *   or if the confirmation wasn't shown because the project trust state was already known.
    */
-  suspend fun confirmOpeningOrLinkingUntrustedProjectAsync(
+  suspend fun confirmOpeningOrLinkingUntrustedProject(
     projectRoot: Path,
     project: Project?,
-    @NlsContexts.DialogTitle title: String,
-    @NlsContexts.DialogMessage message: String = IdeBundle.message("untrusted.project.open.dialog.text", ApplicationInfo.getInstance().fullApplicationName),
-    @NlsContexts.Button trustButtonText: String = IdeBundle.message("untrusted.project.dialog.trust.button"),
-    @NlsContexts.Button distrustButtonText: String = IdeBundle.message("untrusted.project.open.dialog.distrust.button"),
-    @NlsContexts.Button cancelButtonText: String = IdeBundle.message("untrusted.project.open.dialog.cancel.button")
+    title: @NlsContexts.DialogTitle String,
+    message: @NlsContexts.DialogMessage String = IdeBundle.message("untrusted.project.open.dialog.text", ApplicationInfo.getInstance().fullApplicationName),
+    trustButtonText: @NlsContexts.Button String = IdeBundle.message("untrusted.project.dialog.trust.button"),
+    distrustButtonText: @NlsContexts.Button String = IdeBundle.message("untrusted.project.open.dialog.distrust.button"),
+    cancelButtonText: @NlsContexts.Button String = IdeBundle.message("untrusted.project.open.dialog.cancel.button")
   ): Boolean {
     val locatedProject = TrustedProjectsLocator.locateProject(projectRoot, project)
     val projectTrustedState = TrustedProjects.getProjectTrustedState(locatedProject)
     if (projectTrustedState == ThreeState.YES) {
-      TrustedProjects.setProjectTrusted(locatedProject, true)
+      TrustedProjects.setProjectTrusted(locatedProject, isTrusted = true)
     }
     if (projectTrustedState != ThreeState.UNSURE) {
       return true
     }
 
-    val doNotAskOption = projectRoot.parent?.let(TrustedProjectsDialog::createDoNotAskOptionForLocation)
-    val choice = withContext(Dispatchers.EDT) {
-      MessageDialogBuilder.Message(title, message)
-        .buttons(trustButtonText, distrustButtonText, cancelButtonText)
-        .defaultButton(trustButtonText)
-        .focusedButton(distrustButtonText)
-        .doNotAsk(doNotAskOption)
-        .asWarning()
-        .help(TRUSTED_PROJECTS_HELP_TOPIC)
-        .show()
-    }
-
-    val openChoice = when (choice) {
-      trustButtonText -> OpenUntrustedProjectChoice.TRUST_AND_OPEN
-      distrustButtonText -> OpenUntrustedProjectChoice.OPEN_IN_SAFE_MODE
-      cancelButtonText, null -> OpenUntrustedProjectChoice.CANCEL
-      else -> {
-        LOG.error("Illegal choice $choice")
-        return false
+    val pathsToExclude = getDefenderExcludePaths(project, projectRoot)
+    val dialog = withContext(Dispatchers.EDT) {
+      val dialog = TrustedProjectStartupDialog(
+        project, projectRoot, pathsToExclude, title, message, trustButtonText, distrustButtonText, cancelButtonText
+      )
+      writeIntentReadAction {
+        dialog.show()
       }
+      dialog
     }
+    val openChoice = dialog.getOpenChoice()
 
     if (openChoice == OpenUntrustedProjectChoice.TRUST_AND_OPEN) {
       TrustedProjects.setProjectTrusted(locatedProject, true)
+      if (projectRoot.parent != null && dialog.isTrustAll()) {
+        val projectLocationPath = projectRoot.parent.toString()
+        TrustedProjectsStatistics.TRUST_LOCATION_CHECKBOX_SELECTED.log()
+        service<TrustedPathsSettings>().addTrustedPath(projectLocationPath)
+      }
     }
     if (openChoice == OpenUntrustedProjectChoice.OPEN_IN_SAFE_MODE) {
       TrustedProjects.setProjectTrusted(locatedProject, false)
@@ -86,32 +79,52 @@ object TrustedProjectsDialog {
 
     TrustedProjectsStatistics.NEW_PROJECT_OPEN_OR_IMPORT_CHOICE.log(openChoice)
 
+    if (openChoice == OpenUntrustedProjectChoice.TRUST_AND_OPEN) {
+      dialog.getDefenderTrustFolder()?.let { defenderTrustDir ->
+        WindowsDefenderStatisticsCollector.excludedFromTrustDialog(dialog.isTrustAll())
+        val checker = serviceAsync<WindowsDefenderChecker>()
+        if (project == null) {
+          checker.markProjectPath(projectRoot)
+        }
+        if (defenderTrustDir != projectRoot) {
+          (pathsToExclude as MutableList<Path>).apply {
+            remove(projectRoot)
+            add(0, defenderTrustDir)
+          }
+        }
+        WindowsDefenderCheckerActivity.runAndNotify(project) {
+          checker.excludeProjectPaths(project, projectRoot, pathsToExclude)
+        }
+      }
+    }
+
     return openChoice != OpenUntrustedProjectChoice.CANCEL
   }
 
-  private fun createDoNotAskOptionForLocation(projectLocation: Path): DoNotAskOption {
-    val projectLocationPath = projectLocation.toString()
-    return object : DoNotAskOption.Adapter() {
-      override fun rememberChoice(isSelected: Boolean, exitCode: Int) {
-        if (isSelected && exitCode == Messages.YES) {
-          TrustedProjectsStatistics.TRUST_LOCATION_CHECKBOX_SELECTED.log()
-          service<TrustedPathsSettings>().addTrustedPath(projectLocationPath)
+  private suspend fun getDefenderExcludePaths(project: Project?, projectPath: Path): List<Path> {
+    if (SystemInfo.isWindows) {
+      val checker = serviceAsync<WindowsDefenderChecker>()
+      if (
+        !checker.isUntrustworthyLocation(projectPath) &&
+        !checker.isStatusCheckIgnored(project) &&
+        checker.isRealTimeProtectionEnabled == true
+      ) {
+        val paths = checker.filterDevDrivePaths(checker.getPathsToExclude(project, projectPath)).toMutableList()
+        if (paths.isEmpty()) {
+          logger<TrustedProjectsDialog>().info("all paths are on a DevDrive")
         }
-      }
-
-      override fun getDoNotShowMessage(): String {
-        val path = FileUtil.getLocationRelativeToUserHome(projectLocationPath, false)
-        return IdeBundle.message("untrusted.project.warning.trust.location.checkbox", path)
+        return paths
       }
     }
+    return emptyList()
   }
 
   suspend fun confirmLoadingUntrustedProjectAsync(
     project: Project,
-    @NlsContexts.DialogTitle title: String,
-    @NlsContexts.DialogMessage message: String,
-    @NlsContexts.Button trustButtonText: String,
-    @NlsContexts.Button distrustButtonText: String
+    title: @NlsContexts.DialogTitle String,
+    message: @NlsContexts.DialogMessage String,
+    trustButtonText: @NlsContexts.Button String,
+    distrustButtonText: @NlsContexts.Button String
   ): Boolean {
     val locatedProject = TrustedProjectsLocator.locateProject(project)
     if (TrustedProjects.isProjectTrusted(locatedProject)) {
@@ -137,66 +150,12 @@ object TrustedProjectsDialog {
 
   @ApiStatus.ScheduledForRemoval
   @Deprecated("Use async method instead")
-  fun confirmOpeningOrLinkingUntrustedProject(
-    projectRoot: Path,
-    project: Project?,
-    @NlsContexts.DialogTitle title: String,
-    @NlsContexts.DialogMessage message: String,
-    @NlsContexts.Button trustButtonText: String,
-    @NlsContexts.Button distrustButtonText: String,
-    @NlsContexts.Button cancelButtonText: String
-  ): Boolean {
-    val locatedProject = TrustedProjectsLocator.locateProject(projectRoot, project)
-    val projectTrustedState = TrustedProjects.getProjectTrustedState(locatedProject)
-    if (projectTrustedState == ThreeState.YES) {
-      TrustedProjects.setProjectTrusted(locatedProject, true)
-    }
-    if (projectTrustedState != ThreeState.UNSURE) {
-      return true
-    }
-
-    val doNotAskOption = projectRoot.parent?.let(TrustedProjectsDialog::createDoNotAskOptionForLocation)
-    val choice = invokeAndWaitIfNeeded {
-      MessageDialogBuilder.Message(title, message)
-        .buttons(trustButtonText, distrustButtonText, cancelButtonText)
-        .defaultButton(trustButtonText)
-        .focusedButton(distrustButtonText)
-        .doNotAsk(doNotAskOption)
-        .asWarning()
-        .help(TRUSTED_PROJECTS_HELP_TOPIC)
-        .show()
-    }
-
-    val openChoice = when (choice) {
-      trustButtonText -> OpenUntrustedProjectChoice.TRUST_AND_OPEN
-      distrustButtonText -> OpenUntrustedProjectChoice.OPEN_IN_SAFE_MODE
-      cancelButtonText, null -> OpenUntrustedProjectChoice.CANCEL
-      else -> {
-        LOG.error("Illegal choice $choice")
-        return false
-      }
-    }
-
-    if (openChoice == OpenUntrustedProjectChoice.TRUST_AND_OPEN) {
-      TrustedProjects.setProjectTrusted(locatedProject, true)
-    }
-    if (openChoice == OpenUntrustedProjectChoice.OPEN_IN_SAFE_MODE) {
-      TrustedProjects.setProjectTrusted(locatedProject, false)
-    }
-
-    TrustedProjectsStatistics.NEW_PROJECT_OPEN_OR_IMPORT_CHOICE.log(openChoice)
-
-    return openChoice != OpenUntrustedProjectChoice.CANCEL
-  }
-
-  @ApiStatus.ScheduledForRemoval
-  @Deprecated("Use async method instead")
   fun confirmLoadingUntrustedProject(
     project: Project,
-    @NlsContexts.DialogTitle title: String,
-    @NlsContexts.DialogMessage message: String,
-    @NlsContexts.Button trustButtonText: String,
-    @NlsContexts.Button distrustButtonText: String
+    title: @NlsContexts.DialogTitle String,
+    message: @NlsContexts.DialogMessage String,
+    trustButtonText: @NlsContexts.Button String,
+    distrustButtonText: @NlsContexts.Button String
   ): Boolean {
     val locatedProject = TrustedProjectsLocator.locateProject(project)
     if (TrustedProjects.isProjectTrusted(locatedProject)) {

@@ -15,7 +15,7 @@ import kotlin.time.Duration.Companion.days
 internal class TipOrderUtil {
   /**
    * Reorders tips to show the most useful ones in the beginning.
-   * If provided project is null, tip applicability will not be taken into account.
+   * If a provided project is null, tip applicability will not be taken into account.
    * All tips will be counted as applicable.
    *
    * @return object that contains sorted tips and describes approach of how the tips are sorted
@@ -24,7 +24,7 @@ internal class TipOrderUtil {
     val registry = ProductivityFeaturesRegistry.getInstance()
     if (registry == null) {
       thisLogger().warn("ProductivityFeaturesRegistry is not created")
-      return TipsSortingResult(tips.shuffled(), SHUFFLE_ALGORITHM, "1")
+      return TipsSortingResult.create(tips.shuffled(), SHUFFLE_ALGORITHM, "1")
     }
 
     FeatureUsageTracker.getInstance()  // instantiate just to load statistics of feature usage
@@ -56,7 +56,7 @@ internal class TipOrderUtil {
 
     val sortedTips = tipInfoList.sortedWith(getComparator()).map { it.tip }
     val adjustedSortedTips = adjustFirstTip(sortedTips)
-    return TipsSortingResult(adjustedSortedTips, SORTING_ALGORITHM, SORTING_ALGORITHM_VERSION)
+    return TipsSortingResult.create(adjustedSortedTips, SORTING_ALGORITHM, SORTING_ALGORITHM_VERSION)
   }
 
   private fun getComparator(): Comparator<TipInfo> {
@@ -85,7 +85,7 @@ internal class TipOrderUtil {
     }
   }
 
-  /** Move [0; value) elements to the end of the list, so this list will start from element with index [value]
+  /** Move [0; value) elements to the end of the list, so this list will start from an element with index [value]
    *  Can be implemented in place, without allocation of the new list, but is not required here.
    */
   private fun cycleShift(tips: List<TipAndTrickBean>, value: Int): List<TipAndTrickBean> {
@@ -114,8 +114,3 @@ internal class TipOrderUtil {
     fun getInstance(): TipOrderUtil = service()
   }
 }
-
-internal data class TipsSortingResult @JvmOverloads constructor(@JvmField val tips: List<TipAndTrickBean>,
-                                                                @JvmField val algorithm: String = "unknown",
-                                                                @JvmField val version: String? = null)
-

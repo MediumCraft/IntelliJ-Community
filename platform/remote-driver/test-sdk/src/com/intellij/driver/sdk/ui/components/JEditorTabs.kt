@@ -5,17 +5,26 @@ import com.intellij.driver.sdk.ui.Finder
 import org.intellij.lang.annotations.Language
 
 
-fun Finder.editorTabs(@Language("xpath") xpath: String? = null) =
-  x(xpath ?: "//div[@class='EditorTabs']", EditorTabsUiComponent::class.java)
+fun Finder.editorTabs(@Language("xpath") xpath: String? = null, action: EditorTabsUiComponent.() -> Unit = {}) =
+  x(xpath ?: "//div[@class='EditorTabs']", EditorTabsUiComponent::class.java).apply(action)
 
 class EditorTabsUiComponent(data: ComponentData) : UiComponent(data) {
 
   private val editorTabsComponent by lazy { driver.cast(component, EditorTabsRef::class) }
+  val editorAndPreviewActionButton: ActionButtonUi = actionButton { byAccessibleName("Editor and Preview") }
 
   fun getTabs() = editorTabsComponent.getTabs().map { Tab(it) }
 
+  fun getTabsComponents(): List<UiComponent> = xx { byType("com.intellij.openapi.fileEditor.impl.EditorTabLabel") }.list().filter {
+    it.component.width > 0 && it.component.height > 0
+  }
+
   fun clickTab(text: String) {
     x("//div[@class='EditorTabLabel'][.//div[@visible_text='$text']]").click()
+  }
+
+  fun doubleClickTab(text: String) {
+    x("//div[@class='EditorTabLabel'][.//div[@visible_text='$text']]").doubleClick()
   }
 
   fun closeTab(text: String = "") {
@@ -33,6 +42,8 @@ class EditorTabsUiComponent(data: ComponentData) : UiComponent(data) {
   inner class Tab(private val data: TabInfoRef) {
     val text: String
       get() = data.getText()
+    val fontSize: Int
+      get() = data.getFontSize()
   }
 }
 
@@ -44,4 +55,5 @@ interface EditorTabsRef {
 @Remote("com.intellij.ui.tabs.TabInfo")
 interface TabInfoRef {
   fun getText(): String
+  fun getFontSize(): Int
 }

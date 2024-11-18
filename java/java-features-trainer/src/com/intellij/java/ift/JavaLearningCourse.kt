@@ -1,6 +1,7 @@
 // Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.java.ift
 
+import com.intellij.execution.actions.RunConfigurationsComboBoxAction
 import com.intellij.java.ift.lesson.assistance.JavaEditorCodingAssistanceLesson
 import com.intellij.java.ift.lesson.basic.JavaContextActionsLesson
 import com.intellij.java.ift.lesson.basic.JavaSelectLesson
@@ -15,10 +16,12 @@ import com.intellij.java.ift.lesson.refactorings.JavaRenameLesson
 import com.intellij.java.ift.lesson.run.JavaDebugLesson
 import com.intellij.java.ift.lesson.run.JavaRunConfigurationLesson
 import com.intellij.lang.java.JavaLanguage
+import com.intellij.openapi.project.ProjectManager
 import com.intellij.util.PlatformUtils
 import training.dsl.LessonUtil
 import training.learn.CourseManager
 import training.learn.LessonsBundle
+import training.learn.NewUsersOnboardingExperimentAccessor
 import training.learn.course.IftModule
 import training.learn.course.LearningCourseBase
 import training.learn.course.LearningModule
@@ -36,7 +39,7 @@ class JavaLearningCourse : LearningCourseBase(JavaLanguage.INSTANCE.id) {
   override fun modules(): List<IftModule> = onboardingTour() + stableModules() + CourseManager.instance.findCommonModules("Git")
 
   private val isOnboardingLessonEnabled: Boolean
-    get() = PlatformUtils.isIntelliJ() && !useShortOnboardingLesson
+    get() = PlatformUtils.isIntelliJ() && !NewUsersOnboardingExperimentAccessor.isExperimentEnabled()
 
   private fun onboardingTour() = if (isOnboardingLessonEnabled) listOf(
     LearningModule(id = "Java.Onboarding",
@@ -56,8 +59,13 @@ class JavaLearningCourse : LearningCourseBase(JavaLanguage.INSTANCE.id) {
                    primaryLanguage = langSupport,
                    moduleType = LessonType.SCRATCH) {
       fun ls(sampleName: String) = loadSample("EditorBasics/$sampleName")
-      val adjust = if (useShortOnboardingLesson) listOf(JavaReworkedOnboardingTourLesson()) else emptyList()
-      adjust + listOf(
+
+      val onboarding = when {
+        !NewUsersOnboardingExperimentAccessor.isExperimentEnabled() -> emptyList()
+        useShortOnboardingLesson -> listOf(JavaReworkedOnboardingTourLesson())
+        else -> listOf(JavaOnboardingTourLesson())
+      }
+      onboarding + listOf(
         JavaContextActionsLesson(),
         GotoActionLesson(ls("00.Actions.java.sample"), firstLesson = false),
         JavaSearchEverywhereLesson(),
@@ -135,17 +143,21 @@ class JavaLearningCourse : LearningCourseBase(JavaLanguage.INSTANCE.id) {
         JavaOccurrencesLesson(),
       )
     },
-    LearningModule(id = "Java.RunAndDebug",
-                   name = LessonsBundle.message("run.debug.module.name"),
-                   description = LessonsBundle.message("run.debug.module.description"),
-                   primaryLanguage = langSupport,
-                   moduleType = LessonType.SINGLE_EDITOR) {
-      listOf(
-        JavaRunConfigurationLesson(),
-        JavaDebugLesson(),
-      )
-    },
-  )
+  ) + if (RunConfigurationsComboBoxAction.hasRunCurrentFileItem(ProjectManager.getInstance().defaultProject)) { // project doesn't matter in this check for us
+    listOf(
+      LearningModule(id = "Java.RunAndDebug",
+                     name = LessonsBundle.message("run.debug.module.name"),
+                     description = LessonsBundle.message("run.debug.module.description"),
+                     primaryLanguage = langSupport,
+                     moduleType = LessonType.SINGLE_EDITOR) {
+        listOf(
+          JavaRunConfigurationLesson(),
+          JavaDebugLesson(),
+        )
+      }
+    )
+  }
+  else emptyList()
 
   override fun getLessonIdToTipsMap(): Map<String, List<String>> = mutableMapOf(
     // Essential

@@ -10,12 +10,14 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.impl.ProgressSuspender;
 import com.intellij.openapi.progress.util.ProgressIndicatorBase;
+import com.intellij.openapi.project.DumbModeStatisticsCollector.IndexingFinishType;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.wm.ex.ProgressIndicatorEx;
 import com.intellij.util.concurrency.AppExecutorUtil;
 import com.intellij.util.concurrency.ChildContext;
 import com.intellij.util.concurrency.Propagation;
 import kotlin.coroutines.CoroutineContext;
+import org.jetbrains.annotations.ApiStatus;
 import kotlinx.coroutines.Job;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -23,6 +25,7 @@ import org.jetbrains.annotations.Nullable;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
 
+@ApiStatus.Internal
 public class MergingTaskQueue<T extends MergeableQueueTask<T>> {
   public static final class SubmissionReceipt {
     private final long submittedTaskCount;
@@ -64,11 +67,6 @@ public class MergingTaskQueue<T extends MergeableQueueTask<T>> {
   private final AtomicLong mySubmittedTasksCount = new AtomicLong();
 
   /**
-   * A thread context for each task
-   */
-  private final Map<T, ChildContext> myThreadContexts = new HashMap<>();
-
-  /**
    * Disposes tasks, cancel underlying progress indicators, clears tasks queue
    */
   public void disposePendingTasks() {
@@ -82,7 +80,6 @@ public class MergingTaskQueue<T extends MergeableQueueTask<T>> {
 
       myTasksQueue.clear();
       myProgresses.clear();
-      myThreadContexts.clear();
     }
 
     cancelIndicatorSafe(indicatorsQueue);
@@ -125,16 +122,10 @@ public class MergingTaskQueue<T extends MergeableQueueTask<T>> {
     T newTask = task;
     SubmissionReceipt receipt;
 
-    var childContext = AppExecutorUtil.propagateContext() ? Propagation.createChildContext() : null;
-    CoroutineContext currentContext = childContext == null ? null : childContext.getContext();
-    Job job = childContext == null ? null : childContext.getJob();
-
     synchronized (myLock) {
       for (int i = myTasksQueue.size() - 1; i >= 0; i--) {
         T oldTask = myTasksQueue.get(i);
         ProgressIndicatorBase indicator = myProgresses.get(oldTask);
-        ChildContext otherChildContext = myThreadContexts.get(oldTask);
-        CoroutineContext otherContext = otherChildContext == null ? null : otherChildContext.getContext();
         //dispose cancelled tasks
         if (indicator == null || indicator.isCanceled()) {
           myTasksQueue.remove(i);
@@ -152,22 +143,10 @@ public class MergingTaskQueue<T extends MergeableQueueTask<T>> {
         }
 
         T mergedTask = task.tryMergeWith(oldTask);
-        boolean contextsEqual;
-        if (AppExecutorUtil.propagateContext()) {
-          if ((currentContext == null) != (otherContext == null)) {
-            contextsEqual = false;
-          } else {
-            contextsEqual = currentContext == null || ThreadContext.getContextSkeleton(currentContext).equals(ThreadContext.getContextSkeleton(otherContext));
-          }
-        } else {
-          contextsEqual = true;
-        }
-        if (mergedTask == oldTask && contextsEqual) {
+        boolean contextsEqual = true;
+        if (mergedTask == oldTask) {
           // new task completely absorbed by the old task which means that we don't need to modify the queue
           newTask = null;
-          if (job != null) {
-            job.cancel(null);
-          }
           disposeQueue.add(task);
           break;
         }
@@ -191,15 +170,10 @@ public class MergingTaskQueue<T extends MergeableQueueTask<T>> {
         mySubmittedTasksCount.incrementAndGet();
         ProgressIndicatorBase progress = new ProgressIndicatorBase();
         myProgresses.put(taskToAdd, progress);
-        myThreadContexts.put(taskToAdd, childContext);
         Disposer.register(taskToAdd, () -> {
           //a removed progress means the task would be ignored on queue processing
           synchronized (myLock) {
             myProgresses.remove(taskToAdd);
-            myThreadContexts.remove(taskToAdd);
-            if (job != null) {
-              job.cancel(null);
-            }
           }
           progress.cancel();
         });
@@ -238,8 +212,7 @@ public class MergingTaskQueue<T extends MergeableQueueTask<T>> {
             disposeQueue.add(task);
             continue;
           }
-          var childContext = myThreadContexts.get(task);
-          return wrapTask(task, indicator, childContext);
+          return wrapTask(task, indicator);
         }
       }
     }
@@ -248,8 +221,8 @@ public class MergingTaskQueue<T extends MergeableQueueTask<T>> {
     }
   }
 
-  protected MergingTaskQueue.QueuedTask<T> wrapTask(T task, ProgressIndicatorBase indicator, @Nullable ChildContext childContext) {
-    return new QueuedTask<>(task, indicator, childContext);
+  protected MergingTaskQueue.QueuedTask<T> wrapTask(T task, ProgressIndicatorBase indicator) {
+    return new QueuedTask<>(task, indicator);
   }
 
   public boolean isEmpty() {
@@ -297,12 +270,10 @@ public class MergingTaskQueue<T extends MergeableQueueTask<T>> {
   public static class QueuedTask<T extends MergeableQueueTask<T>> implements AutoCloseable {
     private final T task;
     private final ProgressIndicatorEx indicator;
-    private final @Nullable ChildContext myChildContext;
 
-    QueuedTask(@NotNull T task, @NotNull ProgressIndicatorEx progress, @Nullable ChildContext childContext) {
+    QueuedTask(@NotNull T task, @NotNull ProgressIndicatorEx progress) {
       this.task = task;
       indicator = progress;
-      myChildContext = childContext;
     }
 
     @Override
@@ -327,16 +298,7 @@ public class MergingTaskQueue<T extends MergeableQueueTask<T>> {
       indicator.checkCanceled();
 
       beforeTask();
-      if (AppExecutorUtil.propagateContext() && myChildContext != null) {
-        myChildContext.runAsCoroutine(() -> {
-          try (AccessToken ignored = ThreadContext.installThreadContext(myChildContext.getContext(), true)) {
-            task.perform(indicator);
-          }
-        });
-      }
-      else {
-        task.perform(indicator);
-      }
+      task.perform(indicator);
     }
 
     String getInfoString() {
@@ -354,7 +316,24 @@ public class MergingTaskQueue<T extends MergeableQueueTask<T>> {
      * {@link MergingQueueGuiExecutor#processTasksWithProgress(ProgressSuspender, ProgressIndicator, StructuredIdeActivity)} to start
      * FUS activity.
      */
-    void registerStageStarted(@NotNull StructuredIdeActivity activity) {
+    @Nullable
+    StructuredIdeActivity registerStageStarted(@NotNull StructuredIdeActivity activity, @NotNull Project project) {
+      return null;
+    }
+
+    /**
+     * Override in children classes to report finishing a task to FUS.
+     * Note that a task reported as a stage does not need finishing.
+     *
+     * @param parentActivity activity provided to {@link MergingTaskQueue.QueuedTask#registerStageStarted(StructuredIdeActivity, Project)}
+     * @param childActivity  activity returned by {@link MergingTaskQueue.QueuedTask#registerStageStarted(StructuredIdeActivity, Project)}
+     * @param finishType     {@link IndexingFinishType#FINISHED} for correctly finished tasks,
+     *                       {@link IndexingFinishType#TERMINATED} for canceled or failed with exception
+     * @see MergingTaskQueue.QueuedTask#registerStageStarted(StructuredIdeActivity, Project)
+     */
+    void registerStageFinished(@NotNull StructuredIdeActivity parentActivity,
+                               @Nullable StructuredIdeActivity childActivity,
+                               @NotNull IndexingFinishType finishType) {
     }
 
     public void beforeTask() {

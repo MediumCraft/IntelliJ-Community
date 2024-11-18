@@ -43,6 +43,7 @@ import com.intellij.openapi.vfs.encoding.EncodingManager
 import com.intellij.openapi.vfs.encoding.EncodingManagerImpl
 import com.intellij.openapi.vfs.impl.local.LocalFileSystemBase
 import com.intellij.openapi.vfs.newvfs.ManagingFS
+import com.intellij.openapi.vfs.newvfs.RefreshQueueImpl
 import com.intellij.openapi.vfs.newvfs.persistent.PersistentFS
 import com.intellij.openapi.vfs.newvfs.persistent.PersistentFSImpl
 import com.intellij.platform.ide.bootstrap.callAppInitialized
@@ -66,8 +67,10 @@ import com.intellij.util.WalkingState
 import com.intellij.util.concurrency.AppScheduledExecutorService
 import com.intellij.util.indexing.FileBasedIndex
 import com.intellij.util.indexing.FileBasedIndexImpl
+import com.intellij.util.ref.IgnoredTraverseEntry
 import com.intellij.util.ui.EDT
 import com.intellij.util.ui.EdtInvocationManager
+import com.intellij.util.ui.UIUtil
 import com.jetbrains.JBR
 import kotlinx.coroutines.*
 import kotlinx.coroutines.future.asCompletableFuture
@@ -120,11 +123,10 @@ fun loadApp(setupEventQueue: Runnable) {
   // if BB in classpath
   enableCoroutineDump()
   CoroutineDumpState.install()
-  JBR.getJstack()?.includeInfoFrom {
-    """
-    $COROUTINE_DUMP_HEADER
-    ${dumpCoroutines(stripDump = false)}
-    """.trimIndent()
+  JBR.getJstack()?.includeInfoFrom { """
+$COROUTINE_DUMP_HEADER
+${dumpCoroutines(stripDump = false)}
+""" // dumpCoroutines is multiline, trimIndent won't work
   }
   val isHeadless = UITestUtil.getAndSetHeadlessProperty()
   AppMode.setHeadlessInTestMode(isHeadless)
@@ -212,7 +214,7 @@ private suspend fun preloadServicesAndCallAppInitializedListeners(app: Applicati
     }
 
     @Suppress("TestOnlyProblems")
-    callAppInitialized(getAppInitializedListeners(app), app.getCoroutineScope())
+    callAppInitialized(getAppInitializedListeners(app))
 
     LoadingState.setCurrentState(LoadingState.COMPONENTS_LOADED)
   }
@@ -326,8 +328,14 @@ fun Application.cleanupApplicationCaches() {
 @TestOnly
 @Internal
 fun assertNonDefaultProjectsAreNotLeaked() {
+  assertNonDefaultProjectsAreNotLeaked(emptyList())
+}
+
+@TestOnly
+@Internal
+fun assertNonDefaultProjectsAreNotLeaked(ignoredTraverseEntries : List<IgnoredTraverseEntry>) {
   try {
-    LeakHunter.checkNonDefaultProjectLeak()
+    LeakHunter.checkNonDefaultProjectLeakWithIgnoredEntries(ignoredTraverseEntries)
   }
   catch (e: AssertionError) {
     publishHeapDump(LEAKED_PROJECTS)
@@ -351,6 +359,15 @@ fun waitForAppLeakingThreads(application: Application, timeout: Long, timeUnit: 
 
   val stubIndex = application.serviceIfCreated<StubIndex>() as? StubIndexImpl
   stubIndex?.waitUntilStubIndexedInitialized()
+
+  while (RefreshQueueImpl.isRefreshInProgress() || RefreshQueueImpl.isEventProcessingInProgress()) {
+    if (EDT.isCurrentThreadEdt()) {
+      EDT.dispatchAllInvocationEvents()
+    }
+    else {
+      UIUtil.pump()
+    }
+  }
 }
 
 @TestOnly

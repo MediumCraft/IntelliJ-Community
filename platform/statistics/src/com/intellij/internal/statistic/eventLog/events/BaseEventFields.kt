@@ -290,6 +290,10 @@ data class AnonymizedListEventField @JvmOverloads constructor(@NonNls @EventFiel
 
   override val validationRule: List<String>
     get() = listOf("{regexp#hash}")
+
+  override fun addData(fuData: FeatureUsageData, value: List<String>) {
+    fuData.addAnonymizedValue(name, value)
+  }
 }
 
 internal data class ShortAnonymizedEventField(@NonNls @EventFieldName override val name: String,
@@ -373,6 +377,18 @@ data class IntListEventField @JvmOverloads constructor(@NonNls @EventFieldName o
 
   override fun addData(fuData: FeatureUsageData, value: List<Int>) {
     fuData.addListNumberData(name, value)
+  }
+}
+
+data class EnumListEventField<T : Enum<*>>(@NonNls @EventFieldName override val name: String,
+                                            @NonNls override val description: String? = null,
+                                            private val enumClass: Class<T>,
+                                            private val transform: (T) -> String) : ListEventField<T>() {
+  override val validationRule: List<String>
+    get() = listOf("{enum:${enumClass.enumConstants.joinToString("|", transform = transform)}}")
+
+  override fun addData(fuData: FeatureUsageData, value: List<T>) {
+    fuData.addData(name, value.map(transform))
   }
 }
 

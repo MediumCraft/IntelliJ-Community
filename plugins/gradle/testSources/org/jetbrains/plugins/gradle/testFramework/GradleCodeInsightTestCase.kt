@@ -5,18 +5,14 @@ import com.intellij.codeInsight.lookup.LookupElement
 import com.intellij.codeInsight.navigation.actions.GotoDeclarationAction
 import com.intellij.openapi.externalSystem.util.runReadAction
 import com.intellij.openapi.externalSystem.util.runWriteActionAndWait
-import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.openapi.vfs.findDocument
-import com.intellij.openapi.vfs.writeText
 import com.intellij.psi.PsiElement
 import com.intellij.testFramework.runInEdtAndWait
-import com.intellij.testFramework.utils.editor.commitToPsi
-import com.intellij.testFramework.utils.editor.reloadFromDisk
-import com.intellij.util.concurrency.annotations.RequiresWriteLock
+import org.jetbrains.plugins.gradle.testFramework.fixtures.application.GradleProjectTestApplication
 import org.jetbrains.plugins.groovy.util.ExpressionTest
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
 
+@GradleProjectTestApplication
 abstract class GradleCodeInsightTestCase : GradleCodeInsightBaseTestCase(), ExpressionTest {
 
   fun testBuildscript(context: String, expression: String, test: () -> Unit) {
@@ -85,11 +81,14 @@ abstract class GradleCodeInsightTestCase : GradleCodeInsightBaseTestCase(), Expr
     }
   }
 
-  fun testGotoDefinition(expression: String, checker: (PsiElement) -> Unit) {
+  fun testGotoDefinition(expression: String, checker: (PsiElement) -> Unit) =
+    testGotoDefinition("build.gradle", expression, checker)
+
+  fun testGotoDefinition(relativePath: String, expression: String, checker: (PsiElement) -> Unit) {
     checkCaret(expression)
-    writeTextAndCommit("build.gradle", expression)
+    writeTextAndCommit(relativePath, expression)
     runInEdtAndWait {
-      codeInsightFixture.configureFromExistingVirtualFile(getFile("build.gradle"))
+      codeInsightFixture.configureFromExistingVirtualFile(getFile(relativePath))
       val elementAtCaret = codeInsightFixture.elementAtCaret
       assertNotNull(elementAtCaret)
       val elem = GotoDeclarationAction.findTargetElement(project, codeInsightFixture.editor, codeInsightFixture.caretOffset)
@@ -128,20 +127,6 @@ abstract class GradleCodeInsightTestCase : GradleCodeInsightBaseTestCase(), Expr
       isGradleAtLeast("5.0") -> "org.gradle.api.publish.internal.DefaultPublishingExtension"
       else -> "org.gradle.api.publish.internal.DeferredConfigurablePublishingExtension"
     }
-  }
-
-  fun writeTextAndCommit(relativePath: String, text: String) {
-    val file = findOrCreateFile(relativePath)
-    runWriteActionAndWait {
-      file.writeTextAndCommit(text)
-    }
-  }
-
-  @RequiresWriteLock
-  private fun VirtualFile.writeTextAndCommit(text: String) {
-    findDocument()?.reloadFromDisk()
-    writeText(text)
-    findDocument()?.commitToPsi(project)
   }
 
   companion object {

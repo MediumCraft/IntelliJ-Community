@@ -35,6 +35,7 @@ import kotlin.system.measureTimeMillis
  * particular [com.intellij.codeInsight.codeVision.CodeVisionProvider] has to be invalidated.
  * Host relaunches it and takes the result of this pass from the cache.
  */
+@Internal
 class CodeVisionPass(
   rootElement: PsiElement,
   private val editor: Editor
@@ -104,6 +105,7 @@ class CodeVisionPass(
   override fun doCollectInformation(progress: ProgressIndicator) {
     val settings = CodeVisionSettings.getInstance()
     if (!settings.codeVisionEnabled) return
+    if (!CodeVisionProjectSettings.getInstance(myProject).isEnabledForProject()) return
     val providers = DaemonBoundCodeVisionProvider.extensionPoint.extensionList
       .filter {  settings.isProviderEnabled(it.groupId) }
     collect(progress, editor, myFile, providerIdToLenses, providers)

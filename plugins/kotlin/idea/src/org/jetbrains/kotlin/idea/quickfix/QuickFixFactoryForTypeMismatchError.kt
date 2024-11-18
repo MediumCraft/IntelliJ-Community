@@ -6,6 +6,7 @@ import com.intellij.codeInsight.intention.IntentionAction
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.psi.PsiElement
 import com.intellij.psi.util.PsiTreeUtil
+import com.intellij.util.containers.addIfNotNull
 import org.jetbrains.kotlin.builtins.KotlinBuiltIns
 import org.jetbrains.kotlin.builtins.isKFunctionType
 import org.jetbrains.kotlin.config.LanguageFeature
@@ -140,8 +141,11 @@ class QuickFixFactoryForTypeMismatchError : KotlinIntentionActionsFactory() {
                 wrongPrimitiveLiteralFix = WrongPrimitiveLiteralFix(diagnosticElement, expectedType)
                 actions.add(wrongPrimitiveLiteralFix)
             }
-            actions.add(NumberConversionFix(diagnosticElement, expressionType, expectedType, wrongPrimitiveLiteralFix))
-            actions.add(RoundNumberFix(diagnosticElement, expectedType, wrongPrimitiveLiteralFix))
+            if (wrongPrimitiveLiteralFix?.isAvailable() != true) {
+                val elementContext = prepareNumberConversionElementContext(expressionType, expectedType)
+                actions.add(NumberConversionFix(diagnosticElement, elementContext).asIntention())
+                actions.add(RoundNumberFix(diagnosticElement, expectedType))
+            }
         }
 
         if (KotlinBuiltIns.isCharSequenceOrNullableCharSequence(expectedType) || KotlinBuiltIns.isStringOrNullableString(expectedType)) {
@@ -151,10 +155,8 @@ class QuickFixFactoryForTypeMismatchError : KotlinIntentionActionsFactory() {
             }
         }
 
-        val convertKClassToClassFix = ConvertKClassToClassFix.create(file, expectedType, expressionType, diagnosticElement)
-        if (convertKClassToClassFix != null) {
-            actions.add(convertKClassToClassFix)
-        }
+        val convertKClassToClassFix = ConvertKClassToClassFixFactory.create(file, expectedType, expressionType, diagnosticElement)
+        actions.addIfNotNull(convertKClassToClassFix)
 
         if (expectedType.isInterface()) {
             val expressionTypeDeclaration = expressionType.constructor.declarationDescriptor?.let {
@@ -165,10 +167,9 @@ class QuickFixFactoryForTypeMismatchError : KotlinIntentionActionsFactory() {
             }
         }
 
-        actions.addAll(WrapWithCollectionLiteralCallFix.create(expectedType, expressionType, diagnosticElement))
-
-        ConvertCollectionFix.getConversionTypeOrNull(expressionType, expectedType)?.let {
-            actions.add(ConvertCollectionFix(diagnosticElement, it))
+        actions.addAll(WrapWithCollectionLiteralCallFixFactory.create(expectedType, expressionType, diagnosticElement))
+        ConvertCollectionFixFactory.createIfAvailable(diagnosticElement, expressionType, expectedType)?.let {
+            actions.add(it)
         }
 
         fun KtExpression.getTopMostQualifiedForSelectorIfAny(): KtExpression {

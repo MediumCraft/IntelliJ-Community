@@ -35,17 +35,16 @@ import com.intellij.testFramework.UsefulTestCase.assertSameElements
 import com.intellij.testFramework.rules.ProjectModelRule
 import com.intellij.testFramework.rules.TempDirectory
 import com.intellij.testFramework.workspaceModel.updateProjectModel
-import com.intellij.util.PathUtil
 import com.intellij.util.io.write
 import com.intellij.util.ui.UIUtil
-import com.intellij.workspaceModel.ide.impl.LegacyBridgeJpsEntitySourceFactory
 import com.intellij.workspaceModel.ide.impl.WorkspaceModelInitialTestContent
-import com.intellij.workspaceModel.ide.impl.jps.serialization.toConfigLocation
+import com.intellij.platform.workspace.jps.serialization.impl.toConfigLocation
 import com.intellij.workspaceModel.ide.impl.legacyBridge.module.ModuleManagerBridgeImpl
 import com.intellij.workspaceModel.ide.impl.legacyBridge.module.WEB_MODULE_ENTITY_TYPE_ID
 import com.intellij.workspaceModel.ide.impl.legacyBridge.module.findModule
 import com.intellij.workspaceModel.ide.impl.legacyBridge.module.findModuleEntity
 import com.intellij.workspaceModel.ide.impl.legacyBridge.module.roots.ModuleRootComponentBridge
+import com.intellij.workspaceModel.ide.legacyBridge.LegacyBridgeJpsEntitySourceFactory
 import com.intellij.workspaceModel.ide.legacyBridge.ModuleBridge
 import com.intellij.workspaceModel.ide.legacyBridge.impl.java.JAVA_MODULE_ENTITY_TYPE_ID_NAME
 import kotlinx.coroutines.Dispatchers
@@ -101,7 +100,7 @@ class ModuleBridgesTest {
 
       WorkspaceModel.getInstance(project).updateProjectModel {
         val moduleEntity = module.findModuleEntity(it)!!
-        it.modifyEntity(moduleEntity) {
+        it.modifyModuleEntity(moduleEntity) {
           this.contentRoots += ContentRootEntity(contentRootUrl, emptyList<@NlsSafe String>(), moduleEntity.entitySource)
         }
       }
@@ -502,7 +501,7 @@ class ModuleBridgesTest {
                                                               roots = listOf(LibraryRoot(tempDir.toVirtualFileUrl(virtualFileManager),
                                                                                          LibraryRootTypeId.COMPILED)),
                                                               entitySource = source)
-    builder.modifyEntity(moduleEntity) {
+    builder.modifyModuleEntity(moduleEntity) {
       dependencies = listOf(
         LibraryDependency(moduleLibraryEntity.symbolicId, false, DependencyScope.COMPILE)
       ).toMutableList()
@@ -816,7 +815,7 @@ class ModuleBridgesTest {
 
     WorkspaceModel.getInstance(project).updateProjectModel { builder ->
       val entity = builder.resolve(ModuleId("xxx"))!!
-      builder.modifyEntity(entity) {
+      builder.modifyModuleEntity(entity) {
         this.name = "yyy"
       }
     }
@@ -837,15 +836,14 @@ class ModuleBridgesTest {
 
     val moduleDirPath = temporaryDirectoryRule.newDirectoryPath(moduleName).toString()
     val moduleDirVfu = virtualFileUrlManager.getOrCreateFromUrl(VfsUtilCore.pathToUrl(moduleDirPath))
-    val moduleEntitySource = LegacyBridgeJpsEntitySourceFactory.createEntitySourceForModule(
-      project = project,
+    val moduleEntitySource = LegacyBridgeJpsEntitySourceFactory.getInstance(project).createEntitySourceForModule(
       baseModuleDir = moduleDirVfu,
       externalSource = null,
     )
 
     workspaceModel.updateProjectModel { builder ->
       val entity = builder.resolve(ModuleId(moduleName))!!
-      builder.modifyEntity(entity) {
+      builder.modifyModuleEntity(entity) {
         this.entitySource = moduleEntitySource
       }
     }

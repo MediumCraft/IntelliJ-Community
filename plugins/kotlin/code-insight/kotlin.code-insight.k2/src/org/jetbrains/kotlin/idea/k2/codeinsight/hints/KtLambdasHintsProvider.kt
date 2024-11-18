@@ -1,15 +1,10 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.kotlin.idea.k2.codeinsight.hints
 
-import com.intellij.codeInsight.hints.declarative.InlayActionData
-import com.intellij.codeInsight.hints.declarative.InlayTreeSink
-import com.intellij.codeInsight.hints.declarative.InlineInlayPosition
-import com.intellij.codeInsight.hints.declarative.PsiPointerInlayActionNavigationHandler
-import com.intellij.codeInsight.hints.declarative.PsiPointerInlayActionPayload
+import com.intellij.codeInsight.hints.declarative.*
 import com.intellij.psi.PsiElement
 import com.intellij.psi.createSmartPointer
 import org.jetbrains.kotlin.analysis.api.analyze
-import org.jetbrains.kotlin.analysis.api.symbols.KtAnonymousFunctionSymbol
 import org.jetbrains.kotlin.idea.codeInsight.hints.SHOW_IMPLICIT_RECEIVERS_AND_PARAMS
 import org.jetbrains.kotlin.idea.codeInsight.hints.SHOW_RETURN_EXPRESSIONS
 import org.jetbrains.kotlin.idea.codeInsight.hints.isFollowedByNewLine
@@ -47,11 +42,11 @@ class KtLambdasHintsProvider : AbstractKtInlayHintsProvider() {
 
         sink.whenOptionEnabled(SHOW_RETURN_EXPRESSIONS.name) {
             val isUsedAsExpression = analyze(lambdaExpression) {
-                expression.isUsedAsExpression()
+                expression.isUsedAsExpression
             }
             if (!isUsedAsExpression) return@whenOptionEnabled
 
-            sink.addPresentation(InlineInlayPosition(expression.endOffset, true), hasBackground = true) {
+            sink.addPresentation(InlineInlayPosition(expression.endOffset, true), hintFormat = HintFormat.default) {
                 text("^")
                 text(lambdaName,
                      lambdaExpression.createSmartPointer().let {
@@ -94,18 +89,18 @@ class KtLambdasHintsProvider : AbstractKtInlayHintsProvider() {
 
         sink.whenOptionEnabled(SHOW_IMPLICIT_RECEIVERS_AND_PARAMS.name) {
             analyze(functionLiteral) {
-                val anonymousFunctionSymbol = functionLiteral.getSymbol() as? KtAnonymousFunctionSymbol ?: return@whenOptionEnabled
+                val anonymousFunctionSymbol = functionLiteral.symbol
                 anonymousFunctionSymbol.receiverParameter?.let { receiverSymbol ->
-                    sink.addPresentation(InlineInlayPosition(lbrace.textRange.endOffset, true), hasBackground = true) {
+                    sink.addPresentation(InlineInlayPosition(lbrace.textRange.endOffset, true), hintFormat = HintFormat.default) {
                         text("this: ")
-                        printKtType(receiverSymbol.type)
+                        printKtType(receiverSymbol.returnType)
                     }
                 }
 
                 anonymousFunctionSymbol.valueParameters.singleOrNull()?.let { singleParameterSymbol ->
                     val type = singleParameterSymbol.takeIf { it.isImplicitLambdaParameter }
-                        ?.returnType?.takeUnless { it.isUnit } ?: return@let
-                    sink.addPresentation(InlineInlayPosition(lbrace.textRange.endOffset, true), hasBackground = true) {
+                        ?.returnType?.takeUnless { it.isUnitType } ?: return@let
+                    sink.addPresentation(InlineInlayPosition(lbrace.textRange.endOffset, true), hintFormat = HintFormat.default) {
                         text("it: ")
                         printKtType(type)
                     }

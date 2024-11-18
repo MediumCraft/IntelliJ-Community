@@ -109,6 +109,16 @@
       "description": "Minimum size of buttons"
     },
     {
+      "key": "Button.loadingForeground",
+      "description": "The color of button text when in the 'loading' state",
+      "since": "2024.2"
+    },
+    {
+      "key": "Button.default.loadingForeground",
+      "description": "The color of default button text when in the 'loading' state",
+      "since": "2024.2"
+    },
+    {
       "key": "Button.Split.default.separatorColor",
       "description": "Separator color for default split button"
     },
@@ -341,11 +351,6 @@
     {
       "key": "DisclosureButton.pressedOverlay",
       "description": "Pressed overlay color, which is painted over background for hover state",
-      "since": "2024.2"
-    },
-    {
-      "key": "DisclosureButton.successBackground",
-      "description": "Success or visited background of disclosure button",
       "since": "2024.2"
     },
     {
@@ -1056,6 +1061,10 @@
     {
       "key": "Label.errorForeground",
       "description": "Red text color for inline error messages. See the \"Validation Dialog Test\" action in internal mode (press Enter for validation in the dialog)"
+    },
+    {
+      "key": "Label.warningForeground",
+      "description": "Orange text color for inline warning messages."
     },
     {
       "key": "Label.infoForeground",
@@ -2151,6 +2160,16 @@
       "since": "2023.1"
     },
     {
+      "key": "VersionControl.Log.Graph.saturation",
+      "description": "Saturation of the graph in the Version Control | Log tab (a floating point number between 0 and 1)",
+      "since": "2024.2"
+    },
+    {
+      "key": "VersionControl.Log.Graph.brightness",
+      "description": "Brightness of the graph in the Version Control | Log tab (a floating point number between 0 and 1)",
+      "since": "2024.2"
+    },
+    {
       "key": "VersionControl.RefLabel.backgroundBase",
       "description": "Reference label background base color",
       "since": "2019.1"
@@ -2179,6 +2198,11 @@
       "key": "VersionControl.MarkerPopup.Toolbar.background",
       "description": "Color of toolbar background in the Vcs Marker Popup",
       "since": "2022.3"
+    },
+    {
+      "key": "VersionControl.Merge.Status.NoConflicts.foreground",
+      "description": "Color for the status label when all conflicts are resolved",
+      "since": "2024.2"
     },
     {
       "key": "WelcomeScreen.background"
@@ -2491,6 +2515,34 @@
     },
     {
       "key": "MainWindow.FullScreeControl.Background"
+    },
+    {
+      "key": "LicenseDialog.termsAndConditionsForeground",
+      "since": "2024.2"
+    },
+    {
+      "key": "LicenseDialog.waitingLabelForeground",
+      "since": "2024.2"
+    },
+    {
+      "key": "LicenseDialog.separatorColor",
+      "since": "2024.2"
+    },
+    {
+      "key": "LicenseDialog.LicenseList.licenseDetailsForeground",
+      "since": "2024.2"
+    },
+    {
+      "key": "LicenseDialog.LicenseList.licenseIdForeground",
+      "since": "2024.2"
+    },
+    {
+      "key": "LicenseDialog.LicenseList.separatorColor",
+      "since": "2024.2"
+    },
+    {
+      "key": "LicenseDialog.LicenseServer.separatorColor",
+      "since": "2024.2"
     }
   ]
 }

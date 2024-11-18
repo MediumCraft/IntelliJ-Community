@@ -1,10 +1,9 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.plugins.gradle.setup
 
 import com.intellij.ide.projectWizard.NewProjectWizardConstants.Language.JAVA
 import com.intellij.ide.projectWizard.generators.BuildSystemJavaNewProjectWizardData.Companion.javaBuildSystemData
 import com.intellij.ide.wizard.NewProjectWizardBaseData.Companion.baseData
-import com.intellij.idea.IJIgnore
 import com.intellij.openapi.externalSystem.util.ExternalSystemApiUtil
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.use
@@ -119,7 +118,6 @@ class GradleCreateProjectTest : GradleCreateProjectTestCase() {
     }
   }
 
-  @IJIgnore(issue = "IDEA-341326")
   @Test
   fun `test project kotlin dsl setting generation with groovy-kotlin scripts`() {
     runBlocking {
@@ -148,7 +146,7 @@ class GradleCreateProjectTest : GradleCreateProjectTestCase() {
   @Test
   fun `test NPW properties suggestion`() {
     runBlocking {
-      createProjectByWizard(NEW_EMPTY_PROJECT, wait = false) {
+      createProjectByWizard(NEW_EMPTY_PROJECT, numProjectSyncs = 0) {
         baseData!!.name = "project"
         baseData!!.path = testRoot.path
       }.withProjectAsync { project ->

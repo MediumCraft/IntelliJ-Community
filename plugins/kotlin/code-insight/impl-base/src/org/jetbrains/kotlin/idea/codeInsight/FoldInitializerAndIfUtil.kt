@@ -5,9 +5,10 @@ import com.intellij.psi.PsiWhiteSpace
 import com.intellij.psi.search.LocalSearchScope
 import com.intellij.psi.search.searches.ReferencesSearch
 import com.intellij.psi.util.endOffset
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
-import org.jetbrains.kotlin.analysis.api.types.KtErrorType
-import org.jetbrains.kotlin.analysis.api.types.KtTypeNullability
+import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
+import org.jetbrains.kotlin.analysis.api.KaSession
+import org.jetbrains.kotlin.analysis.api.types.KaErrorType
+import org.jetbrains.kotlin.analysis.api.types.KaTypeNullability
 import org.jetbrains.kotlin.idea.base.analysis.api.utils.isPossiblySubTypeOf
 import org.jetbrains.kotlin.idea.base.analysis.api.utils.shortenReferences
 import org.jetbrains.kotlin.idea.base.psi.expressionComparedToNull
@@ -31,7 +32,8 @@ data class FoldInitializerAndIfExpressionData(
     val variableTypeString: String?
 )
 
-context(KtAnalysisSession)
+context(KaSession)
+@OptIn(KaExperimentalApi::class)
 fun prepareData(element: KtIfExpression): FoldInitializerAndIfExpressionData? {
     if (element.`else` != null) return null
 
@@ -64,20 +66,20 @@ fun prepareData(element: KtIfExpression): FoldInitializerAndIfExpressionData? {
     val typeReference = (operationExpression as? KtIsExpression)?.typeReference
 
     if (typeReference != null) {
-        val checkedType = typeReference.getKtType()
-        val variableType = variableDeclaration.getReturnKtType()
+        val checkedType = typeReference.type
+        val variableType = variableDeclaration.returnType
         if (!checkedType.isPossiblySubTypeOf(variableType)) return null
     }
 
 
-    if (statement.getKtType()?.isNothing != true) return null
+    if (statement.expressionType?.isNothingType != true) return null
 
     if (ReferencesSearch.search(variableDeclaration, LocalSearchScope(statement)).findFirst() != null) {
         return null
     }
 
     val type = calculateType(variableDeclaration, element, initializer)?.let { type ->
-        if (type is KtErrorType) null
+        if (type is KaErrorType) null
         else type.render(position = Variance.OUT_VARIANCE)
     }
 
@@ -120,7 +122,7 @@ fun joinLines(
     return positionedElvis
 }
 
-context(KtAnalysisSession)
+context(KaSession)
 private fun calculateType(
     declaration: KtVariableDeclaration,
     element: KtIfExpression,
@@ -133,19 +135,19 @@ private fun calculateType(
 
             val isUsedAsNotNullable = ReferencesSearch.search(declaration, LocalSearchScope(declaration.parent)).any {
                 if (it.element.startOffset <= ifEndOffset) return@any false
-                !(it.element.safeAs<KtExpression>()?.getKtType()?.isMarkedNullable ?: return@any false)
+                !(it.element.safeAs<KtExpression>()?.expressionType?.isMarkedNullable ?: return@any false)
             }
 
-            if (isUsedAsNotNullable) null else initializer.getKtType()
+            if (isUsedAsNotNullable) null else initializer.expressionType
 
         } else {
-            initializer.getKtType()
+            initializer.expressionType
         }
     }
 
     // for val with explicit type, change it to non-nullable
     !declaration.isVar && declaration.typeReference != null ->
-        initializer.getKtType()?.withNullability(KtTypeNullability.NON_NULLABLE)
+        initializer.expressionType?.withNullability(KaTypeNullability.NON_NULLABLE)
 
     else -> null
 }

@@ -2,9 +2,9 @@
 package org.jetbrains.kotlin.idea.fir.resolve
 
 import com.intellij.openapi.application.ApplicationManager
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
+import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.symbols.AdditionalKDocResolutionProvider
-import org.jetbrains.kotlin.analysis.api.symbols.KtSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaSymbol
 import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.psi.KtElement
 
@@ -16,14 +16,14 @@ abstract class AbstractAdditionalKDocResolutionProviderTest : AbstractFirReferen
          * FqName of [contextElement]. Therefore, this can show AdditionalKDocResolutionProvider works as we intended.
          */
         override fun resolveKdocFqName(
-            analysisSession: KtAnalysisSession,
+            analysisSession: KaSession,
             fqName: FqName,
             contextElement: KtElement
-        ): Collection<KtSymbol> {
+        ): Collection<KaSymbol> {
             with(analysisSession) {
                 return contextElement.containingKtFile.declarations
                     .filter { it.name == fqName.shortName().asString() }
-                    .map { it.getSymbol() }
+                    .map { it.symbol }
             }
         }
     }

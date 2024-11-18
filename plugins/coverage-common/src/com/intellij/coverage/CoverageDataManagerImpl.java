@@ -245,7 +245,7 @@ public class CoverageDataManagerImpl extends CoverageDataManager implements Disp
   }
 
   private void closeSuitesBundle(@NotNull CoverageSuitesBundle suite, boolean removeWatches) {
-    if (myActiveBundles.remove(suite.getCoverageEngine()) == null) return;
+    if (!myActiveBundles.remove(suite.getCoverageEngine(), suite)) return;
     CoverageViewManager.getInstance(myProject).closeView(suite);
     if (removeWatches) {
       ExternalCoverageWatchManager.getInstance(myProject).clearWatches();
@@ -284,7 +284,7 @@ public class CoverageDataManagerImpl extends CoverageDataManager implements Disp
   }
 
   @Override
-  void coverageGathered(@NotNull CoverageSuite suite) {
+  public void coverageGathered(@NotNull CoverageSuite suite) {
     fireCoverageGathered(suite);
     CoverageSuitesBundle bundle = myActiveBundles.get(suite.getCoverageEngine());
     if (bundle == null) {
@@ -427,7 +427,7 @@ public class CoverageDataManagerImpl extends CoverageDataManager implements Disp
   }
 
   @Override
-  void coverageDataCalculated(@NotNull CoverageSuitesBundle suitesBundle) {
+  public void coverageDataCalculated(@NotNull CoverageSuitesBundle suitesBundle) {
     fireCoverageDataCalculated(suitesBundle);
   }
 

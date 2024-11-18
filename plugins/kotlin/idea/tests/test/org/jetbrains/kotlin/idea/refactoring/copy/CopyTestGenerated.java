@@ -65,6 +65,11 @@ public class CopyTestGenerated extends AbstractCopyTest {
         runTest("testData/refactoring/copy/copyClassWithSmartCast/copyClassWithSmartCast.test");
     }
 
+    @TestMetadata("copyEmptyKtFile/copyEmptyKtFile.test")
+    public void testCopyEmptyKtFile_CopyEmptyKtFile() throws Exception {
+        runTest("testData/refactoring/copy/copyEmptyKtFile/copyEmptyKtFile.test");
+    }
+
     @TestMetadata("copyFIleFromDefaultPackage/copyFIleFromDefaultPackage.test")
     public void testCopyFIleFromDefaultPackage_CopyFIleFromDefaultPackage() throws Exception {
         runTest("testData/refactoring/copy/copyFIleFromDefaultPackage/copyFIleFromDefaultPackage.test");
@@ -78,6 +83,11 @@ public class CopyTestGenerated extends AbstractCopyTest {
     @TestMetadata("copyFIleToDefaultPackage/copyFIleToDefaultPackage.test")
     public void testCopyFIleToDefaultPackage_CopyFIleToDefaultPackage() throws Exception {
         runTest("testData/refactoring/copy/copyFIleToDefaultPackage/copyFIleToDefaultPackage.test");
+    }
+
+    @TestMetadata("copyFIleToSubpackage/copyFIleToSubpackage.test")
+    public void testCopyFIleToSubpackage_CopyFIleToSubpackage() throws Exception {
+        runTest("testData/refactoring/copy/copyFIleToSubpackage/copyFIleToSubpackage.test");
     }
 
     @TestMetadata("copyFIleWithPackageAndDirUnmatched/copyFIleWithPackageAndDirUnmatched.test")
@@ -223,6 +233,11 @@ public class CopyTestGenerated extends AbstractCopyTest {
     @TestMetadata("kt18149/kt18149.test")
     public void testKt18149_Kt18149() throws Exception {
         runTest("testData/refactoring/copy/kt18149/kt18149.test");
+    }
+
+    @TestMetadata("operationReferenceToJavaDecl/operationReferenceToJavaDecl.test")
+    public void testOperationReferenceToJavaDecl_OperationReferenceToJavaDecl() throws Exception {
+        runTest("testData/refactoring/copy/operationReferenceToJavaDecl/operationReferenceToJavaDecl.test");
     }
 
     @TestMetadata("protectedConstructorRefInSuperListEntry/protectedConstructorRefInSuperListEntry.test")

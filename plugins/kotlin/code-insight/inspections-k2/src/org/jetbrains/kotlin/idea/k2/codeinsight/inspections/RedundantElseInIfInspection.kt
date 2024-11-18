@@ -7,7 +7,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.TextRange
 import com.intellij.psi.PsiElement
 import org.jetbrains.kotlin.KtNodeTypes
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
+import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.analyze
 import org.jetbrains.kotlin.idea.base.psi.getLineNumber
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
@@ -89,7 +89,7 @@ internal class RedundantElseInIfInspection : KotlinApplicableInspectionBase.Simp
         return true
     }
 
-    context(KtAnalysisSession)
+    context(KaSession)
     override fun prepareContext(element: KtIfExpression): Unit? {
         if (element.hasRedundantElse()) {
             return Unit
@@ -108,10 +108,10 @@ internal class RedundantElseInIfInspection : KotlinApplicableInspectionBase.Simp
         return ifExpression.elseKeyword
     }
 
-    context(KtAnalysisSession)
+    context(KaSession)
     private fun KtIfExpression.hasRedundantElse(): Boolean {
         var ifExpression = this
-        if (ifExpression.isUsedAsExpression()) {
+        if (ifExpression.isUsedAsExpression) {
             return false
         }
 
@@ -125,7 +125,7 @@ internal class RedundantElseInIfInspection : KotlinApplicableInspectionBase.Simp
     private fun KtExpression.isReturnOrNothing(): Boolean {
         val lastExpression = (this as? KtBlockExpression)?.statements?.lastOrNull() ?: this
         return analyze(lastExpression) {
-            lastExpression.getKtType()?.isNothing == true
+            lastExpression.expressionType?.isNothingType == true
         }
     }
 }

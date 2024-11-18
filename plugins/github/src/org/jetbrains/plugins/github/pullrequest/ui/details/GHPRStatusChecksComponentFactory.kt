@@ -1,15 +1,16 @@
 // Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.plugins.github.pullrequest.ui.details
 
+import com.intellij.collaboration.messages.CollaborationToolsBundle
 import com.intellij.collaboration.ui.VerticalListPanel
 import com.intellij.collaboration.ui.codereview.avatar.CodeReviewAvatarUtils
 import com.intellij.collaboration.ui.codereview.details.CodeReviewDetailsStatusComponentFactory
 import com.intellij.collaboration.ui.codereview.details.ReviewDetailsUIUtil
+import com.intellij.collaboration.ui.util.bindChildIn
 import com.intellij.collaboration.ui.util.bindContentIn
 import com.intellij.collaboration.ui.util.bindTextIn
 import com.intellij.collaboration.ui.util.toAnAction
 import com.intellij.icons.AllIcons
-import com.intellij.icons.ExpUiIcons
 import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.project.Project
 import com.intellij.platform.util.coroutines.childScope
@@ -17,16 +18,22 @@ import com.intellij.ui.ExperimentalUI
 import com.intellij.ui.ScrollPaneFactory
 import com.intellij.ui.components.panels.Wrapper
 import com.intellij.util.ui.JBUI
+import git4idea.remote.hosting.ui.ResolveConflictsLocallyDialogComponentFactory.showBranchUpdateDialog
+import git4idea.remote.hosting.ui.ResolveConflictsLocallyViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
+import org.jetbrains.plugins.github.ai.GHPRAIReviewExtension
 import org.jetbrains.plugins.github.api.data.GHRepositoryPermissionLevel
 import org.jetbrains.plugins.github.i18n.GithubBundle
 import org.jetbrains.plugins.github.pullrequest.data.service.GHPRSecurityService
 import org.jetbrains.plugins.github.pullrequest.ui.details.action.GHPRRemoveReviewerAction
-import org.jetbrains.plugins.github.pullrequest.ui.details.model.GHPRReviewFlowViewModel
+import org.jetbrains.plugins.github.pullrequest.ui.details.model.GHPRResolveConflictsLocallyError
+import org.jetbrains.plugins.github.pullrequest.ui.details.model.GHPRResolveConflictsLocallyError.*
 import org.jetbrains.plugins.github.pullrequest.ui.details.model.GHPRStatusViewModel
-import org.jetbrains.plugins.github.ui.avatars.GHAvatarIconsProvider
+import org.jetbrains.plugins.github.pullrequest.ui.details.model.impl.GHPRDetailsViewModel
+import java.awt.event.ActionListener
 import javax.swing.JComponent
 import javax.swing.JScrollPane
 
@@ -34,17 +41,21 @@ internal object GHPRStatusChecksComponentFactory {
   fun create(
     parentScope: CoroutineScope,
     project: Project,
-    reviewStatusVm: GHPRStatusViewModel,
-    reviewFlowVm: GHPRReviewFlowViewModel,
-    securityService: GHPRSecurityService,
-    avatarIconsProvider: GHAvatarIconsProvider
+    detailsVm: GHPRDetailsViewModel,
   ): JComponent {
     val scope = parentScope.childScope(Dispatchers.Main.immediate)
+
+    val reviewStatusVm = detailsVm.statusVm
+    val reviewFlowVm = detailsVm.reviewFlowVm
+    val securityService = detailsVm.securityService
+    val avatarIconsProvider = detailsVm.avatarIconsProvider
+
     val loadingPanel = createLoadingComponent(scope, reviewStatusVm, securityService)
+
     val statusesPanel = VerticalListPanel().apply {
       add(createAccessDeniedLabel(scope, reviewStatusVm, securityService))
       add(CodeReviewDetailsStatusComponentFactory.createCiComponent(scope, reviewStatusVm))
-      add(CodeReviewDetailsStatusComponentFactory.createConflictsComponent(scope, reviewStatusVm.hasConflicts))
+      add(createConflictsStatusComponentIn(scope, reviewStatusVm.resolveConflictsVm))
       add(CodeReviewDetailsStatusComponentFactory.createRequiredReviewsComponent(scope,
                                                                                  reviewStatusVm.requiredApprovingReviewsCount,
                                                                                  reviewStatusVm.isDraft))
@@ -66,6 +77,10 @@ internal object GHPRStatusChecksComponentFactory {
           )
         }
       ))
+      bindChildIn(scope, GHPRAIReviewExtension.singleFlow) { extension ->
+        if (extension == null) return@bindChildIn null
+        extension.createAIReviewAction(project, detailsVm.prId)
+      }
     }
     val scrollableStatusesPanel = ScrollPaneFactory.createScrollPane(statusesPanel, true).apply {
       isOpaque = false
@@ -81,14 +96,44 @@ internal object GHPRStatusChecksComponentFactory {
     }
   }
 
+  private fun createConflictsStatusComponentIn(
+    scope: CoroutineScope,
+    resolveConflictsVm: ResolveConflictsLocallyViewModel<GHPRResolveConflictsLocallyError>,
+  ) = CodeReviewDetailsStatusComponentFactory.createConflictsComponent(
+    scope, resolveConflictsVm.hasConflicts,
+    resolveConflictsVm.requestOrError.map { requestOrError ->
+      requestOrError.bimap(
+        ifLeft = {
+          when (it) {
+            is AlreadyResolvedLocally -> CollaborationToolsBundle.message("review.details.resolveConflicts.error.alreadyResolvedLocally")
+            is MergeInProgress -> CollaborationToolsBundle.message("review.details.resolveConflicts.error.mergeInProgress")
+            is DetailsNotLoaded -> CollaborationToolsBundle.message("review.details.resolveConflicts.error.detailsNotLoaded")
+            is RepositoryNotFound -> GithubBundle.message("pull.request.resolveConflicts.error.repositoryNotFound", it.baseOrHead.text)
+            is RemoteNotFound -> GithubBundle.message("pull.request.resolveConflicts.error.remoteNotFound", it.baseOrHead.text, it.coordinates.getWebURI())
+          }
+        },
+        ifRight = { request ->
+          ActionListener {
+            resolveConflictsVm.performResolveConflicts {
+              withContext(Dispatchers.Main) {
+                showBranchUpdateDialog(request.headRefName, request.baseRefName)
+              }
+            }
+          }
+        }
+      )
+    },
+    resolveConflictsVm.isBusy
+  )
+
   private fun createLoadingComponent(
     scope: CoroutineScope,
     reviewStatusVm: GHPRStatusViewModel,
-    securityService: GHPRSecurityService
+    securityService: GHPRSecurityService,
   ): JComponent {
     val stateLabel = CodeReviewDetailsStatusComponentFactory.ReviewDetailsStatusLabel("Pull request status: loading label").apply {
       border = JBUI.Borders.empty(5, 0)
-      icon = if (ExperimentalUI.isNewUI()) ExpUiIcons.Run.TestNotRunYet else AllIcons.RunConfigurations.TestNotRan
+      icon = if (ExperimentalUI.isNewUI()) AllIcons.RunConfigurations.TestNotRan else AllIcons.RunConfigurations.TestNotRan
       text = GithubBundle.message("pull.request.loading.status")
     }
     val accessDeniedLabel = createAccessDeniedLabel(scope, reviewStatusVm, securityService)
@@ -102,7 +147,7 @@ internal object GHPRStatusChecksComponentFactory {
   private fun createAccessDeniedLabel(
     scope: CoroutineScope,
     reviewStatusVm: GHPRStatusViewModel,
-    securityService: GHPRSecurityService
+    securityService: GHPRSecurityService,
   ): JComponent {
     val viewerDidAuthor = reviewStatusVm.viewerDidAuthor
 
@@ -113,7 +158,7 @@ internal object GHPRStatusChecksComponentFactory {
 
     return CodeReviewDetailsStatusComponentFactory.ReviewDetailsStatusLabel("Code review status: access denied").apply {
       border = JBUI.Borders.empty(5, 0)
-      icon = if (ExperimentalUI.isNewUI()) ExpUiIcons.Status.Error else AllIcons.RunConfigurations.TestError
+      icon = if (ExperimentalUI.isNewUI()) AllIcons.General.Error else AllIcons.RunConfigurations.TestError
       bindTextIn(scope, reviewStatusVm.isDraft.map { isDraft ->
         when {
           !canClose -> GithubBundle.message("pull.request.repo.access.required")

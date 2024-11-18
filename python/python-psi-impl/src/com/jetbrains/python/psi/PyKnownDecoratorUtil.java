@@ -5,6 +5,7 @@ import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.util.QualifiedName;
 import com.intellij.util.containers.ContainerUtil;
+import com.jetbrains.python.FunctionParameter;
 import com.jetbrains.python.PyNames;
 import com.jetbrains.python.codeInsight.controlflow.ScopeOwner;
 import com.jetbrains.python.psi.resolve.PyResolveContext;
@@ -12,6 +13,7 @@ import com.jetbrains.python.psi.resolve.PyResolveUtil;
 import com.jetbrains.python.psi.types.TypeEvalContext;
 import com.jetbrains.python.pyi.PyiFile;
 import one.util.streamex.StreamEx;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.*;
@@ -69,6 +71,9 @@ public final class PyKnownDecoratorUtil {
     TYPING_RUNTIME_CHECKABLE_EXT("typing_extensions.runtime_checkable"),
     TYPING_FINAL("typing.final"),
     TYPING_FINAL_EXT("typing_extensions.final"),
+    TYPING_DEPRECATED("typing_extensions.deprecated"),
+
+    WARNING_DEPRECATED("warnings.deprecated"),
 
     REPRLIB_RECURSIVE_REPR("reprlib.recursive_repr"),
 
@@ -88,7 +93,9 @@ public final class PyKnownDecoratorUtil {
     ATTRS_MUTABLE("attrs.mutable"),
     ATTRS_FROZEN("attrs.frozen"),
 
-    PYTEST_FIXTURES_FIXTURE("_pytest.fixtures.fixture");
+    PYTEST_FIXTURES_FIXTURE("_pytest.fixtures.fixture"),
+    ENUM_MEMBER(PyNames.TYPE_ENUM_MEMBER),
+    ENUM_NONMEMBER(PyNames.TYPE_ENUM_NONMEMBER);
 
     private final QualifiedName myQualifiedName;
 
@@ -175,10 +182,16 @@ public final class PyKnownDecoratorUtil {
         .toImmutableList();
     }
     else {
-      // The method might have been called during building of PSI stub indexes. Thus, we can't leave this file's boundaries.
-      // TODO Use proper local resolve to imported names here
-      return Collections.unmodifiableList(BY_SHORT_NAME.getOrDefault(qualifiedName.getLastComponent(), Collections.emptyList()));
+      return asKnownDecorators(qualifiedName);
     }
+  }
+
+  @ApiStatus.Internal
+  @NotNull
+  public static List<KnownDecorator> asKnownDecorators(@NotNull QualifiedName qualifiedName) {
+    // The method might have been called during building of PSI stub indexes. Thus, we can't leave this file's boundaries.
+    // TODO Use proper local resolve to imported names here
+    return Collections.unmodifiableList(BY_SHORT_NAME.getOrDefault(qualifiedName.getLastComponent(), Collections.emptyList()));
   }
 
   /**
@@ -266,5 +279,27 @@ public final class PyKnownDecoratorUtil {
     return decoratorList == null
            ? decorators.isEmpty()
            : decoratorList.getDecorators().length == StreamEx.of(decorators).groupingBy(KnownDecorator::getShortName).size();
+  }
+
+  public enum FunctoolsWrapsParameters implements FunctionParameter {
+    WRAPPED(0, "wrapped");
+
+    private final int myPosition;
+    private final String myName;
+
+    FunctoolsWrapsParameters(int position, @NotNull String name) {
+      myPosition = position;
+      myName = name;
+    }
+
+    @Override
+    public int getPosition() {
+      return myPosition;
+    }
+
+    @Override
+    public @NotNull String getName() {
+      return myName;
+    }
   }
 }

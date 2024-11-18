@@ -1,7 +1,6 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.startup.importSettings.jb
 
-import com.intellij.codeInspection.ex.ApplicationInspectionProfileManager
 import com.intellij.configurationStore.*
 import com.intellij.configurationStore.schemeManager.SchemeManagerFactoryBase
 import com.intellij.diagnostic.VMOptions
@@ -12,12 +11,12 @@ import com.intellij.ide.plugins.RepositoryHelper
 import com.intellij.ide.plugins.marketplace.MarketplaceRequests
 import com.intellij.ide.startup.importSettings.ImportSettingsBundle
 import com.intellij.ide.startup.importSettings.data.SettingsService
-import com.intellij.ide.startup.importSettings.jb.JbImportServiceImpl.Companion
 import com.intellij.ide.startup.importSettings.statistics.ImportSettingsEventsCollector
 import com.intellij.ide.ui.LafManager
 import com.intellij.ide.ui.laf.LafManagerImpl
 import com.intellij.openapi.application.*
 import com.intellij.openapi.components.*
+import com.intellij.openapi.components.impl.stores.stateStore
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.editor.colors.EditorColorsManager
 import com.intellij.openapi.editor.colors.impl.EditorColorsManagerImpl
@@ -34,6 +33,7 @@ import com.intellij.openapi.util.registry.EarlyAccessRegistryManager
 import com.intellij.openapi.util.registry.Registry
 import com.intellij.openapi.util.registry.RegistryManager
 import com.intellij.openapi.util.registry.RegistryValueListener
+import com.intellij.profile.codeInspection.InspectionProfileManager
 import com.intellij.psi.codeStyle.CodeStyleSchemes
 import com.intellij.serviceContainer.ComponentManagerImpl
 import com.intellij.ui.ExperimentalUI
@@ -183,7 +183,7 @@ class JbSettingsImporter(private val configDirPath: Path,
 
     // load code style scheme manager
     CodeStyleSchemes.getInstance()
-    ApplicationInspectionProfileManager.getInstanceImpl()
+    InspectionProfileManager.getInstance()
     val schemeManagerFactory = SchemeManagerFactory.getInstance() as SchemeManagerFactoryBase
     schemeManagerFactory.process {
       progressIndicator.checkCanceled()
@@ -321,7 +321,7 @@ class JbSettingsImporter(private val configDirPath: Path,
     val retval = ArrayList<String>()
     for (entry in dir.listDirectoryEntries()) {
       if (entry.isRegularFile()) {
-        if (prefix.isNullOrEmpty()) {
+        if (prefix.isEmpty()) {
           retval.add(entry.name)
         }
         else {
@@ -500,10 +500,15 @@ class JbSettingsImporter(private val configDirPath: Path,
       ConfigImportHelper.updateVMOptions(PathManager.getConfigDir(), LOG)
     }
     CustomConfigMigrationOption.MigrateFromCustomPlace(configDirPath).writeConfigMarkerFile(PathManager.getConfigDir())
+    migrateLocalization()
     (System.currentTimeMillis() - startTime).let {
       LOG.info("Raw import finished in $it ms.")
       ImportSettingsEventsCollector.jbTotalImportTimeSpent(it)
     }
+  }
+
+  fun migrateLocalization() {
+    ConfigImportHelper.migrateLocalization(configDirPath, pluginsPath)
   }
 
   internal class ImportStreamProvider(private val configDirPath: Path) : StreamProvider {

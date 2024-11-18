@@ -178,7 +178,8 @@ public class MarkerType {
   }
 
   private static PsiMethod @NotNull [] composeSuperMethods(@NotNull PsiMethod method, boolean acceptSelf) {
-    PsiElement[] superElements = FindSuperElementsHelper.findSuperElements(method);
+    PsiElement[] superElements = DumbService.getInstance(method.getProject()).computeWithAlternativeResolveEnabled(
+      () -> FindSuperElementsHelper.findSuperElements(method));
 
     PsiMethod[] superMethods = ContainerUtil.map(superElements, element -> (PsiMethod)element, PsiMethod.EMPTY_ARRAY);
     if (acceptSelf) {
@@ -200,7 +201,7 @@ public class MarkerType {
   }, new InheritorsLineMarkerNavigator() {
     @Override
     protected String getMessageForDumbMode() {
-      return JavaBundle.message("notification.navigation.to.overriding.classes");
+      return JavaBundle.message("notification.navigation.to.overriding.methods");
     }
   });
 
@@ -238,7 +239,7 @@ public class MarkerType {
   }, new InheritorsLineMarkerNavigator() {
     @Override
     protected String getMessageForDumbMode() {
-      return JavaBundle.message("notification.navigation.to.overriding.methods");
+      return JavaBundle.message("notification.navigation.to.overriding.classes");
     }
   });
 

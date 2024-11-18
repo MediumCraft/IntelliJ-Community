@@ -2,11 +2,11 @@
 package org.jetbrains.kotlin.idea.k2.codeinsight.fixes.imprt
 
 import com.intellij.psi.PsiClass
-import org.jetbrains.kotlin.analysis.api.KtAnalysisSession
-import org.jetbrains.kotlin.analysis.api.symbols.KtClassKind
-import org.jetbrains.kotlin.analysis.api.symbols.KtClassLikeSymbol
-import org.jetbrains.kotlin.analysis.api.symbols.KtClassOrObjectSymbol
-import org.jetbrains.kotlin.analysis.api.symbols.KtTypeAliasSymbol
+import org.jetbrains.kotlin.analysis.api.KaSession
+import org.jetbrains.kotlin.analysis.api.symbols.KaClassKind
+import org.jetbrains.kotlin.analysis.api.symbols.KaClassLikeSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaClassSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaTypeAliasSymbol
 import org.jetbrains.kotlin.idea.base.analysis.api.utils.KtSymbolFromIndexProvider
 import org.jetbrains.kotlin.idea.util.positionContext.KotlinAnnotationTypeNameReferencePositionContext
 import org.jetbrains.kotlin.idea.util.positionContext.KotlinCallableReferencePositionContext
@@ -17,39 +17,44 @@ import org.jetbrains.kotlin.psi.KtClassOrObject
 import org.jetbrains.kotlin.psi.KtTypeAlias
 
 internal open class ClassifierImportCandidatesProvider(
-    override val positionContext: KotlinNameReferencePositionContext,
-    indexProvider: KtSymbolFromIndexProvider,
-) : ImportCandidatesProvider(indexProvider) {
-    protected open fun acceptsKotlinClass(kotlinClass: KtClassLikeDeclaration): Boolean = kotlinClass.canBeImported()
-    protected open fun acceptsJavaClass(javaClass: PsiClass): Boolean = javaClass.canBeImported()
+    positionContext: KotlinNameReferencePositionContext,
+) : ImportCandidatesProvider(positionContext) {
 
-    context(KtAnalysisSession)
-    protected open fun acceptsClassLikeSymbol(symbol: KtClassLikeSymbol): Boolean = true
+    protected open fun acceptsKotlinClass(kotlinClass: KtClassLikeDeclaration): Boolean =
+        !kotlinClass.isImported() && kotlinClass.canBeImported()
 
-    context(KtAnalysisSession)
-    protected fun KtClassLikeSymbol.getExpandedClassSymbol(): KtClassOrObjectSymbol? = when (this) {
-        is KtTypeAliasSymbol -> expandedType.expandedClassSymbol
-        is KtClassOrObjectSymbol -> this
+    protected open fun acceptsJavaClass(javaClass: PsiClass): Boolean =
+        !javaClass.isImported() && javaClass.canBeImported()
+
+    context(KaSession)
+    protected open fun acceptsClassLikeSymbol(symbol: KaClassLikeSymbol): Boolean = true
+
+    context(KaSession)
+    protected fun KaClassLikeSymbol.getExpandedClassSymbol(): KaClassSymbol? = when (this) {
+        is KaTypeAliasSymbol -> expandedType.expandedSymbol
+        is KaClassSymbol -> this
     }
 
-    context(KtAnalysisSession)
-    override fun collectCandidates(): List<KtClassLikeSymbol> {
+    context(KaSession)
+    override fun collectCandidates(
+        indexProvider: KtSymbolFromIndexProvider,
+    ): List<KaClassLikeSymbol> {
         if (positionContext.explicitReceiver != null) return emptyList()
 
-        val unresolvedName = positionContext.getName()
+        val unresolvedName = positionContext.name
         val fileSymbol = getFileSymbol()
 
         return buildList {
-            addAll(indexProvider.getKotlinClassesByName(unresolvedName, ::acceptsKotlinClass))
-            addAll(indexProvider.getJavaClassesByName(unresolvedName, ::acceptsJavaClass))
+            addAll(indexProvider.getKotlinClassesByName(unresolvedName) { acceptsKotlinClass(it) })
+            addAll(indexProvider.getJavaClassesByName(unresolvedName) { acceptsJavaClass(it) })
         }.filter { it.isVisible(fileSymbol) && it.classId != null && acceptsClassLikeSymbol(it) }
     }
 }
 
 internal class AnnotationImportCandidatesProvider(
-    override val positionContext: KotlinAnnotationTypeNameReferencePositionContext,
-    indexProvider: KtSymbolFromIndexProvider,
-) : ClassifierImportCandidatesProvider(positionContext, indexProvider) {
+    positionContext: KotlinAnnotationTypeNameReferencePositionContext,
+) : ClassifierImportCandidatesProvider(positionContext) {
+
     override fun acceptsKotlinClass(kotlinClass: KtClassLikeDeclaration): Boolean {
         val isPossiblyAnnotation = when (kotlinClass) {
             is KtTypeAlias -> true
@@ -63,15 +68,15 @@ internal class AnnotationImportCandidatesProvider(
     override fun acceptsJavaClass(javaClass: PsiClass): Boolean =
         javaClass.isAnnotationType && super.acceptsJavaClass(javaClass)
 
-    context(KtAnalysisSession)
-    override fun acceptsClassLikeSymbol(symbol: KtClassLikeSymbol): Boolean =
-        symbol.getExpandedClassSymbol()?.classKind == KtClassKind.ANNOTATION_CLASS
+    context(KaSession)
+    override fun acceptsClassLikeSymbol(symbol: KaClassLikeSymbol): Boolean =
+        symbol.getExpandedClassSymbol()?.classKind == KaClassKind.ANNOTATION_CLASS
 }
 
 internal class ConstructorReferenceImportCandidatesProvider(
-    override val positionContext: KotlinCallableReferencePositionContext,
-    indexProvider: KtSymbolFromIndexProvider,
-) : ClassifierImportCandidatesProvider(positionContext, indexProvider) {
+    positionContext: KotlinCallableReferencePositionContext,
+) : ClassifierImportCandidatesProvider(positionContext) {
+
     override fun acceptsKotlinClass(kotlinClass: KtClassLikeDeclaration): Boolean {
         val possiblyHasAcceptableConstructor = when (kotlinClass) {
             is KtTypeAlias -> true
@@ -86,7 +91,7 @@ internal class ConstructorReferenceImportCandidatesProvider(
         !(javaClass.isEnum || javaClass.isInterface || javaClass.isAnnotationType) && super.acceptsJavaClass(javaClass)
 
 
-    context(KtAnalysisSession)
-    override fun acceptsClassLikeSymbol(symbol: KtClassLikeSymbol): Boolean =
-        symbol.getExpandedClassSymbol()?.classKind == KtClassKind.CLASS
+    context(KaSession)
+    override fun acceptsClassLikeSymbol(symbol: KaClassLikeSymbol): Boolean =
+        symbol.getExpandedClassSymbol()?.classKind == KaClassKind.CLASS
 }

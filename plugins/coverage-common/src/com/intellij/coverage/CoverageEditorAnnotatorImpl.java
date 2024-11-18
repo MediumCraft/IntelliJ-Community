@@ -59,6 +59,7 @@ public class CoverageEditorAnnotatorImpl implements CoverageEditorAnnotator, Dis
   private volatile LineHistoryMapper myMapper;
   private final Object myLock = new Object();
   private Disposable myListenerDisposable;
+  private boolean myIsDisposed;
 
   private final Alarm myUpdateAlarm = new Alarm(Alarm.ThreadToUse.POOLED_THREAD, this);
 
@@ -74,7 +75,7 @@ public class CoverageEditorAnnotatorImpl implements CoverageEditorAnnotator, Dis
     Editor editor = myEditor;
     PsiFile file = myFile;
     Document document = myDocument;
-    if (editor == null || editor.isDisposed() || file == null || document == null) return;
+    if (editor == null || file == null || document == null) return;
     final FileEditorManager fileEditorManager = FileEditorManager.getInstance(myProject);
     removeHighlighters();
 
@@ -94,7 +95,7 @@ public class CoverageEditorAnnotatorImpl implements CoverageEditorAnnotator, Dis
 
   private synchronized void removeHighlighters() {
     var editor = myEditor;
-    if (editor == null || editor.isDisposed()) return;
+    if (editor == null) return;
     var highlighters = editor.getUserData(COVERAGE_HIGHLIGHTERS);
     if (highlighters != null) {
       for (var highlighter : highlighters) {
@@ -226,8 +227,10 @@ public class CoverageEditorAnnotatorImpl implements CoverageEditorAnnotator, Dis
       }
     };
     synchronized (myLock) {
-      myListenerDisposable = Disposer.newDisposable(this);
-      document.addDocumentListener(documentListener, myListenerDisposable);
+      if (!myIsDisposed) {
+        myListenerDisposable = Disposer.newDisposable(this);
+        document.addDocumentListener(documentListener, myListenerDisposable);
+      }
     }
   }
 
@@ -476,6 +479,9 @@ public class CoverageEditorAnnotatorImpl implements CoverageEditorAnnotator, Dis
 
   @Override
   public void dispose() {
+    synchronized (myLock) {
+      myIsDisposed = true;
+    }
     hideCoverage();
     myEditor = null;
     myDocument = null;

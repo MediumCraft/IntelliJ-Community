@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 @file:Suppress("ReplacePutWithAssignment", "ReplaceGetOrSet")
 
 package com.intellij.ide.plugins.newui
@@ -24,7 +24,6 @@ import com.intellij.util.containers.CollectionFactory
 import com.intellij.util.io.HttpRequests
 import com.intellij.util.io.URLUtil
 import com.intellij.util.io.sanitizeFileName
-import com.intellij.util.lang.ImmutableZipFile
 import com.intellij.util.ui.JBImageIcon
 import kotlinx.coroutines.*
 import java.awt.GraphicsEnvironment
@@ -40,6 +39,7 @@ import java.nio.file.Path
 import java.util.zip.ZipFile
 import javax.swing.Icon
 import kotlin.coroutines.CoroutineContext
+import com.intellij.util.lang.ZipFile as IntelliJZipFile
 
 private val iconCache = CollectionFactory.createConcurrentWeakValueMap<String, Pair<PluginLogoIconProvider?, PluginLogoIconProvider?>>()
 private val MISSING: Pair<PluginLogoIconProvider?, PluginLogoIconProvider?> = Pair(null, null)
@@ -96,6 +96,7 @@ object PluginLogo {
     service<PluginLogoLoader>().endBatchMode()
   }
 
+  @JvmName("getDefault")
   internal fun getDefault(): PluginLogoIconProvider {
     if (Default == null) {
       Default = if (AllIcons.Plugins.PluginLogo is CachedImageIcon) {
@@ -145,7 +146,7 @@ internal fun reloadPluginIcon(icon: Icon, width: Int, height: Int): Icon {
 
 internal fun getPluginIconFileName(light: Boolean): String = PluginManagerCore.META_INF + if (light) PLUGIN_ICON else PLUGIN_ICON_DARK
 
-private fun tryLoadIcon(zipFile: com.intellij.util.lang.ZipFile, light: Boolean): PluginLogoIconProvider? {
+private fun tryLoadIcon(zipFile: IntelliJZipFile, light: Boolean): PluginLogoIconProvider? {
   val pluginIconFileName = getPluginIconFileName(light)
   try {
     return zipFile.getData(pluginIconFileName)?.let { loadFileIcon(it) }
@@ -269,7 +270,7 @@ private fun tryLoadJarIcons(idPlugin: String,
   }
 
   try {
-    ImmutableZipFile.load(path).use { zipFile ->
+    IntelliJZipFile.load(path).use { zipFile ->
       val light = tryLoadIcon(zipFile = zipFile, light = true)
       val dark = tryLoadIcon(zipFile = zipFile, light = false)
       if (put || light != null || dark != null) {

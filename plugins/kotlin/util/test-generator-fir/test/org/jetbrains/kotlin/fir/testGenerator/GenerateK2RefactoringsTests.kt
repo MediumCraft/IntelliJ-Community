@@ -1,4 +1,4 @@
-// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.kotlin.fir.testGenerator
 
 import org.jetbrains.kotlin.idea.k2.refactoring.bindToElement.AbstractK2BindToElementTest
@@ -6,13 +6,8 @@ import org.jetbrains.kotlin.idea.k2.refactoring.bindToElement.AbstractK2BindToFq
 import org.jetbrains.kotlin.idea.k2.refactoring.copy.AbstractK2CopyTest
 import org.jetbrains.kotlin.idea.k2.refactoring.copy.AbstractK2MultiModuleCopyTest
 import org.jetbrains.kotlin.idea.k2.refactoring.inline.AbstractKotlinFirInlineTest
-import org.jetbrains.kotlin.idea.k2.refactoring.introduce.AbstractK2InplaceIntroduceFunctionTest
-import org.jetbrains.kotlin.idea.k2.refactoring.introduce.AbstractK2IntroduceConstantTest
-import org.jetbrains.kotlin.idea.k2.refactoring.introduce.AbstractK2PsiUnifierTest
+import org.jetbrains.kotlin.idea.k2.refactoring.introduce.*
 import org.jetbrains.kotlin.idea.k2.refactoring.introduce.introduceVariable.AbstractK2IntroduceVariableTest
-import org.jetbrains.kotlin.idea.k2.refactoring.introduce.AbstractK2IntroduceFunctionTest
-import org.jetbrains.kotlin.idea.k2.refactoring.introduce.AbstractK2IntroduceParameterTest
-import org.jetbrains.kotlin.idea.k2.refactoring.introduce.AbstractK2IntroducePropertyTest
 import org.jetbrains.kotlin.idea.k2.refactoring.move.*
 import org.jetbrains.kotlin.idea.k2.refactoring.safeDelete.AbstractFirMultiModuleSafeDeleteTest
 import org.jetbrains.kotlin.idea.k2.refactoring.safeDelete.AbstractK2SafeDeleteTest
@@ -67,23 +62,16 @@ internal fun MutableTWorkspace.generateK2RefactoringsTests() {
     }
     testGroup("refactorings/kotlin.refactorings.tests.k2", category = INLINE_REFACTORING, testDataPath = "../../idea/tests/testData") {
         testClass<AbstractKotlinFirInlineTest> {
-            model("refactoring/inline/inlineVariableOrProperty", isRecursive = false, pattern = Patterns.KT_WITHOUT_DOTS)
-            model("refactoring/inline/inlineVariableOrProperty/addParenthesis", pattern = Patterns.KT_WITHOUT_DOTS)
-            model("refactoring/inline/inlineVariableOrProperty/explicateParameterTypes", pattern = Patterns.KT_WITHOUT_DOTS)
-            model("refactoring/inline/inlineVariableOrProperty/explicateTypeArgument", pattern = Patterns.KT_WITHOUT_DOTS)
-            model("refactoring/inline/inlineVariableOrProperty/property", pattern = Patterns.KT_WITHOUT_DOTS)
-            model("refactoring/inline/inlineVariableOrProperty/stringTemplates", pattern = Patterns.KT_WITHOUT_DOTS)
-            model("refactoring/inline/namedFunction", isRecursive = false, pattern = Patterns.KT_WITHOUT_DOTS)
-            model("refactoring/inline/namedFunction/expressionBody", pattern = Patterns.KT_WITHOUT_DOTS)
-            model("refactoring/inline/namedFunction/fromIntellij", pattern = Patterns.KT_WITHOUT_DOTS)
-            model("refactoring/inline/namedFunction/returnAtEnd", pattern = Patterns.KT_WITHOUT_DOTS)
-            model("refactoring/inline/anonymousFunction", pattern = Patterns.KT_WITHOUT_DOTS)
-            model("refactoring/inline/lambdaExpression", pattern = Patterns.KT_WITHOUT_DOTS)
+            model("refactoring/inline", pattern = Patterns.KT_WITHOUT_DOTS, excludedDirectories = listOf("withFullJdk"))
         }
     }
     testGroup("refactorings/kotlin.refactorings.tests.k2", category = EXTRACT_REFACTORING, testDataPath = "../../idea/tests/testData") {
         testClass<AbstractK2IntroduceFunctionTest> {
             model("refactoring/extractFunction", pattern = Patterns.KT_OR_KTS, testMethodName = "doExtractFunctionTest")
+        }
+
+        testClass<AbstractK2IntroduceFunctionWithExtractFunctionModifierTest> {
+            model("refactoring/extractFunctionModifier", pattern = Patterns.KT_OR_KTS, testMethodName = "doExtractFunctionTest")
         }
 
         testClass<AbstractK2InplaceIntroduceFunctionTest> {
@@ -92,6 +80,8 @@ internal fun MutableTWorkspace.generateK2RefactoringsTests() {
 
         testClass<AbstractK2IntroduceParameterTest> {
             model("refactoring/introduceParameter", pattern = Patterns.KT_OR_KTS_WITHOUT_DOTS, testMethodName = "doIntroduceParameterTest")
+            model("refactoring/introduceJavaParameter", pattern = Patterns.JAVA, testMethodName = "doIntroduceJavaParameterTest")
+            model("refactoring/introduceLambdaParameter", pattern = Patterns.KT_OR_KTS_WITHOUT_DOTS, testMethodName = "doIntroduceFunctionalParameterTest")
         }
 
         testClass<AbstractK2IntroducePropertyTest> {
@@ -120,7 +110,10 @@ internal fun MutableTWorkspace.generateK2RefactoringsTests() {
         testClass<AbstractK2MovePackageTest> {
             model("refactoring/movePackage", pattern = TEST, flatten = true)
         }
-        testClass<AbstractK2MoveFileTest> {
+        testClass<AbstractK2MoveDirectoryTest> {
+            model("refactoring/moveDirectory", pattern = TEST, flatten = true)
+        }
+        testClass<AbstractK2MoveFileOrDirectoriesTest> {
             model("refactoring/moveFile", pattern = TEST, flatten = true)
         }
         testClass<AbstractK2MoveTopLevelTest> {

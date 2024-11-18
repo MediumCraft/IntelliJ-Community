@@ -46,6 +46,11 @@
       "pressedBackground": "#000000"
     },
 
+    "Badge": {
+      "greenOutlineForeground": "#16F334",
+      "greenOutlineBorderColor": "#0DA522"
+    },
+
     "Button": {
       "startBackground": "#000000",
       "endBackground": "#000000",
@@ -67,6 +72,12 @@
       "selectedEndBorderColor": "#1AEBFF",
       "selectedButtonColor": "#000000",
       "focusedSelectedButtonColor": "#0f6780"
+    },
+
+    "DisclosureButton": {
+      "defaultBackground": "#281A33",
+      "hoverOverlay": "#450073",
+      "pressedOverlay": "#54008c"
     },
 
     "Borders": {
@@ -112,6 +123,7 @@
     },
 
     "Component": {
+      "focusedBorderColor": "#000000",
       "errorFocusColor": "#E6194B",
       "inactiveErrorFocusColor": "#800002",
       "warningFocusColor": "#F58231",
@@ -407,6 +419,13 @@
       "endBackground": "#FFD333FF"
     },
 
+    "Slider": {
+      "buttonColor": "#FFFFFF",
+      "buttonBorderColor": "#000000",
+      "tickColor": "#FFFFFF",
+      "trackColor": "#8c8c8c"
+    },
+
     "StatusBar.borderColor": "#b3b3b3",
 
     "TabbedPane": {
@@ -584,6 +603,35 @@
       "LiveChart": {
         "horizontalAxisColor": "#E6E6E6"
       }
+    },
+    "CompilationCharts": {
+      "background": {
+        "odd": "#000000",
+        "even": "#1A1A1A",
+        "default": "#000000"
+      },
+      "test": {
+        "enabled": "#3E8E41",
+        "disabled": "#2B5931",
+        "stroke": "#6FAF6D",
+        "selected": "#5E9E57"
+      },
+      "production": {
+        "enabled": "#3F88C5",
+        "disabled": "#2D5D87",
+        "stroke": "#6EA7C9",
+        "selected": "#6EB8DF"
+      },
+      "memory": {
+        "background": "#3F88C5",
+        "stroke": "#6EB8DF"
+      },
+      "cpu": {
+        "background": "#3E8E41",
+        "stroke": "#5E9E57"
+      },
+      "lineColor": "#FFFFFF",
+      "textColor": "#FFFFFF"
     },
     "FlameGraph.Tooltip": {
       "scaleBackground": "#555454",
